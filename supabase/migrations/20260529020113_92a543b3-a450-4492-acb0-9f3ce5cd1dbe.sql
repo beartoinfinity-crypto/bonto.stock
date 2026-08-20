@@ -1,0 +1,1 @@
+DELETE FROM public.politician_trades WHERE symbol LIKE '#%' OR symbol = 'OTHER';

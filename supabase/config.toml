@@ -1,0 +1,20 @@
+project_id = "qwezfxdfaistnabwqols"
+
+[functions.stock-data]
+verify_jwt = false
+
+[functions.sync-stock-data]
+verify_jwt = false
+
+[functions.analyze-news-sentiment]
+verify_jwt = false
+
+[functions.social-sentiment]
+verify_jwt = false
+
+[functions.compute-screener]
+verify_jwt = false
+
+[functions.asymmetric-value-screener]
+verify_jwt = false
+

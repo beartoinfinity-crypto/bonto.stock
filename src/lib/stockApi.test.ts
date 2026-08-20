@@ -1,0 +1,146 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// Mock localDb BEFORE importing stockApi
+vi.mock('./localDb', () => ({
+  getQuote: vi.fn().mockResolvedValue(null),
+  putQuote: vi.fn().mockResolvedValue(undefined),
+  getHistorical: vi.fn().mockResolvedValue(null),
+  putHistorical: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Mock fetch globally BEFORE importing stockApi
+const mockFetch = vi.fn();
+vi.stubGlobal('fetch', mockFetch);
+
+// Now import stockApi (after mocks are in place)
+const { fetchStockQuote, resetYahooCrumb } = await import('./stockApi');
+
+function jsonResponse(data: unknown) {
+  return {
+    ok: true,
+    json: () => Promise.resolve(data),
+    text: () => Promise.resolve(JSON.stringify(data)),
+  } as unknown as Response;
+}
+
+function textResponse(text: string) {
+  return {
+    ok: true,
+    json: () => Promise.resolve({}),
+    text: () => Promise.resolve(text),
+  } as unknown as Response;
+}
+
+function errorResponse() {
+  return Promise.reject(new Error('Network error'));
+}
+
+beforeEach(() => {
+  mockFetch.mockReset();
+  resetYahooCrumb();
+});
+
+/**
+ * Build mock responses in the order fetch() will be called:
+ * 1. proxyFetch → fetch(chartUrl)           — chart data
+ * 2. getYahooCrumb → fetch(yahoo.com)       — cookie step (no-cors)
+ * 3. getYahooCrumb → fetch(getcrumb)        — returns crumb text
+ * 4. proxyFetch → fetch(v10Url)             — quoteSummary data
+ *
+ * If the crumb step or v10 step fail, proxyFetch also tries 2 CORS proxies
+ * per URL (each is another fetch call), so we may need extra mocks.
+ */
+function setupMocks(...responses: unknown[]) {
+  for (const r of responses) {
+    if (r === 'error') mockFetch.mockRejectedValueOnce(new Error('Network error'));
+    else if (r === 'ok') mockFetch.mockResolvedValueOnce({ ok: true, status: 200 } as Response);
+    else if (typeof r === 'string') mockFetch.mockResolvedValueOnce(textResponse(r));
+    else mockFetch.mockResolvedValueOnce(r as Response);
+  }
+}
+
+describe('fetchStockQuote — quoteSummary integration', () => {
+  it('populates pe, marketCap and sector from v10 with crumb', async () => {
+    setupMocks(
+      jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 195.89, fiftyTwoWeekHigh: 199.62, fiftyTwoWeekLow: 164.08, longName: 'Apple Inc.' }, indicators: { quote: [{ close: [190, 192, 195.89], volume: [50e6, 55e6, 60e6] }] } }] } }),
+      'ok',               // crumb step 1
+      'abc123crumb',       // crumb step 2
+      jsonResponse({ quoteSummary: { result: [{ summaryDetail: { trailingPE: { raw: 32.1 }, marketCap: { raw: 3_000_000_000_000 } }, assetProfile: { sector: 'Technology' } }] } }),
+    );
+
+    const result = await fetchStockQuote('AAPL');
+    expect(result.data?.pe).toBe(32.1);
+    expect(result.data?.marketCap).toBe('3T');
+    expect(result.data?.sector).toBe('Technology');
+    expect(result.data?.price).toBe(195.89);
+    expect(result.data?.name).toBe('Apple Inc.');
+  });
+
+  it('formats marketCap as billions', async () => {
+    setupMocks(
+      jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 45.20 }, indicators: { quote: [{ close: [44, 45], volume: [10e6, 12e6] }] } }] } }),
+      'ok',
+      'crumbXYZ',
+      jsonResponse({ quoteSummary: { result: [{ summaryDetail: { trailingPE: { raw: 12.5 }, marketCap: { raw: 180_000_000_000 } }, assetProfile: { sector: 'Technology' } }] } }),
+    );
+
+    const result = await fetchStockQuote('INTC');
+    expect(result.data?.marketCap).toBe('180B');
+    expect(result.data?.pe).toBe(12.5);
+    expect(result.data?.sector).toBe('Technology');
+  });
+
+  it('falls back to defaults when crumb and summary both fail', async () => {
+    // chart succeeds, then everything else fails (crumb + v10 for both hosts + proxies)
+    setupMocks(
+      jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 100.0 }, indicators: { quote: [{ close: [99, 100], volume: [1e6, 2e6] }] } }] } }),
+      'error', 'error', 'error', 'error', 'error', 'error', 'error', 'error', 'error', 'error', 'error', 'error', 'error', 'error',
+    );
+
+    const result = await fetchStockQuote('TEST');
+    expect(result.data?.pe).toBe(0);
+    expect(result.data?.marketCap).toBe('N/A');
+    expect(result.data?.sector).toBe('Unknown');
+  });
+
+  it('falls back when quoteSummary returns empty result', async () => {
+    setupMocks(
+      jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 100.0 }, indicators: { quote: [{ close: [99, 100], volume: [1e6, 2e6] }] } }] } }),
+      'ok', 'crumbOK',
+      jsonResponse({ quoteSummary: { result: [{}] } }),
+      'ok', 'crumbOK',
+      jsonResponse({ quoteSummary: { result: [{}] } }),
+    );
+
+    const result = await fetchStockQuote('TEST');
+    expect(result.data?.pe).toBe(0);
+    expect(result.data?.marketCap).toBe('N/A');
+    expect(result.data?.sector).toBe('Unknown');
+  });
+
+  it('returns N/A marketCap when marketCap is missing', async () => {
+    setupMocks(
+      jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 10.0 }, indicators: { quote: [{ close: [9, 10], volume: [1e6, 2e6] }] } }] } }),
+      'ok', 'crumbOK',
+      jsonResponse({ quoteSummary: { result: [{ summaryDetail: { trailingPE: { raw: 15.0 } }, assetProfile: { sector: 'Healthcare' } }] } }),
+    );
+
+    const result = await fetchStockQuote('TEST');
+    expect(result.data?.marketCap).toBe('N/A');
+    expect(result.data?.pe).toBe(15.0);
+    expect(result.data?.sector).toBe('Healthcare');
+  });
+
+  it('returns 0 pe when trailingPE is missing', async () => {
+    setupMocks(
+      jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 50.0 }, indicators: { quote: [{ close: [49, 50], volume: [3e6, 4e6] }] } }] } }),
+      'ok', 'crumbOK',
+      jsonResponse({ quoteSummary: { result: [{ summaryDetail: { marketCap: { raw: 5_000_000_000 } }, assetProfile: { sector: 'Financial' } }] } }),
+    );
+
+    const result = await fetchStockQuote('TEST');
+    expect(result.data?.pe).toBe(0);
+    expect(result.data?.marketCap).toBe('5B');
+    expect(result.data?.sector).toBe('Financial');
+  });
+});
