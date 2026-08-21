@@ -125,7 +125,7 @@ export function SignalPanel({ signals }: SignalPanelProps) {
 
       {/* All signals */}
       <div className="space-y-2 max-h-[400px] overflow-y-auto">
-        {signals.sort((a, b) => b.confidence - a.confidence).map((signal, index) => {
+        {[...signals].sort((a, b) => b.confidence - a.confidence).map((signal, index) => {
           const StrategyIcon = strategyIcons[signal.strategy] || Zap;
           const typeIcon = signal.type === 'buy' ? ArrowUpCircle : signal.type === 'sell' ? ArrowDownCircle : MinusCircle;
           const TypeIcon = typeIcon;
@@ -162,7 +162,7 @@ export function SignalPanel({ signals }: SignalPanelProps) {
                   </div>
                 </div>
                 <div className="text-right shrink-0">
-                  <div className={cn("text-sm font-bold", confidenceColor(signal.confidence))}>{signal.confidence}%</div>
+                  <div className={cn("text-sm font-bold", confidenceColor(signal.confidence))}>{signal.confidence.toFixed(0)}%</div>
                 </div>
               </div>
             </div>

@@ -8,7 +8,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
-  ArrowDownRight, ArrowUpRight, ChevronDown, ChevronUp, Landmark, Loader2, Plus,
+  ArrowDownRight, ArrowUpRight, ChevronDown, ChevronUp, Landmark, Loader2, Plus, AlertCircle, RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import * as storage from '@/lib/storage';
@@ -45,7 +45,6 @@ function formatAmount(from: number | null, to: number | null): string {
 }
 
 const TRADES_CACHE_KEY = 'stockpulse_politician_trades';
-const TRADES_CACHE_TTL = 1000 * 60 * 60 * 24; // 24 hours
 
 interface TradeCache {
   data: TradeRow[];
@@ -57,8 +56,18 @@ function loadTradesFromCache(): TradeRow[] | null {
     const raw = storage.getItem(TRADES_CACHE_KEY);
     if (!raw) return null;
     const cache: TradeCache = JSON.parse(raw);
-    if (Date.now() - cache.fetchedAt > TRADES_CACHE_TTL) return null;
-    return cache.data;
+    return cache.data ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function loadCacheFetchedAt(): number | null {
+  try {
+    const raw = storage.getItem(TRADES_CACHE_KEY);
+    if (!raw) return null;
+    const cache: TradeCache = JSON.parse(raw);
+    return cache.fetchedAt ?? null;
   } catch {
     return null;
   }
@@ -102,13 +111,13 @@ export const PoliticianTrades = () => {
   const [expanded, setExpanded] = useState(false);
   const [pages, setPages] = useState(1);
 
-  const { data, isLoading, isError, isFetching } = useQuery({
+  const { data, isLoading, isError, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ['politician-trades', pages],
     queryFn: async (): Promise<TradeRow[]> => {
-      const cached = loadTradesFromCache();
-      if (cached && cached.length > 0) return cached.slice(0, pages * PAGE_SIZE);
+      const existingCached = loadTradesFromCache();
 
       const allTrades: TradeRow[] = [];
+      let sourcesOk = { congress: false, capitol: false };
 
       // Fetch from CongressInvests (full history back to 2015, House + Senate)
       {
@@ -120,6 +129,7 @@ export const PoliticianTrades = () => {
             const json = await res.json();
             const trades: any[] = json?.trades ?? [];
             if (!Array.isArray(trades) || trades.length === 0) break;
+            sourcesOk.congress = true;
             for (const r of trades) {
               const tt = String(r.trade_type ?? '').toLowerCase();
               let side: Side = 'OTHER';
@@ -153,6 +163,7 @@ export const PoliticianTrades = () => {
           const json = await res.json();
           const rows: unknown[] = json?.data ?? (Array.isArray(json) ? json : []);
           if (!Array.isArray(rows) || rows.length === 0) break;
+          sourcesOk.capitol = true;
           for (const r of rows) {
             const raw = r as Record<string, unknown>;
             const tt = String(raw.transaction_type ?? '').toLowerCase();
@@ -178,17 +189,42 @@ export const PoliticianTrades = () => {
         } catch { break; }
       }
 
-      // Dedup across sources
-      const seen = new Set<string>();
-      const deduped = allTrades.filter((t) => {
-        const key = `${t.symbol}|${t.politician}|${t.transaction_date}|${t.transaction_type}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
+      // Merge with existing cached data so partial failures don't lose what we have
+      let merged: TradeRow[];
+      if (allTrades.length > 0) {
+        // Dedup newly fetched trades among themselves
+        const seen = new Set<string>();
+        const fetched = allTrades.filter((t) => {
+          const key = `${t.symbol}|${t.politician}|${t.transaction_date}|${t.transaction_type}`;
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+
+        // Merge with existing cache: keep cached trades not in fetched set
+        const fetchedKeys = new Set(fetched.map((t) => `${t.symbol}|${t.politician}|${t.transaction_date}|${t.transaction_type}`));
+        const preserved = (existingCached || []).filter((t) => {
+          const key = `${t.symbol}|${t.politician}|${t.transaction_date}|${t.transaction_type}`;
+          return !fetchedKeys.has(key);
+        });
+
+        merged = [...fetched, ...preserved];
+      } else if (existingCached && existingCached.length > 0) {
+        // Both APIs failed — use cached data as-is
+        merged = existingCached;
+      } else {
+        throw new Error('No data available from any source');
+      }
+
+      // Sort by disclosed date newest first, fall back to transaction date
+      merged.sort((a, b) => {
+        const da = a.filing_date || a.transaction_date;
+        const db = b.filing_date || b.transaction_date;
+        return db.localeCompare(da);
       });
 
-      if (deduped.length > 0) saveTradesToCache(deduped);
-      return deduped;
+      saveTradesToCache(merged);
+      return merged;
     },
     staleTime: 1000 * 60 * 30,
   });
@@ -205,11 +241,21 @@ export const PoliticianTrades = () => {
     });
   }, [data, side, politicianQ, symbolQ]);
 
-  const visible = expanded ? filtered : filtered.slice(0, DEFAULT_VISIBLE);
+  const hasActiveFilter = politicianQ.trim() !== '' || symbolQ.trim() !== '' || side !== 'ALL';
+  const visible = (expanded || hasActiveFilter) ? filtered : filtered.slice(0, DEFAULT_VISIBLE);
   const hiddenCount = Math.max(0, filtered.length - DEFAULT_VISIBLE);
   const canLoadMore = (data?.length ?? 0) >= pages * PAGE_SIZE;
 
+  const cacheFetchedAt = loadCacheFetchedAt();
+  const isStale = cacheFetchedAt ? (Date.now() - cacheFetchedAt) > 1000 * 60 * 60 * 24 : true;
+  const lastUpdatedText = cacheFetchedAt
+    ? new Date(cacheFetchedAt).toLocaleString()
+    : null;
+
   const queryClient = useQueryClient();
+  const handleRefresh = () => {
+    queryClient.invalidateQueries({ queryKey: ['politician-trades'] });
+  };
   useEffect(() => {
     const handler = () => queryClient.invalidateQueries({ queryKey: ['politician-trades'] });
     window.addEventListener('stockpulse-politician-sync', handler);
@@ -239,9 +285,27 @@ export const PoliticianTrades = () => {
           </div>
         </div>
         <p className="text-xs text-muted-foreground">
-          US Congressional STOCK Act disclosures (House Clerk &amp; Senate eFD via CapitolExposed) plus
-          President Donald J. Trump's OGE Form 278T filings (via Unusual Whales). Refreshed daily.
+          US Congressional STOCK Act disclosures (House Clerk &amp; Senate eFD) plus
+          President Donald J. Trump's OGE Form 278T filings. Data from CongressInvests and CapitolExposed.
         </p>
+        <div className="flex items-center gap-2 text-xs">
+          {lastUpdatedText && (
+            <span className={cn('flex items-center gap-1', isStale ? 'text-amber-400' : 'text-muted-foreground')}>
+              {isStale && <AlertCircle className="h-3 w-3" />}
+              Last updated: {lastUpdatedText}
+            </span>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={handleRefresh}
+            disabled={isFetching}
+            className="h-6 px-2 text-xs"
+          >
+            <RefreshCw className={cn('h-3 w-3 mr-1', isFetching && 'animate-spin')} />
+            Refresh
+          </Button>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <Input
             placeholder="Filter by politician (e.g. Pelosi, Trump)"

@@ -204,6 +204,12 @@ async function runPoliticianTrades(): Promise<{ ok: boolean; message: string }> 
   });
 
   const merged = [...deduped, ...preserved];
+  // Sort by disclosed date newest first, fall back to transaction date
+  merged.sort((a: any, b: any) => {
+    const da = a.filing_date || a.transaction_date;
+    const db = b.filing_date || b.transaction_date;
+    return db.localeCompare(da);
+  });
   storage.setItem('stockpulse_politician_trades', JSON.stringify({ data: merged, fetchedAt: Date.now() }));
   window.dispatchEvent(new Event('stockpulse-politician-sync'));
   return {
