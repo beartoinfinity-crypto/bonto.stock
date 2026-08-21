@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { TrendingUp, BarChart3, Activity, Zap, Search, Globe, Crosshair, Settings } from 'lucide-react';
+import { TrendingUp, BarChart3, Activity, Zap, Search, Globe, Crosshair, Settings, User } from 'lucide-react';
 import { AlertPanel } from './AlertPanel';
 import { Alert, AlertConfig } from '@/lib/alertTypes';
 import { Button } from '@/components/ui/button';
@@ -62,6 +62,14 @@ export function Header({
               <Button variant="outline" size="sm" className="gap-2">
                 <Crosshair className="h-4 w-4" />
                 <span className="hidden sm:inline">{t('tacticalEngine')}</span>
+              </Button>
+            </Link>
+
+            {/* Trading Masters Link */}
+            <Link to="/masters">
+              <Button variant="outline" size="sm" className="gap-2">
+                <User className="h-4 w-4" />
+                <span className="hidden sm:inline">Masters</span>
               </Button>
             </Link>
 

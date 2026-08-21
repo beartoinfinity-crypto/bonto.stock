@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Index from "./pages/Index";
 import Screener from "./pages/Screener";
 import Tactical from "./pages/Tactical";
+import TradingMasters from "./pages/TradingMasters";
 import NotFound from "./pages/NotFound";
 import Settings from "./pages/Settings";
 import ApiSettings from "./pages/ApiSettings";
@@ -33,6 +34,7 @@ const App = () => (
             <Route path="/" element={<Index />} />
             <Route path="/screener" element={<Screener />} />
             <Route path="/tactical" element={<Tactical />} />
+            <Route path="/masters" element={<TradingMasters />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/api-settings" element={<ApiSettings />} />
             <Route path="/admin" element={<Admin />} />
