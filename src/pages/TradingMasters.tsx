@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useStockData } from '@/hooks/useStockData';
 import { Header } from '@/components/Header';
-import { Stock, popularStocks } from '@/lib/stockData';
+import { popularStocks } from '@/lib/stockData';
 import { TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, XCircle, Search, User, Briefcase, Target, Shield, Brain, BarChart3, Activity, Eye, Scale, Zap } from 'lucide-react';
 
 interface MasterAnalysis {
@@ -485,17 +485,13 @@ function confidenceColor(c: number) {
 }
 
 export default function TradingMasters() {
-  const [symbol, setSymbol] = useState('AAPL');
-  const [stockObj, setStockObj] = useState<Stock>(() => {
-    return popularStocks.find(s => s.symbol === 'AAPL') ?? popularStocks[0];
-  });
-  const { selectedStock, historicalData: histData, isLoading } = useStockData(stockObj);
+  const [inputSymbol, setInputSymbol] = useState('AAPL');
+  const { selectedStock, historicalData: histData, isLoading, setSelectedStock } = useStockData();
   const [sortBy, setSortBy] = useState<'verdict' | 'confidence'>('confidence');
 
-  const searchSymbol = stockObj.symbol;
+  const searchSymbol = selectedStock.symbol;
 
   const data = useMemo(() => {
-    if (!selectedStock) return null;
     return {
       price: selectedStock.price,
       previousClose: selectedStock.price - selectedStock.change,
@@ -506,7 +502,6 @@ export default function TradingMasters() {
   }, [selectedStock, histData]);
 
   const analyses = useMemo(() => {
-    if (!data) return [];
     return analyzeStock(searchSymbol.toUpperCase(), data);
   }, [data, searchSymbol]);
 
@@ -524,9 +519,9 @@ export default function TradingMasters() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    const upper = symbol.toUpperCase();
+    const upper = inputSymbol.toUpperCase();
     const found = popularStocks.find(s => s.symbol === upper);
-    setStockObj(found ?? { symbol: upper, name: upper, sector: 'Unknown', price: 0, change: 0, changePercent: 0, volume: 0, marketCap: '0', pe: 0, week52High: 0, week52Low: 0 });
+    setSelectedStock(found ?? { symbol: upper, name: upper, sector: 'Unknown', price: 0, change: 0, changePercent: 0, volume: 0, marketCap: '0', pe: 0, week52High: 0, week52Low: 0 });
   };
 
   return (
@@ -547,8 +542,9 @@ export default function TradingMasters() {
         {/* Search Bar */}
         <form onSubmit={handleSearch} className="flex gap-3 mb-6">
           <Input
-            value={symbol}
-            onChange={(e) => setSymbol(e.target.value.toUpperCase())}
+            value={inputSymbol}
+            onChange={(e) => setInputSymbol(e.target.value.toUpperCase())}
+            value={inputSymbol}
             placeholder="Enter stock symbol (e.g. AAPL, TSLA, NVDA)"
             className="max-w-xs font-mono text-lg"
           />
