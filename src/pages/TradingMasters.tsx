@@ -489,10 +489,21 @@ export default function TradingMasters() {
   const [stockObj, setStockObj] = useState<Stock>(() => {
     return popularStocks.find(s => s.symbol === 'AAPL') ?? popularStocks[0];
   });
-  const { data, isLoading } = useStockData(stockObj);
+  const { selectedStock, historicalData: histData, isLoading } = useStockData(stockObj);
   const [sortBy, setSortBy] = useState<'verdict' | 'confidence'>('confidence');
 
   const searchSymbol = stockObj.symbol;
+
+  const data = useMemo(() => {
+    if (!selectedStock) return null;
+    return {
+      price: selectedStock.price,
+      previousClose: selectedStock.price - selectedStock.change,
+      volume: selectedStock.volume,
+      marketCap: selectedStock.marketCap,
+      historical: histData,
+    };
+  }, [selectedStock, histData]);
 
   const analyses = useMemo(() => {
     if (!data) return [];
