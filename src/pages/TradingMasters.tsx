@@ -3,9 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Header } from '@/components/Header';
 import { useStockData } from '@/hooks/useStockData';
-import { Header as HeaderComponent } from '@/components/Header';
+import { Header } from '@/components/Header';
+import { Stock, popularStocks } from '@/lib/stockData';
 import { TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle, XCircle, Search, User, Briefcase, Target, Shield, Brain, BarChart3, Activity, Eye, Scale, Zap } from 'lucide-react';
 
 interface MasterAnalysis {
@@ -486,9 +486,13 @@ function confidenceColor(c: number) {
 
 export default function TradingMasters() {
   const [symbol, setSymbol] = useState('AAPL');
-  const [searchSymbol, setSearchSymbol] = useState('AAPL');
-  const { data, isLoading } = useStockData(searchSymbol.toUpperCase());
+  const [stockObj, setStockObj] = useState<Stock>(() => {
+    return popularStocks.find(s => s.symbol === 'AAPL') ?? popularStocks[0];
+  });
+  const { data, isLoading } = useStockData(stockObj);
   const [sortBy, setSortBy] = useState<'verdict' | 'confidence'>('confidence');
+
+  const searchSymbol = stockObj.symbol;
 
   const analyses = useMemo(() => {
     if (!data) return [];
@@ -509,12 +513,14 @@ export default function TradingMasters() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    setSearchSymbol(symbol.toUpperCase());
+    const upper = symbol.toUpperCase();
+    const found = popularStocks.find(s => s.symbol === upper);
+    setStockObj(found ?? { symbol: upper, name: upper, sector: 'Unknown', price: 0, change: 0, changePercent: 0, volume: 0, marketCap: '0', pe: 0, week52High: 0, week52Low: 0 });
   };
 
   return (
     <div className="min-h-screen bg-background">
-      <HeaderComponent />
+      <Header />
       <div className="container mx-auto px-4 py-6 max-w-7xl">
         {/* Title */}
         <div className="mb-6">
