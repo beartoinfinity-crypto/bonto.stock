@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { useStockData } from '@/hooks/useStockData';
 import { Header } from '@/components/Header';
 import { popularStocks } from '@/lib/stockData';
@@ -488,8 +489,32 @@ export default function TradingMasters() {
   const [inputSymbol, setInputSymbol] = useState('AAPL');
   const { selectedStock, historicalData: histData, isLoading, setSelectedStock } = useStockData();
   const [sortBy, setSortBy] = useState<'verdict' | 'confidence'>('confidence');
+  const [analyzing, setAnalyzing] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [analyzedSymbol, setAnalyzedSymbol] = useState('');
+  const progressTimer = useRef<ReturnType<typeof setInterval>>();
 
   const searchSymbol = selectedStock.symbol;
+
+  // Animate progress while loading
+  useEffect(() => {
+    if (isLoading) {
+      setProgress(0);
+      let p = 0;
+      progressTimer.current = setInterval(() => {
+        p += Math.random() * 15 + 5;
+        if (p >= 90) p = 90;
+        setProgress(p);
+      }, 200);
+      return () => clearInterval(progressTimer.current);
+    } else if (analyzing) {
+      // Data loaded — fill to 100%
+      clearInterval(progressTimer.current);
+      setProgress(100);
+      const t = setTimeout(() => setAnalyzing(false), 400);
+      return () => clearTimeout(t);
+    }
+  }, [isLoading, analyzing]);
 
   const data = useMemo(() => {
     return {
@@ -520,6 +545,10 @@ export default function TradingMasters() {
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     const upper = inputSymbol.toUpperCase();
+    if (!upper || analyzing || isLoading) return;
+    setAnalyzing(true);
+    setProgress(0);
+    setAnalyzedSymbol(upper);
     const found = popularStocks.find(s => s.symbol === upper);
     setSelectedStock(found ?? { symbol: upper, name: upper, sector: 'Unknown', price: 0, change: 0, changePercent: 0, volume: 0, marketCap: '0', pe: 0, week52High: 0, week52Low: 0 });
   };
@@ -548,11 +577,24 @@ export default function TradingMasters() {
             placeholder="Enter stock symbol (e.g. AAPL, TSLA, NVDA)"
             className="max-w-xs font-mono text-lg"
           />
-          <Button type="submit" disabled={isLoading}>
+          <Button type="submit" disabled={analyzing || isLoading}>
             <Search className="h-4 w-4 mr-2" />
-            Analyze
+            {analyzing ? 'Analyzing...' : 'Analyze'}
           </Button>
         </form>
+
+        {/* Progress Bar */}
+        {analyzing && (
+          <div className="mb-6 space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">
+                12 masters analyzing <span className="font-mono font-bold text-foreground">{analyzedSymbol}</span>...
+              </span>
+              <span className="font-mono text-muted-foreground">{Math.round(progress)}%</span>
+            </div>
+            <Progress value={progress} className="h-2" />
+          </div>
+        )}
 
         {/* Summary */}
         {analyses.length > 0 && (
