@@ -560,6 +560,19 @@ export default function Settings() {
                   }}
                 />
               </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={!sbUrl || !sbKey || sbLoading}
+                onClick={() => {
+                  saveSupabaseConfig({ url: sbUrl, anonKey: sbKey, enabled: sbEnabled });
+                  setSbStatus('unknown');
+                  toast.success('Supabase credentials saved');
+                }}
+              >
+                Save credentials
+              </Button>
             </div>
 
             <div className="flex flex-wrap gap-2">
