@@ -313,6 +313,31 @@ export function getNextRun(job: CronJob): Date | null {
 
 // ─── Execute a job ─────────────────────────────────────────────────
 
+/**
+ * If Supabase cloud sync is enabled, push this job's output to the cloud.
+ * Returns a short note appended to the run message ('' when not applicable).
+ */
+async function cloudPushAfterJob(jobId: string): Promise<string> {
+  try {
+    const { getClient, pushStockData, pushKeys } = await import('@/lib/supabaseDb');
+    if (!getClient()) return '';   // cloud sync disabled or unconfigured
+    if (jobId === 'sync-stock-data') {
+      const r = await pushStockData();
+      return r.quotes + r.bars > 0
+        ? ` | cloud: ${r.quotes} quotes + ${r.bars} bars pushed`
+        : ' | cloud: nothing to push';
+    }
+    if (jobId === 'sync-politician-trades') {
+      const n = await pushKeys(['stockpulse_politician_trades']);
+      return n > 0 ? ' | cloud: politician trades pushed' : ' | cloud: nothing to push';
+    }
+    return '';
+  } catch (e) {
+    console.warn('[LocalCron] Cloud push failed:', e);
+    return ' | cloud push FAILED';
+  }
+}
+
 async function runJob(job: CronJob): Promise<CronRun> {
   const run: CronRun = {
     jobId: job.id,
@@ -329,6 +354,10 @@ async function runJob(job: CronJob): Promise<CronRun> {
     const result = await job.run();
     run.ok = result.ok;
     run.message = result.message;
+    // Mirror fresh data to Supabase when the job succeeded
+    if (run.ok) {
+      run.message += await cloudPushAfterJob(job.id);
+    }
   } catch (e) {
     run.error = e instanceof Error ? e.message : 'Unknown error';
   }
