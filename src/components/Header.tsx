@@ -42,7 +42,7 @@ export function Header({
                 <TrendingUp className="h-5 w-5 text-primary-foreground" />
               </div>
               <div>
-                <h1 className="text-xl font-bold tracking-tight">StockPulse</h1>
+                <h1 className="text-xl font-bold tracking-tight">Dan's StockPulse</h1>
                 <p className="text-xs text-muted-foreground">{t('appSubtitle')}</p>
               </div>
             </Link>
