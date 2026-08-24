@@ -1,87 +1,81 @@
-# Deploy to Render.com
+# Deploy Guide
 
 ## Repository
 
-- **GitHub:** https://github.com/beartoinfinity-crypto/bonto.stock
-- **Live URL:** https://dandanball-stock.onrender.com/
+- **GitHub**: https://github.com/beartoinfinity-crypto/bonto.stock
+- **Live**: https://dandanball-stock.onrender.com/
 
-## Quick Start
+## How Deploy Works
 
-```bash
-# Clone the repo
-git clone https://github.com/beartoinfinity-crypto/bonto.stock.git
-cd bonto.stock
+Push to `main` → Render auto-builds → Express serves `dist/` on port 10000.
 
-# Install dependencies
-npm install
+The `dist/` folder is committed to git (Render runs `npm install && npm start`, not `npm run build`).
 
-# Build for production
-npm run build
-
-# Run locally (for testing the production build)
-npm start
-```
-
-## Deploy to Render
-
-### Auto-deploy (recommended)
-
-Render connects to the GitHub repo and auto-deploys on push to `main`:
+## Deploy Steps
 
 ```bash
+npm run build              # rebuild dist/
 git add -A
-git commit -m "your message"
-git push
+git commit -m "feat: ..."
+git push                   # triggers Render auto-deploy
 ```
 
-Your app will be live at:
-https://dandanball-stock.onrender.com/
+## Local Testing (Production Build)
 
-### Manual deploy
-
-1. Go to https://dashboard.render.com
-2. Select the `dandanball-stock` service
-3. Click "Manual Deploy" → "Deploy latest commit"
-
-## Project Structure
-
+```bash
+npm run build
+npm start                  # Express on http://localhost:10000
 ```
-├── index.js              # Express server (serves dist/ + /api/proxy endpoint)
-├── package.json          # Dependencies + start script
-├── dist/                 # Production build (committed for deployment)
-│   ├── index.html
-│   ├── favicon.ico
-│   ├── sql-wasm.wasm
-│   └── assets/
-│       ├── index-*.css
-│       └── index-*.js
-├── src/                  # Source code
-└── ...
-```
+
+## Express Server (`index.js`)
+
+The server does three things:
+
+1. **Serves `dist/`** — SPA with catch-all route for client-side routing
+2. **`/api/proxy?url=<encoded>`** — CORS proxy with SSRF protection (blocks localhost, private IPs)
+3. **`/api/politician-trades/*`** — Server-side endpoints for external data sources:
+   - `GET /api/politician-trades/unusualwhales?politician=<name>` — scrapes UnusualWhales profile page
+   - `GET /api/politician-trades/stockspill?member_name=<name>` — queries StockSpill Supabase
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PORT`   | `10000` | Server port (Render sets this automatically) |
+| `PORT` | `10000` | Server port (Render sets this automatically) |
 
-## Useful Commands
+## Supabase Setup
+
+### First Time
+
+1. Create a Supabase project
+2. Go to SQL Editor
+3. Run the setup SQL from Settings page (or from `supabaseDb.ts` `SETUP_SQL` constant)
+4. In Settings, enter your Supabase URL and anon key
+5. Enable Cloud Sync
+
+### Featured Trades Table
+
+The `politician_featured_trades` table is created by the same setup SQL. It stores Trump/Pelosi trades for instant display.
+
+### Edge Functions (Optional)
+
+Server-side sync that runs even when no browser is open:
 
 ```bash
-# Rebuild after code changes
-npm run build
+# Deploy
+./scripts/deploy-edge-functions.ps1
 
-# Push updates to Render
-git add -A
-git commit -m "your message"
-git push
+# Schedule: fill placeholders in supabase/schedules.sql, run in SQL Editor
 ```
 
 ## Troubleshooting
 
-- **Page is blank:** Make sure `dist/` folder is committed and `index.js` points to it
-- **404 on refresh:** The Express catch-all route handles client-side routing
-- **App won't start:** Check that `package.json` has `"start": "node index.js"`
-- **"All providers unavailable":** The server-side proxy (`/api/proxy`) handles data fetching; check Render logs for fetch errors
-- **Stale data:** Click "Refresh" in the Politician Trades panel, or run the cron job from Admin page
-- **Server proxy 502:** Render's outbound requests may be blocked; check the service's outbound IP allowlist
+| Problem | Fix |
+|---------|-----|
+| Blank page | Ensure `dist/` is committed and `index.js` serves it |
+| 404 on refresh | Express catch-all should handle client-side routes |
+| "All providers unavailable" | Check Render logs; server proxy may be failing |
+| Stale data | Click Refresh in Politician Trades panel, or run cron job from Admin |
+| Server proxy 502 | Render outbound requests may be blocked |
+| Trump shows no records | Verify the UnusualWhales URL uses `Donald J Trump` (no period) |
+| Render slow to respond | Free tier sleeps after inactivity; first request takes 30-50s |

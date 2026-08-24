@@ -1,37 +1,35 @@
-# Mark Six PWA
-
-A PWA that displays Hong Kong Mark Six lottery results, refreshes daily, and stores historical data in SQLite.
+# StockPulse Domain Model
 
 ## Language
 
-**Draw**:
-A single lottery event identified by a year/sequence number (e.g. `26/089`). The primary key in the database.
-_Avoid_: Lottery, event, round
+**Stock quote**: A snapshot of a stock's price, volume, and fundamentals at a point in time. Stored as JSON in the `stock_quotes` Supabase table keyed by symbol.
 
-**Draw number**:
-The sequence identifier within a year (e.g. `26/089` means draw 89 of 2026). Stored as `draw` in the DB.
-_Avoid_: ID, number
+**Historical bar**: A single OHLCV (open/high/low/close/volume) candle for one trading day. Stored in `stock_historical` keyed by `(symbol, date)`.
 
-**Numbers**:
-The six main balls drawn in a draw. Stored as a JSON array of integers.
-_Avoid_: Main numbers, balls, drawn numbers
+**Signal**: The output of one strategy evaluating one stock. Has a direction (BUY/SELL/HOLD), strength (strong/moderate/weak), and confidence (0-100).
 
-**Special number**:
-The single bonus ball drawn after the six main numbers. Displayed with a `+` prefix.
-_Avoid_: Bonus, extra, supplemental
+**Confluence**: How many distinct signal strategies agree on the same direction for a stock. The primary metric for ranking stocks in the screener.
 
-**Refresh**:
-Scraping the latest draw from an external source and appending it to the database if newer than what's stored.
-_Avoid_: Update, sync, fetch
+**Regime**: The current market state classification (STRONG_UPTREND, SIDEWAYS_TIGHT, CORRECTION, etc.). Determined by `analyzeMarketConditions()`.
 
-**Backfill**:
-A one-time historical import of draws from an external source to populate the database.
-_Avoid_: Import, bulk load, migration
+**Featured trade**: A trade by a prominent politician (Trump, Pelosi) fetched from external sources and stored in the `politician_featured_trades` Supabase table.
 
-**Scrape**:
-Extracting draw data from an external website's HTML or JSON.
-_Avoid_: Crawl, parse, fetch (use "scrape" for the full action, "parse" for the HTML→object step)
+**Cron job**: A scheduled task that runs in the browser while a tab is open. Jobs fetch data from external APIs and push results to Supabase (primary store).
 
-**Draw day**:
-A day when Mark Six draws occur: Tuesday, Thursday, Saturday.
-_Avoid_: Lottery day, event day
+**Server proxy**: The Express endpoint `/api/proxy?url=<encoded>` that fetches external URLs server-side, bypassing CORS restrictions. Has SSRF protection (blocks localhost, private IPs).
+
+**Crumb token**: A Yahoo Finance authentication token fetched once and cached for 30 minutes. Required for the v10 quoteSummary API but not for the v8 chart API.
+
+## Storage Layers
+
+1. **Supabase** (primary): Source of truth. Written first (debounced 3s). Hydrated on boot via `pullAll()`.
+2. **SQLite** (backup): Offline archive. Written second (fire-and-forget). Persisted via File System API or IndexedDB.
+3. **localStorage** (cache): Sync read cache. Instant reads. Always written on every `setItem()`.
+
+## Data Sources
+
+- **Yahoo Finance**: v8 chart (OHLCV), v10 quoteSummary (fundamentals with crumb)
+- **CapitolExposed**: Recent congressional trades (House/Senate, paginated API)
+- **CongressInvests**: Full congressional trade history back to 2015
+- **UnusualWhales**: Trump OGE Form 278T filings (HTML scraping of `__NEXT_DATA__`)
+- **StockSpill**: Congress trades stored in a separate Supabase project (`artscweyrracfffoqvur`)
