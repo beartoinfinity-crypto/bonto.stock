@@ -229,12 +229,25 @@ On first load, existing localStorage data is migrated into SQLite.
 
 Browser-based cron scheduler supporting 5-field cron expressions (lists, ranges, steps). Jobs:
 
-| Job | Schedule | Action |
-|-----|----------|--------|
-| Stock Data Sync | Every 30 min | Fetches quotes + historical for top 20 stocks |
-| Politician Trades | Every 6 hours | Fetches CapitolExposed + CongressInvests APIs, merges/deduplicates |
+| Job | Target | Schedule | Action |
+|-----|--------|----------|--------|
+| Stock quotes → Supabase | Cloud (primary) | 6:00 UTC Mon–Fri | Fetch quotes + historical, push to `stock_quotes`/`stock_historical` |
+| Politician trades → Supabase | Cloud (primary) | 7:00 UTC Mon–Fri | Fetch CapitolExposed + CongressInvests, merge/dedup, push to KV |
+| Local SQLite archive | Local backup | 8:30 UTC daily | Flush pending writes into `.db` archive, report stats |
 
-Run results are capped at 200 entries and stored in SQLite as a document.
+Run results are capped at 200 entries and stored in SQLite as a document. Browser jobs only run while a tab is open.
+
+## Server-Side Sync (Supabase Edge Functions)
+
+Optional server-side equivalents that run **even when no browser is open** (via `pg_cron`):
+
+- `supabase/functions/sync-stock-data` — Yahoo v8 chart fetch for top 20 symbols → upserts into `stock_quotes` + `stock_historical`
+- `supabase/functions/sync-politician-trades` — both disclosure APIs → dedup/merge with existing cloud copy → writes back to `stockpulse_kv`
+
+Setup:
+1. Deploy: run `scripts/deploy-edge-functions.ps1` (requires [Supabase CLI](https://supabase.com/docs/guides/functions); sets a `CRON_SECRET`, deploys both functions)
+2. Schedule: fill placeholders in `supabase/schedules.sql`, run in Dashboard → SQL Editor
+3. The browser picks up server-synced data automatically: settings/docs via boot hydration, stock bars via Settings → Pull now
 
 ---
 
