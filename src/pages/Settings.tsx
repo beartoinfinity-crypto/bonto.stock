@@ -17,7 +17,7 @@ import { popularStocks } from '@/lib/stockData';
 import * as storage from '@/lib/storage';
 import { exportDb, importDb, importCsv, getStats, isFsAccessSupported, pickDbFile, resetDbFile, getDbFileName, clearSymbol } from '@/lib/localDb';
 import {
-  getSupabaseConfig, saveSupabaseConfig, testConnection, pushKeys, pullAll, SETUP_SQL, TABLE,
+  getSupabaseConfig, saveSupabaseConfig, testConnection, pushKeys, pullAll, pushStockData, pullStockData, SETUP_SQL, TABLE,
 } from '@/lib/supabaseDb';
 
 const WATCHLIST_KEY = 'stockpulse_watchlist';
@@ -512,10 +512,10 @@ export default function Settings() {
           </CardHeader>
           <CardContent className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              Optional third storage layer. When enabled, all settings and documents
+              Optional third storage layer. Settings and documents
               (watchlist, users, screener results, politician trades, alerts, cron history…)
-              are mirrored to a Supabase table <span className="font-mono">{TABLE}</span> with a 3-second debounce.
-              Configure it below, run the setup SQL once in your Supabase project, then test the connection.
+              auto-mirror with a 3-second debounce. Cached quotes and historical price bars
+              sync via the Push now / Pull now buttons. Requires three tables — run the setup SQL below once.
             </p>
 
             <div className="space-y-3">
@@ -610,12 +610,19 @@ export default function Settings() {
                 onClick={() => {
                   saveSupabaseConfig({ url: sbUrl, anonKey: sbKey, enabled: sbEnabled });
                   setSbLoading(true);
-                  toast.promise(pushKeys(), {
-                    loading: 'Pushing local data to cloud...',
-                    success: (n) => `Pushed ${n} keys to Supabase`,
-                    error: (e) => (e instanceof Error ? e.message : 'Push failed'),
-                    finally: () => setSbLoading(false),
-                  });
+                  toast.promise(
+                    (async () => {
+                      const kv = await pushKeys();
+                      const stock = await pushStockData();
+                      return `${kv} settings/docs + ${stock.quotes} quotes + ${stock.bars} price bars pushed`;
+                    })(),
+                    {
+                      loading: 'Pushing local data to cloud (this may take a minute)...',
+                      success: (msg) => msg,
+                      error: (e) => (e instanceof Error ? e.message : 'Push failed'),
+                      finally: () => setSbLoading(false),
+                    }
+                  );
                 }}
               >
                 <CloudUpload className="h-3.5 w-3.5" /> Push now
@@ -628,12 +635,19 @@ export default function Settings() {
                 onClick={() => {
                   saveSupabaseConfig({ url: sbUrl, anonKey: sbKey, enabled: sbEnabled });
                   setSbLoading(true);
-                  toast.promise(pullAll(), {
-                    loading: 'Pulling cloud data to local...',
-                    success: (n) => `Pulled ${n} keys from Supabase`,
-                    error: (e) => (e instanceof Error ? e.message : 'Pull failed'),
-                    finally: () => setSbLoading(false),
-                  });
+                  toast.promise(
+                    (async () => {
+                      const kv = await pullAll();
+                      const stock = await pullStockData();
+                      return `${kv} settings/docs + ${stock.quotes} quotes + ${stock.bars} price bars pulled`;
+                    })(),
+                    {
+                      loading: 'Pulling cloud data to local (this may take a minute)...',
+                      success: (msg) => msg,
+                      error: (e) => (e instanceof Error ? e.message : 'Pull failed'),
+                      finally: () => setSbLoading(false),
+                    }
+                  );
                 }}
               >
                 <CloudDownload className="h-3.5 w-3.5" /> Pull now

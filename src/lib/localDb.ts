@@ -484,6 +484,96 @@ export async function putHistorical(symbol: string, data: Record<string, unknown
   markDirty();
 }
 
+// ─── Bulk dump / restore (for cloud sync) ─────────────────────────
+
+export interface QuoteDumpRow {
+  symbol: string;
+  data: string;        // JSON-serialized CachedQuote
+  updated_at: number;
+}
+
+export interface HistoricalDumpRow {
+  symbol: string;
+  date: string;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  close: number | null;
+  volume: number | null;
+  updated_at: number;
+}
+
+/** Dump every cached quote row (no TTL filter — used by cloud push). */
+export async function getAllCachedQuotes(): Promise<QuoteDumpRow[]> {
+  const d = await dbReady;
+  const res = d.exec(`SELECT symbol, data, updated_at FROM quotes`);
+  if (!res.length) return [];
+  return res[0].values.map(([symbol, data, updated_at]) => ({
+    symbol: symbol as string,
+    data: data as string,
+    updated_at: updated_at as number,
+  }));
+}
+
+/** Dump every historical bar (all symbols — used by cloud push). */
+export async function getAllHistoricalRows(): Promise<HistoricalDumpRow[]> {
+  const d = await dbReady;
+  const res = d.exec(
+    `SELECT symbol, date, open, high, low, close, volume, updated_at FROM historical ORDER BY symbol, date`
+  );
+  if (!res.length) return [];
+  return res[0].values.map(([symbol, date, open, high, low, close, volume, updated_at]) => ({
+    symbol: symbol as string,
+    date: date as string,
+    open: open as number | null,
+    high: high as number | null,
+    low: low as number | null,
+    close: close as number | null,
+    volume: volume as number | null,
+    updated_at: updated_at as number,
+  }));
+}
+
+/** Restore quotes from cloud dump (INSERT OR REPLACE). Returns count. */
+export async function bulkPutQuotes(rows: QuoteDumpRow[]): Promise<number> {
+  const d = await dbReady;
+  d.run('BEGIN TRANSACTION');
+  try {
+    const stmt = d.prepare(
+      `INSERT OR REPLACE INTO quotes (symbol, data, updated_at) VALUES (?, ?, ?)`
+    );
+    for (const r of rows) stmt.run([r.symbol.toUpperCase(), r.data, r.updated_at]);
+    stmt.free();
+    d.run('COMMIT');
+  } catch (e) {
+    d.run('ROLLBACK');
+    throw e;
+  }
+  markDirty();
+  return rows.length;
+}
+
+/** Restore historical bars from cloud dump (upsert per symbol+date). Returns count. */
+export async function bulkPutHistoricalRows(rows: HistoricalDumpRow[]): Promise<number> {
+  const d = await dbReady;
+  d.run('BEGIN TRANSACTION');
+  try {
+    const stmt = d.prepare(
+      `INSERT OR REPLACE INTO historical (symbol, date, open, high, low, close, volume, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    for (const r of rows) {
+      stmt.run([r.symbol.toUpperCase(), r.date, r.open, r.high, r.low, r.close, r.volume, r.updated_at]);
+    }
+    stmt.free();
+    d.run('COMMIT');
+  } catch (e) {
+    d.run('ROLLBACK');
+    throw e;
+  }
+  markDirty();
+  return rows.length;
+}
+
 // ─── Generic metadata (with TTL) ─────────────────────────────────
 
 export async function getMeta(key: string, ttlMs = GENERIC_TTL): Promise<unknown | null> {
