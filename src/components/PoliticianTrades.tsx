@@ -34,8 +34,8 @@ interface TradeRow {
 const PAGE_SIZE = 20;
 
 const FEATURED_POLITICIANS = [
-  { name: 'Donald J. Trump', slug: 'donald-trump', sources: ['unusualwhales'] as SourceId[], description: 'President — OGE Form 278T filings' },
-  { name: 'Nancy Pelosi', slug: 'nancy-pelosi', sources: ['stockspill', 'unusualwhales'] as SourceId[], description: 'House (D-CA) — STOCK Act disclosures' },
+  { name: 'Donald J. Trump', uwSlug: 'Donald J Trump', slug: 'donald-trump', sources: ['unusualwhales'] as SourceId[], description: 'President — OGE Form 278T filings' },
+  { name: 'Nancy Pelosi', uwSlug: 'Nancy Pelosi', slug: 'nancy-pelosi', sources: ['stockspill', 'unusualwhales'] as SourceId[], description: 'House (D-CA) — STOCK Act disclosures' },
 ];
 
 function formatAmount(from: number | null, to: number | null): string {
@@ -279,7 +279,7 @@ export const PoliticianTrades = () => {
     for (const src of politician.sources) {
       try {
         if (src === 'unusualwhales') {
-          const res = await fetch(`/api/politician-trades/unusualwhales?politician=${encodeURIComponent(politician.name)}`);
+          const res = await fetch(`/api/politician-trades/unusualwhales?politician=${encodeURIComponent(politician.uwSlug)}`);
           if (res.ok) {
             const json = await res.json();
             allTrades.push(...mapUnusualWhalesRows(json));
@@ -362,6 +362,19 @@ export const PoliticianTrades = () => {
   };
 
   useEffect(() => { fetchInitial(); }, []);
+
+  // ── Auto-fetch featured when filter matches a known name (debounced) ──
+  useEffect(() => {
+    const q = politicianQ.trim().toLowerCase();
+    if (!q || q.length < 3 || featuredLoading) return;
+    const match = FEATURED_POLITICIANS.find(fp =>
+      fp.name.toLowerCase().includes(q) || q.includes(fp.name.toLowerCase().split(' ').pop() ?? '')
+    );
+    if (match && featuredActive !== match.slug && !trades.some(t => t.politician.toLowerCase().includes(q))) {
+      const timer = setTimeout(() => fetchFeatured(match), 800);
+      return () => clearTimeout(timer);
+    }
+  }, [politicianQ]);
 
   // ── Load more: fetch next page from current source ─────────────
   const loadMore = async () => {
