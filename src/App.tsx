@@ -13,6 +13,7 @@ import ApiSettings from "./pages/ApiSettings";
 import Admin from "./pages/Admin";
 import { purgeExpired } from "@/lib/localDb";
 import { startScheduler } from "@/lib/localCron";
+import { getClient, pullAll } from "@/lib/supabaseDb";
 import { LanguageProvider } from "@/lib/i18n";
 
 // Purge expired SQLite entries on startup
@@ -20,6 +21,23 @@ purgeExpired().then(n => { if (n > 0) console.log(`[LocalDB] Purged ${n} expired
 
 // Start local cron scheduler
 startScheduler();
+
+// Cloud-first hydration: Supabase is the primary store — refresh the local
+// mirror (localStorage + SQLite) from the cloud shortly after boot.
+setTimeout(() => {
+  if (!getClient()) return;
+  pullAll()
+    .then(n => {
+      if (n > 0) {
+        console.log(`[SupabaseSync] Hydrated ${n} keys from cloud on boot`);
+        window.dispatchEvent(new Event('stockpulse-sync'));
+        window.dispatchEvent(new Event('stockpulse-politician-sync'));
+      } else {
+        console.log('[SupabaseSync] Boot hydration: cloud empty or unchanged');
+      }
+    })
+    .catch(e => console.warn('[SupabaseSync] Boot hydration failed:', e));
+}, 4000);
 
 const queryClient = new QueryClient();
 

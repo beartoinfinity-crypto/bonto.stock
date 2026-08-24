@@ -1,12 +1,15 @@
 /**
  * storage.ts — unified read/write layer
  *
- * Every write goes to localStorage (fast, sync, backward compat),
- * SQLite (via localDb, for .db file export), and — if enabled —
- * Supabase cloud (via supabaseDb, debounced 3 s).
+ * HIERARCHY (cloud-first):
+ *   1. Supabase  — PRIMARY store. Source of truth. Written first (debounced 3 s).
+ *   2. SQLite    — LOCAL BACKUP / ARCHIVE. Written second (fire-and-forget).
+ *                  The .db file (File System Access) or IndexedDB copy is the
+ *                  offline archive of everything.
+ *   3. localStorage — sync read cache only. Instant reads, zero latency.
  *
- * Reads come from localStorage (synchronous, zero latency).
- * On first load, localDb.ts migrates existing localStorage → SQLite.
+ * On boot, App.tsx hydrates localStorage/SQLite FROM Supabase (pullAll),
+ * so the cloud always wins as source of truth when sync is enabled.
  */
 
 import { getConfig, setConfig, deleteConfig, getDocument, setDocument, deleteDocument } from './localDb';
@@ -22,15 +25,22 @@ export function getItem(key: string): string | null {
 }
 
 export function setItem(key: string, value: string): void {
+  // 0. Sync read cache (always)
   localStorage.setItem(key, value);
-  // Also persist to SQLite (fire-and-forget)
-  if (CONFIG_KEYS.includes(key as typeof CONFIG_KEYS[number])) {
+
+  const isConfig = CONFIG_KEYS.includes(key as typeof CONFIG_KEYS[number]);
+  const isDocument = DOCUMENT_KEYS.includes(key as typeof DOCUMENT_KEYS[number]);
+  if (!isConfig && !isDocument) return;
+
+  // 1. PRIMARY: Supabase cloud (debounced, fire-and-forget)
+  maybeSyncToSupabase(key);
+
+  // 2. BACKUP: local SQLite archive (fire-and-forget)
+  if (isConfig) {
     setConfig(key, value).catch(() => {});
-  } else if (DOCUMENT_KEYS.includes(key as typeof DOCUMENT_KEYS[number])) {
+  } else {
     setDocument(key, value).catch(() => {});
   }
-  // And to Supabase cloud if configured + enabled (debounced, fire-and-forget)
-  maybeSyncToSupabase(key);
 }
 
 export function removeItem(key: string): void {

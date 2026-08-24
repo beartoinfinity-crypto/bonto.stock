@@ -1,5 +1,6 @@
 // Local cron scheduler — runs in the browser
-// Jobs compute locally or fetch from public APIs directly (no Supabase)
+// Supabase jobs are primary (fetch + push to cloud); archive-sqlite flushes
+// the local SQLite backup.
 
 import * as storage from '@/lib/storage';
 
@@ -212,9 +213,23 @@ async function runPoliticianTrades(): Promise<{ ok: boolean; message: string }> 
   });
   storage.setItem('stockpulse_politician_trades', JSON.stringify({ data: merged, fetchedAt: Date.now() }));
   window.dispatchEvent(new Event('stockpulse-politician-sync'));
+
+  // PRIMARY TARGET: push merged trades to Supabase when cloud sync is on
+  let cloudNote = '';
+  try {
+    const { getClient, pushKeys } = await import('@/lib/supabaseDb');
+    if (getClient()) {
+      const n = await pushKeys(['stockpulse_politician_trades']);
+      cloudNote = n > 0 ? ` | Supabase: pushed` : ' | Supabase: nothing to push';
+    }
+  } catch (e) {
+    console.warn('[LocalCron] Supabase push failed:', e);
+    cloudNote = ' | Supabase push FAILED';
+  }
+
   return {
     ok: true,
-    message: `Fetched ${capitolTrades.length} from CapitolExposed + ${congressTrades.length} from CongressInvests (${deduped.length} unique), kept ${preserved.length} imported records (${((Date.now() - start) / 1000).toFixed(1)}s)`,
+    message: `Fetched ${capitolTrades.length} from CapitolExposed + ${congressTrades.length} from CongressInvests (${deduped.length} unique), kept ${preserved.length} imported records (${((Date.now() - start) / 1000).toFixed(1)}s)${cloudNote}`,
   };
 }
 
@@ -236,7 +251,36 @@ async function runSyncStockData(): Promise<{ ok: boolean; message: string }> {
   }
   // Notify UI to refetch stale queries
   window.dispatchEvent(new Event('stockpulse-sync'));
-  return { ok: quotesSynced > 0, message: `Synced ${quotesSynced} quotes, ${historySynced} histories` };
+
+  // PRIMARY TARGET: push fetched stock data to Supabase when cloud sync is on
+  let cloudNote = '';
+  try {
+    const { getClient, pushStockData } = await import('@/lib/supabaseDb');
+    if (getClient()) {
+      const r = await pushStockData();
+      cloudNote = r.quotes + r.bars > 0
+        ? ` | Supabase: ${r.quotes} quotes + ${r.bars} bars pushed`
+        : ' | Supabase: nothing to push';
+    }
+  } catch (e) {
+    console.warn('[LocalCron] Supabase push failed:', e);
+    cloudNote = ' | Supabase push FAILED';
+  }
+
+  return { ok: quotesSynced > 0, message: `Synced ${quotesSynced} quotes, ${historySynced} histories${cloudNote}` };
+}
+
+// ─── Local archive job (SQLite backup) ──────────────────────────────
+
+async function runSqliteArchive(): Promise<{ ok: boolean; message: string }> {
+  // Flush any debounced writes so the .db file / IndexedDB snapshot is current
+  const { persistNow, getStats } = await import('@/lib/localDb');
+  await persistNow();
+  const s = await getStats();
+  return {
+    ok: true,
+    message: `Archived to local SQLite: ${s.quotes} quotes, ${s.historical} bars, ${s.config} config, ${s.documents} docs${s.file ? ` (${s.file})` : ''}`,
+  };
 }
 
 // ─── Job definitions ───────────────────────────────────────────────
@@ -256,19 +300,27 @@ function persistEnabledState() {
 export const CRON_JOBS: CronJob[] = [
   {
     id: 'sync-stock-data',
-    label: 'Sync stock quotes',
+    label: 'Stock quotes → Supabase',
     schedule: '0 6 * * 1-5',
-    description: 'Refresh quotes for top 20 stocks via Yahoo/Stooq (browser-direct)',
+    description: 'Fetch quotes + history for top 20 stocks, store to Supabase (primary). SQLite copy happens automatically on write.',
     enabled: loadEnabledState()['sync-stock-data'] ?? false,
     run: runSyncStockData,
   },
   {
     id: 'sync-politician-trades',
-    label: 'Politician trades sync',
+    label: 'Politician trades → Supabase',
     schedule: '0 7 * * 1-5',
-    description: 'Fetch congressional trading disclosures from CapitolExposed API',
+    description: 'Fetch congressional trading disclosures (CapitolExposed + CongressInvests), store to Supabase (primary).',
     enabled: loadEnabledState()['sync-politician-trades'] ?? false,
     run: runPoliticianTrades,
+  },
+  {
+    id: 'archive-sqlite',
+    label: 'Local SQLite archive',
+    schedule: '30 8 * * *',
+    description: 'Flush all pending writes into the local SQLite backup (.db file / IndexedDB) and report archive stats.',
+    enabled: loadEnabledState()['archive-sqlite'] ?? false,
+    run: runSqliteArchive,
   },
 ];
 
@@ -313,30 +365,9 @@ export function getNextRun(job: CronJob): Date | null {
 
 // ─── Execute a job ─────────────────────────────────────────────────
 
-/**
- * If Supabase cloud sync is enabled, push this job's output to the cloud.
- * Returns a short note appended to the run message ('' when not applicable).
- */
-async function cloudPushAfterJob(jobId: string): Promise<string> {
-  try {
-    const { getClient, pushStockData, pushKeys } = await import('@/lib/supabaseDb');
-    if (!getClient()) return '';   // cloud sync disabled or unconfigured
-    if (jobId === 'sync-stock-data') {
-      const r = await pushStockData();
-      return r.quotes + r.bars > 0
-        ? ` | cloud: ${r.quotes} quotes + ${r.bars} bars pushed`
-        : ' | cloud: nothing to push';
-    }
-    if (jobId === 'sync-politician-trades') {
-      const n = await pushKeys(['stockpulse_politician_trades']);
-      return n > 0 ? ' | cloud: politician trades pushed' : ' | cloud: nothing to push';
-    }
-    return '';
-  } catch (e) {
-    console.warn('[LocalCron] Cloud push failed:', e);
-    return ' | cloud push FAILED';
-  }
-}
+// Note: each job handles its own Supabase push explicitly inside run()
+// (Supabase = primary store). The archive-sqlite job flushes the local
+// SQLite backup. No generic post-run hook needed anymore.
 
 async function runJob(job: CronJob): Promise<CronRun> {
   const run: CronRun = {
@@ -354,10 +385,6 @@ async function runJob(job: CronJob): Promise<CronRun> {
     const result = await job.run();
     run.ok = result.ok;
     run.message = result.message;
-    // Mirror fresh data to Supabase when the job succeeded
-    if (run.ok) {
-      run.message += await cloudPushAfterJob(job.id);
-    }
   } catch (e) {
     run.error = e instanceof Error ? e.message : 'Unknown error';
   }
