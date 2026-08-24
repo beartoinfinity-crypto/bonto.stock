@@ -7,13 +7,13 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
-  ArrowDownRight, ArrowUpRight, ChevronDown, ChevronUp, Landmark, Loader2, Plus, AlertCircle, RefreshCw,
+  ArrowDownRight, ArrowUpRight, ChevronDown, ChevronUp, Landmark, Loader2, Plus, AlertCircle, RefreshCw, Star, ExternalLink, CheckCircle2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import * as storage from '@/lib/storage';
 
 type Side = 'BUY' | 'SELL' | 'EXCHANGE' | 'OTHER';
 type SideFilter = 'ALL' | 'BUY' | 'SELL';
+type SourceId = 'capitol' | 'congress' | 'unusualwhales' | 'stockspill';
 
 interface TradeRow {
   id: string;
@@ -26,9 +26,17 @@ interface TradeRow {
   amount_to: number | null;
   asset_name: string | null;
   position_held: string | null;
+  sources: Set<SourceId>;
+  source_url?: string;
+  source_name?: SourceId;
 }
 
 const PAGE_SIZE = 20;
+
+const FEATURED_POLITICIANS = [
+  { name: 'Donald J. Trump', slug: 'donald-trump', sources: ['unusualwhales'] as SourceId[], description: 'President — OGE Form 278T filings' },
+  { name: 'Nancy Pelosi', slug: 'nancy-pelosi', sources: ['stockspill', 'unusualwhales'] as SourceId[], description: 'House (D-CA) — STOCK Act disclosures' },
+];
 
 function formatAmount(from: number | null, to: number | null): string {
   const fmt = (n: number) =>
@@ -39,6 +47,15 @@ function formatAmount(from: number | null, to: number | null): string {
   if (from) return `${fmt(from)}+`;
   if (to) return `≤ ${fmt(to)}`;
   return '—';
+}
+
+function parseAmountRange(str: string | null): { from: number | null; to: number | null } {
+  if (!str) return { from: null, to: null };
+  const clean = (s: string) => Number(s.replace(/[^0-9.]/g, '')) || null;
+  const parts = str.split(/\s*[-–]\s*/);
+  if (parts.length === 2) return { from: clean(parts[0]), to: clean(parts[1]) };
+  if (parts.length === 1) return { from: null, to: clean(parts[0]) };
+  return { from: null, to: null };
 }
 
 const SERVER_PROXY = (url: string) => `/api/proxy?url=${encodeURIComponent(url)}`;
@@ -98,6 +115,9 @@ function mapCapitolRows(json: any): TradeRow[] {
       amount_to: raw.amount_max ? Number(String(raw.amount_max).replace(/[^0-9.]/g, '')) || null : null,
       asset_name: raw.asset_description ? String(raw.asset_description) : null,
       position_held: raw.owner ? String(raw.owner) : null,
+      sources: new Set(['capitol'] as SourceId[]),
+      source_url: raw.source_url ? String(raw.source_url) : undefined,
+      source_name: 'capitol' as SourceId,
     };
   });
 }
@@ -124,22 +144,99 @@ function mapCongressRows(json: any): TradeRow[] {
       amount_to: parts.length === 2 ? clean(parts[1]) : null,
       asset_name: r.asset ? String(r.asset) : null,
       position_held: r.chamber ? String(r.chamber) : null,
+      sources: new Set(['congress'] as SourceId[]),
+      source_url: r.link ? String(r.link) : undefined,
+      source_name: 'congress' as SourceId,
     };
   });
 }
 
-// ─── Dedup helper ──────────────────────────────────────────────────
+function mapUnusualWhalesRows(json: any): TradeRow[] {
+  const trades: any[] = json?.trades ?? [];
+  if (!Array.isArray(trades)) return [];
+  return trades.map((r) => {
+    const tt = String(r.txn_type ?? '').toLowerCase();
+    let side: Side = 'OTHER';
+    if (tt === 'buy' || tt === 'purchase') side = 'BUY';
+    else if (tt === 'sell' || tt === 'sale') side = 'SELL';
+    else if (tt === 'exchange') side = 'EXCHANGE';
+    const { from, to } = parseAmountRange(r.amounts ?? null);
+    return {
+      id: `uw-${r.file_record_id ?? Math.random().toString(36).slice(2)}`,
+      symbol: String(r.ticker ?? ''),
+      politician: String(r.name ?? ''),
+      transaction_date: String(r.transaction_date ?? '').slice(0, 10),
+      filing_date: r.filed_at_date ? String(r.filed_at_date).slice(0, 10) : null,
+      transaction_type: side,
+      amount_from: from,
+      amount_to: to,
+      asset_name: r.issuer ? String(r.issuer) : null,
+      position_held: r.affiliation ? String(r.affiliation) : null,
+      sources: new Set(['unusualwhales'] as SourceId[]),
+      source_url: r.link_url ? String(r.link_url) : undefined,
+      source_name: 'unusualwhales' as SourceId,
+    };
+  });
+}
 
-function dedupTrades(existing: TradeRow[], incoming: TradeRow[]): TradeRow[] {
-  const seen = new Set(existing.map(t => `${t.symbol}|${t.politician}|${t.transaction_date}|${t.transaction_type}`));
-  const unique: TradeRow[] = [];
+function mapStockSpillRows(json: any): TradeRow[] {
+  const trades: any[] = json?.trades ?? [];
+  if (!Array.isArray(trades)) return [];
+  return trades.map((r) => {
+    const tt = String(r.transaction_type ?? '').toLowerCase();
+    let side: Side = 'OTHER';
+    if (tt === 'purchase' || tt === 'buy') side = 'BUY';
+    else if (tt === 'sale' || tt === 'sell') side = 'SELL';
+    else if (tt === 'exchange') side = 'EXCHANGE';
+    const { from, to } = parseAmountRange(r.amount_range ?? null);
+    return {
+      id: `ss-${r.id ?? ''}`,
+      symbol: String(r.ticker ?? ''),
+      politician: String(r.member_name ?? ''),
+      transaction_date: String(r.transaction_date ?? '').slice(0, 10),
+      filing_date: r.disclosure_date ? String(r.disclosure_date).slice(0, 10) : null,
+      transaction_type: side,
+      amount_from: from,
+      amount_to: to,
+      asset_name: r.asset_name ? String(r.asset_name) : null,
+      position_held: r.owner ? String(r.owner) : null,
+      sources: new Set(['stockspill'] as SourceId[]),
+      source_url: r.source_url ? String(r.source_url) : undefined,
+      source_name: 'stockspill' as SourceId,
+    };
+  });
+}
+
+// ─── Merge / dedup helper ──────────────────────────────────────────
+
+function mergeTrade(existing: TradeRow, incoming: TradeRow): TradeRow {
+  const merged = { ...existing };
+  for (const s of incoming.sources) merged.sources.add(s);
+  if (!merged.source_url && incoming.source_url) merged.source_url = incoming.source_url;
+  return merged;
+}
+
+function dedupKey(t: TradeRow): string {
+  const date = t.transaction_date?.slice(0, 10) ?? '';
+  const symbol = t.symbol?.toUpperCase() ?? '';
+  const politician = t.politician?.toLowerCase().replace(/[^a-z]/g, '') ?? '';
+  const side = t.transaction_type;
+  return `${politician}|${symbol}|${date}|${side}`;
+}
+
+function mergeInto(target: TradeRow[], incoming: TradeRow[]): TradeRow[] {
+  const map = new Map<string, TradeRow>();
+  for (const t of target) map.set(dedupKey(t), t);
   for (const t of incoming) {
-    const key = `${t.symbol}|${t.politician}|${t.transaction_date}|${t.transaction_type}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(t);
+    const key = dedupKey(t);
+    const existing = map.get(key);
+    if (existing) {
+      map.set(key, mergeTrade(existing, t));
+    } else {
+      map.set(key, t);
+    }
   }
-  return unique;
+  return Array.from(map.values());
 }
 
 // ─── Component ─────────────────────────────────────────────────────
@@ -163,6 +260,66 @@ export const PoliticianTrades = () => {
   const [source, setSource] = useState<'capitol' | 'congress' | 'done'>('capitol');
   const [hasMore, setHasMore] = useState(true);
 
+  // Featured politician state
+  const [featuredActive, setFeaturedActive] = useState<string | null>(null);
+  const [featuredLoading, setFeaturedLoading] = useState(false);
+
+  // ── Fetch featured politician trades ────────────────────────────
+  const fetchFeatured = async (politician: typeof FEATURED_POLITICIANS[0]) => {
+    setFeaturedLoading(true);
+    setFeaturedActive(politician.slug);
+    setTrades([]);
+    setLoading(true);
+    setError(false);
+
+    const allTrades: TradeRow[] = [];
+
+    for (const src of politician.sources) {
+      try {
+        if (src === 'unusualwhales') {
+          const res = await fetch(`/api/politician-trades/unusualwhales?politician=${encodeURIComponent(politician.name)}`);
+          if (res.ok) {
+            const json = await res.json();
+            allTrades.push(...mapUnusualWhalesRows(json));
+          }
+        } else if (src === 'stockspill') {
+          const res = await fetch(`/api/politician-trades/stockspill?member_name=${encodeURIComponent(politician.name)}`);
+          if (res.ok) {
+            const json = await res.json();
+            allTrades.push(...mapStockSpillRows(json));
+          }
+        }
+      } catch { /* skip failed source */ }
+    }
+
+    // Also try CapitolExposed and CongressInvests for cross-check
+    try {
+      const res = await proxyFetch(`https://www.capitolexposed.com/api/v1/trades?page=1&per_page=100`);
+      const json = await res.json();
+      const capitolRows = mapCapitolRows(json);
+      const matching = capitolRows.filter(r =>
+        r.politician.toLowerCase().includes(politician.name.toLowerCase().split(' ').pop() ?? '')
+      );
+      allTrades.push(...matching);
+    } catch { /* skip */ }
+
+    try {
+      const res = await proxyFetch(`https://congressinvests.com/trades?limit=100&offset=0`);
+      const json = await res.json();
+      const congressRows = mapCongressRows(json);
+      const matching = congressRows.filter(r =>
+        r.politician.toLowerCase().includes(politician.name.toLowerCase().split(' ').pop() ?? '')
+      );
+      allTrades.push(...matching);
+    } catch { /* skip */ }
+
+    setTrades(mergeInto([], allTrades));
+    setFetchedAt(Date.now());
+    setHasMore(false);
+    setLoading(false);
+    setFeaturedLoading(false);
+  };
+
   // ── Initial fetch: 20 records only ─────────────────────────────
   const fetchInitial = async () => {
     setLoading(true);
@@ -171,6 +328,7 @@ export const PoliticianTrades = () => {
     setCapitolPage(2);
     setCongressOffset(0);
     setSource('capitol');
+    setFeaturedActive(null);
 
     // Try CapitolExposed first (most recent ~30 days)
     try {
@@ -213,7 +371,7 @@ export const PoliticianTrades = () => {
         const json = await res.json();
         const rows = mapCapitolRows(json);
         if (rows.length > 0) {
-          setTrades(prev => [...prev, ...dedupTrades(prev, rows)]);
+          setTrades(prev => mergeInto(prev, rows));
           setCapitolPage(p => p + 1);
           setFetchedAt(Date.now());
         } else {
@@ -224,7 +382,7 @@ export const PoliticianTrades = () => {
         const json = await res.json();
         const rows = mapCongressRows(json);
         if (rows.length > 0) {
-          setTrades(prev => [...prev, ...dedupTrades(prev, rows)]);
+          setTrades(prev => mergeInto(prev, rows));
           setCongressOffset(o => o + PAGE_SIZE);
           setFetchedAt(Date.now());
         } else {
@@ -241,15 +399,12 @@ export const PoliticianTrades = () => {
   // ── Refresh: re-fetch from scratch ─────────────────────────────
   const handleRefresh = () => {
     setTrades([]);
+    if (featuredActive) {
+      const fp = FEATURED_POLITICIANS.find(p => p.slug === featuredActive);
+      if (fp) { fetchFeatured(fp); return; }
+    }
     fetchInitial();
   };
-
-  // Listen for cron sync events
-  useEffect(() => {
-    const handler = () => fetchInitial();
-    window.addEventListener('stockpulse-politician-sync', handler);
-    return () => window.removeEventListener('stockpulse-politician-sync', handler);
-  }, []);
 
   // ── Client-side filter ─────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -270,6 +425,20 @@ export const PoliticianTrades = () => {
 
   const isStale = fetchedAt ? (Date.now() - fetchedAt) > 1000 * 60 * 60 * 24 : true;
   const lastUpdatedText = fetchedAt ? new Date(fetchedAt).toLocaleString() : null;
+
+  const SOURCE_LABELS: Record<SourceId, string> = {
+    capitol: 'CapitolExposed',
+    congress: 'CongressInvests',
+    unusualwhales: 'UnusualWhales',
+    stockspill: 'StockSpill',
+  };
+
+  const SOURCE_COLORS: Record<SourceId, string> = {
+    capitol: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+    congress: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
+    unusualwhales: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
+    stockspill: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+  };
 
   return (
     <Card>
@@ -295,8 +464,37 @@ export const PoliticianTrades = () => {
         </div>
         <p className="text-xs text-muted-foreground">
           US Congressional STOCK Act disclosures (House Clerk &amp; Senate eFD) plus
-          President Donald J. Trump's OGE Form 278T filings. Data from CongressInvests and CapitolExposed.
+          President Donald J. Trump's OGE Form 278T filings. Data from CongressInvests, CapitolExposed, UnusualWhales, and StockSpill.
         </p>
+
+        {/* ── Featured Politicians ────────────────────────────── */}
+        <div className="flex flex-wrap gap-2">
+          {FEATURED_POLITICIANS.map((fp) => (
+            <Button
+              key={fp.slug}
+              size="sm"
+              variant={featuredActive === fp.slug ? 'default' : 'outline'}
+              onClick={() => featuredActive === fp.slug ? handleRefresh() : fetchFeatured(fp)}
+              disabled={featuredLoading}
+              className="h-8 text-xs gap-1.5"
+            >
+              <Star className={cn('h-3 w-3', featuredActive === fp.slug && 'fill-current')} />
+              {fp.name}
+              <span className="text-[10px] text-muted-foreground ml-1 hidden sm:inline">{fp.description}</span>
+            </Button>
+          ))}
+          {featuredActive && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => { setFeaturedActive(null); fetchInitial(); }}
+              className="h-8 text-xs"
+            >
+              View all
+            </Button>
+          )}
+        </div>
+
         <div className="flex items-center gap-2 text-xs">
           {lastUpdatedText && (
             <span className={cn('flex items-center gap-1', isStale ? 'text-amber-400' : 'text-muted-foreground')}>
@@ -335,7 +533,7 @@ export const PoliticianTrades = () => {
           {loading ? (
             <div className="flex items-center justify-center py-10 text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              Loading trades...
+              {featuredLoading ? 'Fetching featured politician data...' : 'Loading trades...'}
             </div>
           ) : error ? (
             <div className="py-10 text-center text-sm text-muted-foreground">
@@ -353,6 +551,7 @@ export const PoliticianTrades = () => {
                   <TableHead>Symbol</TableHead>
                   <TableHead>Side</TableHead>
                   <TableHead>Amount</TableHead>
+                  <TableHead className="hidden md:table-cell">Source</TableHead>
                   <TableHead className="hidden md:table-cell">Traded</TableHead>
                   <TableHead className="hidden md:table-cell">Disclosed</TableHead>
                 </TableRow>
@@ -361,11 +560,18 @@ export const PoliticianTrades = () => {
                 {visible.map((t) => {
                   const isBuy = t.transaction_type === 'BUY';
                   const isSell = t.transaction_type === 'SELL';
+                  const sourceCount = t.sources.size;
+                  const isCrossChecked = sourceCount >= 2;
                   return (
                     <TableRow key={t.id}>
                       <TableCell>
                         <div className="flex flex-col gap-1">
-                          <span className="font-medium">{t.politician}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-medium">{t.politician}</span>
+                            {isCrossChecked && (
+                              <CheckCircle2 className="h-3 w-3 text-emerald-400 flex-shrink-0" title="Cross-checked by multiple sources" />
+                            )}
+                          </div>
                           {t.position_held && (
                             <span className="text-[10px] text-muted-foreground">{t.position_held}</span>
                           )}
@@ -395,6 +601,15 @@ export const PoliticianTrades = () => {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-sm">{formatAmount(t.amount_from, t.amount_to)}</TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        <div className="flex flex-wrap gap-1">
+                          {Array.from(t.sources).map(s => (
+                            <Badge key={s} variant="outline" className={cn('text-[10px] px-1.5 py-0', SOURCE_COLORS[s])}>
+                              {SOURCE_LABELS[s]}
+                            </Badge>
+                          ))}
+                        </div>
+                      </TableCell>
                       <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{t.transaction_date}</TableCell>
                       <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{t.filing_date || '—'}</TableCell>
                     </TableRow>
