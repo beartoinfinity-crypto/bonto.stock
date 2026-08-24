@@ -283,6 +283,23 @@ async function runSqliteArchive(): Promise<{ ok: boolean; message: string }> {
   };
 }
 
+// ─── Cloud -> Local pull job ────────────────────────────────────────
+
+// Keeps the local SQLite mirror in sync with Supabase (primary store).
+// Server-side Edge Functions write fresh data to the cloud; this job
+// brings it down so the offline .db archive never goes stale.
+async function runPullFromSupabase(): Promise<{ ok: boolean; message: string }> {
+  const { getClient, pullStockData } = await import('@/lib/supabaseDb');
+  if (!getClient()) return { ok: false, message: 'Supabase not configured or disabled' };
+  const r = await pullStockData();
+  // Notify UI so React Query refetches from the refreshed cache
+  window.dispatchEvent(new Event('stockpulse-sync'));
+  return {
+    ok: true,
+    message: `Pulled ${r.quotes} quotes + ${r.bars} price bars from Supabase into local SQLite`,
+  };
+}
+
 // ─── Job definitions ───────────────────────────────────────────────
 
 const CRON_ENABLED_KEY = 'stockpulse_cron_enabled';
@@ -321,6 +338,14 @@ export const CRON_JOBS: CronJob[] = [
     description: 'Flush all pending writes into the local SQLite backup (.db file / IndexedDB) and report archive stats.',
     enabled: loadEnabledState()['archive-sqlite'] ?? false,
     run: runSqliteArchive,
+  },
+  {
+    id: 'pull-stock-data',
+    label: 'Stock data ← Supabase',
+    schedule: '0 9 * * 1-5',
+    description: 'Pull quotes + price bars from Supabase (primary) into the local SQLite mirror so offline data stays fresh.',
+    enabled: loadEnabledState()['pull-stock-data'] ?? false,
+    run: runPullFromSupabase,
   },
 ];
 
