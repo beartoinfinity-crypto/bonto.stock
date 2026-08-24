@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import {
   ArrowLeft, Download, Database, FileDown, FileUp, FolderOpen, Loader2, LogOut, Mail, Plus, ShieldCheck, Star, Trash2, Upload, User,
-  KeyRound, Cloud, CloudUpload, CloudDownload, PlugZap, Copy,
+  KeyRound, Cloud, CloudUpload, CloudDownload, PlugZap, Copy, Lock,
 } from 'lucide-react';
 import { BackToTop } from '@/components/BackToTop';
 import { popularStocks } from '@/lib/stockData';
@@ -23,6 +23,11 @@ import {
 const WATCHLIST_KEY = 'stockpulse_watchlist';
 const AUTH_KEY = 'stockpulse_auth';
 const USERS_KEY = 'stockpulse_users';
+
+// Shared admin gate (same password as /admin) — protects destructive and
+// credential-bearing sections: SQLite ops + Supabase cloud sync config.
+const ADMIN_AUTH_KEY = 'stockpulse_admin_auth';
+const SESSION_PW_KEY = 'stockpulse_admin_pw';
 
 async function hashPassword(pw: string): Promise<string> {
   const data = new TextEncoder().encode(pw);
@@ -99,6 +104,39 @@ export default function Settings() {
   const [sbLoading, setSbLoading] = useState(false);
   const [sbStatus, setSbStatus] = useState<'unknown' | 'ok' | 'error'>('unknown');
   const [showSql, setShowSql] = useState(false);
+
+  // Admin gate for restricted sections (same password as /admin)
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
+  const [adminInput, setAdminInput] = useState('');
+  const [adminError, setAdminError] = useState('');
+
+  useEffect(() => {
+    // Trust the sessionStorage cache only if it still matches the stored hash
+    const stored = storage.getItem(ADMIN_AUTH_KEY);
+    const cached = sessionStorage.getItem(SESSION_PW_KEY);
+    if (!stored || !cached) return;
+    hashPassword(cached).then(h => { if (h === stored) setAdminUnlocked(true); });
+  }, []);
+
+  const handleUnlock = useCallback(async () => {
+    if (!adminInput) return;
+    setAdminError('');
+    const stored = storage.getItem(ADMIN_AUTH_KEY);
+    const inputHash = await hashPassword(adminInput);
+    if (!stored) {
+      storage.setItem(ADMIN_AUTH_KEY, inputHash);
+      sessionStorage.setItem(SESSION_PW_KEY, adminInput);
+      setAdminUnlocked(true);
+      toast.success('Password set — restricted settings unlocked');
+    } else if (inputHash === stored) {
+      sessionStorage.setItem(SESSION_PW_KEY, adminInput);
+      setAdminUnlocked(true);
+      toast.success('Unlocked');
+    } else {
+      setAdminError('Incorrect password');
+    }
+    setAdminInput('');
+  }, [adminInput]);
 
   useEffect(() => {
     getStats().then(setDbStats);
@@ -329,6 +367,34 @@ export default function Settings() {
           </CardContent>
         </Card>
 
+        {/* Admin Gate — protects SQLite ops + cloud credentials */}
+        {!adminUnlocked ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Lock className="h-4 w-4 text-warning" /> Restricted settings
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Database management and cloud-sync credentials are protected by the admin password
+                (the same one used on the Ops Console). First time here? Enter a new password to set it.
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  type="password"
+                  placeholder="Admin password"
+                  value={adminInput}
+                  onChange={(e) => setAdminInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleUnlock()}
+                />
+                <Button size="sm" onClick={handleUnlock} disabled={!adminInput}>Unlock</Button>
+              </div>
+              {adminError && <p className="text-xs text-destructive">{adminError}</p>}
+            </CardContent>
+          </Card>
+        ) : (
+        <>
         {/* Database Section */}
         <Card>
           <CardHeader>
@@ -675,12 +741,14 @@ export default function Settings() {
                     toast.success('SQL copied to clipboard');
                   }}
                 >
-                  <Copy className="h-3 w-3" /> Copy SQL
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                   <Copy className="h-3 w-3" /> Copy SQL
+                 </Button>
+               </div>
+             )}
+           </CardContent>
+         </Card>
+         </>
+        )}
 
         <Separator />
 
