@@ -41,6 +41,7 @@ interface TodayActionPlanProps {
   data: StockData[];
   signals: Signal[];
   symbol: string;
+  currentPrice?: number;  // real-time quote price (overrides historical last close)
 }
 
 interface ConfidenceFactor {
@@ -218,7 +219,8 @@ function computeActionAdvice(
   t: (key: TranslationKey) => string,
   rerollCount: number = 0,
   forecastDays: number = 30,
-  forecastPaths: number = 100
+  forecastPaths: number = 100,
+  quotePrice?: number
 ): ActionAdvice | null {
   if (data.length < 100) return null;
 
@@ -226,7 +228,7 @@ function computeActionAdvice(
     const result = getStrategyRecommendations(data);
     const { marketCondition, topPick } = result;
     const latestIdx = data.length - 1;
-    const currentPrice = data[latestIdx].close;
+    const currentPrice = quotePrice ?? data[latestIdx].close;
     const prevClose = data[latestIdx - 1]?.close ?? currentPrice;
 
     const hashStringToSeed = (str: string) => {
@@ -561,13 +563,13 @@ const actionStyles = {
 
 type HistoryDaysOption = 7 | 14 | 30;
 
-export function TodayActionPlan({ data, signals, symbol }: TodayActionPlanProps) {
+export function TodayActionPlan({ data, signals, symbol, currentPrice: quotePrice }: TodayActionPlanProps) {
   const { t } = useLanguage();
   const [rerollCount, setRerollCount] = useState(0);
   const [showConfidenceBreakdown, setShowConfidenceBreakdown] = useState(false);
   const [showConfidenceHistory, setShowConfidenceHistory] = useState(false);
   const [historyDays, setHistoryDays] = useState<HistoryDaysOption>(7);
-  const advice = useMemo(() => computeActionAdvice(data, signals, symbol, t, rerollCount), [data, signals, symbol, t, rerollCount]);
+  const advice = useMemo(() => computeActionAdvice(data, signals, symbol, t, rerollCount, 30, 100, quotePrice), [data, signals, symbol, t, rerollCount, quotePrice]);
   
   // Compute confidence history (past N trading days) — all hooks before early return
   const confidenceHistory = useMemo(() => computeConfidenceHistory(data, historyDays), [data, historyDays]);
@@ -646,7 +648,7 @@ export function TodayActionPlan({ data, signals, symbol }: TodayActionPlanProps)
 
   const style = actionStyles[advice.action];
   const ActionIcon = style.icon;
-  const currentPrice = data[data.length - 1].close;
+  const currentPrice = quotePrice ?? data[data.length - 1].close;
 
   const getConfidenceColor = (score: number) => {
     if (score >= 70) return 'text-bullish';

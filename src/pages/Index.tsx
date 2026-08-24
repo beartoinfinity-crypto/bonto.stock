@@ -211,7 +211,7 @@ const Index = () => {
             <div className="col-span-12 lg:col-span-4 space-y-6">
               {/* Today's Action Plan */}
               <div className="animate-fade-in" style={{ animationDelay: '0.12s' }}>
-                <TodayActionPlan data={historicalData} signals={signals} symbol={selectedStock.symbol} />
+                <TodayActionPlan data={historicalData} signals={signals} symbol={selectedStock.symbol} currentPrice={selectedStock.price} />
               </div>
 
               {/* Social Sentiment Cross-Check */}
