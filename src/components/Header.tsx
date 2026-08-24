@@ -99,7 +99,7 @@ export function Header({
             {lastUpdated && (
               <div className="px-3 py-1.5 bg-secondary rounded-lg text-xs font-mono hidden md:block">
                 <span className="text-muted-foreground">{t('lastUpdated')}: </span>
-                <span>{new Date(lastUpdated).toLocaleDateString(lang === 'zh-TW' ? 'zh-TW' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                <span>{new Date(lastUpdated).toLocaleString(lang === 'zh-TW' ? 'zh-TW' : 'en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
               </div>
             )}
 

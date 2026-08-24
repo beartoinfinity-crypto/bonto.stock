@@ -18,23 +18,23 @@ const CORS_PROXIES = [
 ];
 
 async function proxyFetch(url: string, timeoutMs = 10000, headers?: Record<string, string>): Promise<Response> {
-  // 1. Try direct first
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    const res = await fetch(url, { signal: ctrl.signal, headers });
-    clearTimeout(timer);
-    if (res.ok) return res;
-  } catch { /* CORS blocked — try proxies */ }
-
-  // 2. Server-side proxy (Bonto Express — no CORS restrictions)
+  // 1. Server-side proxy (primary — no CORS restrictions)
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     const res = await fetch(SERVER_PROXY(url), { signal: ctrl.signal, headers });
     clearTimeout(timer);
     if (res.ok) return res;
-  } catch { /* server proxy unavailable */ }
+  } catch { /* server proxy unavailable — try fallbacks */ }
+
+  // 2. Try direct (works for same-origin or non-CORS URLs)
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const res = await fetch(url, { signal: ctrl.signal, headers });
+    clearTimeout(timer);
+    if (res.ok) return res;
+  } catch { /* CORS blocked */ }
 
   // 3. Third-party CORS proxies (legacy fallback)
   for (const proxy of CORS_PROXIES) {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stock, StockData, popularStocks, generateSignals, Signal } from '@/lib/stockData';
 import { fetchStockQuote, fetchHistoricalData } from '@/lib/stockApi';
@@ -19,6 +19,7 @@ interface UseStockDataResult {
 export function useStockData(initialStock: Stock = popularStocks[0]): UseStockDataResult {
   const [selectedStock, setSelectedStock] = useState<Stock>(initialStock);
   const [isRealData, setIsRealData] = useState(false);
+  const lastFetchedAt = useRef<string | null>(null);
 
   // Fetch real-time quote
   const quoteQuery = useQuery({
@@ -27,6 +28,10 @@ export function useStockData(initialStock: Stock = popularStocks[0]): UseStockDa
       const result = await fetchStockQuote(selectedStock.symbol);
       if (!result.isRealData && result.error) {
         console.warn('Using mock quote data:', result.error);
+      }
+      // Track when fresh (non-cache) data was actually fetched
+      if (result.isRealData && !result.fromCache) {
+        lastFetchedAt.current = new Date().toISOString();
       }
       setIsRealData(prev => prev || result.isRealData);
       return result;
@@ -43,6 +48,10 @@ export function useStockData(initialStock: Stock = popularStocks[0]): UseStockDa
       if (!result.isRealData && result.error) {
         console.warn('Using mock historical data:', result.error);
       }
+      // Track when fresh (non-cache) data was actually fetched
+      if (result.isRealData && !result.fromCache) {
+        lastFetchedAt.current = new Date().toISOString();
+      }
       setIsRealData(prev => prev || result.isRealData);
       return result;
     },
@@ -54,10 +63,9 @@ export function useStockData(initialStock: Stock = popularStocks[0]): UseStockDa
   const historicalData = historicalQuery.data?.data || [];
   const signals = historicalData.length > 0 ? generateSignals(historicalData) : [];
   
-  // Determine last updated time from the most recent data point
-  const lastUpdated = historicalData.length > 0 
-    ? historicalData[historicalData.length - 1].date 
-    : null;
+  // "Last updated" = when fresh data was last fetched from the API,
+  // NOT the last trading day in the chart (which stays stale if fetch fails).
+  const lastUpdated = lastFetchedAt.current;
 
   // Show toast when data source changes
   useEffect(() => {

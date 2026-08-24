@@ -88,7 +88,7 @@ export function PriceChart({ data, symbol, lastUpdated, onRefresh }: PriceChartP
             <p className="text-sm text-muted-foreground">Historical price data</p>
             {lastUpdated && (
               <span className="text-xs text-muted-foreground/70">
-                · Last updated: {new Date(lastUpdated).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                · Last updated: {new Date(lastUpdated).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
               </span>
             )}
             {onRefresh && (
