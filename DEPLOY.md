@@ -1,9 +1,9 @@
-# Deploy to Bonto
+# Deploy to Render.com
 
 ## Repository
 
 - **GitHub:** https://github.com/beartoinfinity-crypto/bonto.stock
-- **Bonto URL:** https://dandanball.bonto.run
+- **Live URL:** https://dandanball-stock.onrender.com/
 
 ## Quick Start
 
@@ -22,44 +22,40 @@ npm run build
 npm start
 ```
 
-## Deploy to Bonto
+## Deploy to Render
 
-### Option 1: Git Push (recommended)
+### Auto-deploy (recommended)
+
+Render connects to the GitHub repo and auto-deploys on push to `main`:
 
 ```bash
-# Add remote (already done if cloned from GitHub)
-git remote add origin https://github.com/beartoinfinity-crypto/bonto.stock.git
-
-# Push to main branch
-git push -u origin main
+git add -A
+git commit -m "your message"
+git push
 ```
 
-Bonto auto-deploys on push. Your app will be live at:
-https://dandanball.bonto.run
+Your app will be live at:
+https://dandanball-stock.onrender.com/
 
-### Option 2: Browser Editor
+### Manual deploy
 
-1. Go to https://bonto.dev
-2. Create a new project
-3. Upload these files:
-   - `index.js`
-   - `package.json`
-   - `dist/` folder (entire folder)
-4. Bonto will install dependencies and start the app
+1. Go to https://dashboard.render.com
+2. Select the `dandanball-stock` service
+3. Click "Manual Deploy" → "Deploy latest commit"
 
 ## Project Structure
 
 ```
-├── index.js              # Express server (serves dist/)
+├── index.js              # Express server (serves dist/ + /api/proxy endpoint)
 ├── package.json          # Dependencies + start script
-├── dist/                 # Production build (upload this to Bonto)
+├── dist/                 # Production build (committed for deployment)
 │   ├── index.html
 │   ├── favicon.ico
 │   ├── sql-wasm.wasm
 │   └── assets/
 │       ├── index-*.css
 │       └── index-*.js
-├── src/                  # Source code (not needed on Bonto)
+├── src/                  # Source code
 └── ...
 ```
 
@@ -67,7 +63,7 @@ https://dandanball.bonto.run
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PORT`   | `3000`  | Server port (Bonto sets this automatically) |
+| `PORT`   | `10000` | Server port (Render sets this automatically) |
 
 ## Useful Commands
 
@@ -75,18 +71,17 @@ https://dandanball.bonto.run
 # Rebuild after code changes
 npm run build
 
-# Push updates to Bonto
+# Push updates to Render
 git add -A
 git commit -m "your message"
 git push
-
-# Check Bonto logs (if available)
-# Use Bonto browser editor or MCP
 ```
 
 ## Troubleshooting
 
-- **Page is blank:** Make sure `dist/` folder is uploaded and `index.js` points to it
+- **Page is blank:** Make sure `dist/` folder is committed and `index.js` points to it
 - **404 on refresh:** The Express catch-all route handles client-side routing
 - **App won't start:** Check that `package.json` has `"start": "node index.js"`
+- **"All providers unavailable":** The server-side proxy (`/api/proxy`) handles data fetching; check Render logs for fetch errors
 - **Stale data:** Click "Refresh" in the Politician Trades panel, or run the cron job from Admin page
+- **Server proxy 502:** Render's outbound requests may be blocked; check the service's outbound IP allowlist
