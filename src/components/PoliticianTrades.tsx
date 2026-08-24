@@ -154,29 +154,31 @@ function mapCongressRows(json: any): TradeRow[] {
 function mapUnusualWhalesRows(json: any): TradeRow[] {
   const trades: any[] = json?.trades ?? [];
   if (!Array.isArray(trades)) return [];
-  return trades.map((r) => {
-    const tt = String(r.txn_type ?? '').toLowerCase();
-    let side: Side = 'OTHER';
-    if (tt === 'buy' || tt === 'purchase') side = 'BUY';
-    else if (tt === 'sell' || tt === 'sale') side = 'SELL';
-    else if (tt === 'exchange') side = 'EXCHANGE';
-    const { from, to } = parseAmountRange(r.amounts ?? null);
-    return {
-      id: `uw-${r.file_record_id ?? Math.random().toString(36).slice(2)}`,
-      symbol: String(r.ticker ?? ''),
-      politician: String(r.name ?? ''),
-      transaction_date: String(r.transaction_date ?? '').slice(0, 10),
-      filing_date: r.filed_at_date ? String(r.filed_at_date).slice(0, 10) : null,
-      transaction_type: side,
-      amount_from: from,
-      amount_to: to,
-      asset_name: r.issuer ? String(r.issuer) : null,
-      position_held: r.affiliation ? String(r.affiliation) : null,
-      sources: new Set(['unusualwhales'] as SourceId[]),
-      source_url: r.link_url ? String(r.link_url) : undefined,
-      source_name: 'unusualwhales' as SourceId,
-    };
-  });
+  return trades
+    .filter((r) => r.ticker || r.symbol)
+    .map((r) => {
+      const tt = String(r.txn_type ?? '').toLowerCase();
+      let side: Side = 'OTHER';
+      if (tt === 'buy' || tt === 'purchase') side = 'BUY';
+      else if (tt === 'sell' || tt === 'sale') side = 'SELL';
+      else if (tt === 'exchange') side = 'EXCHANGE';
+      const { from, to } = parseAmountRange(r.amounts ?? null);
+      return {
+        id: `uw-${r.file_record_id ?? Math.random().toString(36).slice(2)}`,
+        symbol: String(r.ticker ?? r.symbol ?? ''),
+        politician: String(r.name ?? ''),
+        transaction_date: String(r.transaction_date ?? '').slice(0, 10),
+        filing_date: r.filed_at_date ? String(r.filed_at_date).slice(0, 10) : null,
+        transaction_type: side,
+        amount_from: from,
+        amount_to: to,
+        asset_name: r.issuer ? String(r.issuer) : null,
+        position_held: r.affiliation ? String(r.affiliation) : null,
+        sources: new Set(['unusualwhales'] as SourceId[]),
+        source_url: r.link_url ? String(r.link_url) : undefined,
+        source_name: 'unusualwhales' as SourceId,
+      };
+    });
 }
 
 function mapStockSpillRows(json: any): TradeRow[] {

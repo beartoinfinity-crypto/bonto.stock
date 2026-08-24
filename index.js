@@ -87,7 +87,8 @@ app.get('/api/politician-trades/unusualwhales', async (req, res) => {
     if (!match) return res.status(502).json({ error: 'Could not find __NEXT_DATA__ in page' });
 
     const nextData = JSON.parse(match[1]);
-    const trades = nextData?.props?.pageProps?.trades ?? [];
+    const rawTrades = nextData?.props?.pageProps?.trades ?? [];
+    const trades = Array.isArray(rawTrades) ? rawTrades.flat() : [];
     const politicianInfo = nextData?.props?.pageProps?.politician ?? null;
 
     res.set('Access-Control-Allow-Origin', '*');
