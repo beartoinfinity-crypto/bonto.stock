@@ -573,7 +573,6 @@ export default function TradingMasters() {
           <Input
             value={inputSymbol}
             onChange={(e) => setInputSymbol(e.target.value.toUpperCase())}
-            value={inputSymbol}
             placeholder="Enter stock symbol (e.g. AAPL, TSLA, NVDA)"
             className="max-w-xs font-mono text-lg"
           />

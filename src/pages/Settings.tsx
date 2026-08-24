@@ -6,15 +6,19 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
 import { toast } from 'sonner';
 import {
   ArrowLeft, Download, Database, FileDown, FileUp, FolderOpen, Loader2, LogOut, Mail, Plus, ShieldCheck, Star, Trash2, Upload, User,
-  KeyRound,
+  KeyRound, Cloud, CloudUpload, CloudDownload, PlugZap, Copy,
 } from 'lucide-react';
 import { BackToTop } from '@/components/BackToTop';
 import { popularStocks } from '@/lib/stockData';
 import * as storage from '@/lib/storage';
 import { exportDb, importDb, importCsv, getStats, isFsAccessSupported, pickDbFile, resetDbFile, getDbFileName, clearSymbol } from '@/lib/localDb';
+import {
+  getSupabaseConfig, saveSupabaseConfig, testConnection, pushKeys, pullAll, SETUP_SQL, TABLE,
+} from '@/lib/supabaseDb';
 
 const WATCHLIST_KEY = 'stockpulse_watchlist';
 const AUTH_KEY = 'stockpulse_auth';
@@ -87,6 +91,14 @@ export default function Settings() {
   const [newSymbol, setNewSymbol] = useState('');
   const [dbStats, setDbStats] = useState<{ quotes: number; historical: number; file: string | null }>({ quotes: 0, historical: 0, file: null });
   const [dbLoading, setDbLoading] = useState(false);
+
+  // Supabase cloud sync
+  const [sbUrl, setSbUrl] = useState(getSupabaseConfig().url);
+  const [sbKey, setSbKey] = useState(getSupabaseConfig().anonKey);
+  const [sbEnabled, setSbEnabled] = useState(getSupabaseConfig().enabled);
+  const [sbLoading, setSbLoading] = useState(false);
+  const [sbStatus, setSbStatus] = useState<'unknown' | 'ok' | 'error'>('unknown');
+  const [showSql, setShowSql] = useState(false);
 
   useEffect(() => {
     getStats().then(setDbStats);
@@ -482,6 +494,164 @@ export default function Settings() {
                 <Trash2 className="h-3.5 w-3.5" /> Clear Cache
               </Button>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Supabase Cloud Sync Section */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Cloud className="h-4 w-4 text-primary" /> Cloud Sync (Supabase)
+              {sbEnabled && sbStatus === 'ok' && (
+                <Badge variant="default" className="ml-auto text-[10px]">Connected</Badge>
+              )}
+              {sbStatus === 'error' && (
+                <Badge variant="destructive" className="ml-auto text-[10px]">Error</Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-xs text-muted-foreground">
+              Optional third storage layer. When enabled, all settings and documents
+              (watchlist, users, screener results, politician trades, alerts, cron history…)
+              are mirrored to a Supabase table <span className="font-mono">{TABLE}</span> with a 3-second debounce.
+              Configure it below, run the setup SQL once in your Supabase project, then test the connection.
+            </p>
+
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label htmlFor="sb-url" className="text-xs">Project URL</Label>
+                <Input
+                  id="sb-url"
+                  type="url"
+                  placeholder="https://xxxxx.supabase.co"
+                  value={sbUrl}
+                  onChange={(e) => setSbUrl(e.target.value.trim())}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="sb-key" className="text-xs flex items-center gap-1.5">
+                  <KeyRound className="h-3 w-3" /> Anon (public) key
+                </Label>
+                <Input
+                  id="sb-key"
+                  type="password"
+                  placeholder="eyJhbGciOi..."
+                  value={sbKey}
+                  onChange={(e) => setSbKey(e.target.value.trim())}
+                />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
+                <div>
+                  <p className="text-sm font-medium">Enable cloud sync</p>
+                  <p className="text-xs text-muted-foreground">Writes mirror to Supabase automatically</p>
+                </div>
+                <Switch
+                  checked={sbEnabled}
+                  onCheckedChange={(checked) => {
+                    if (checked && (!sbUrl || !sbKey)) {
+                      toast.error('Enter Project URL and Anon key first');
+                      return;
+                    }
+                    setSbEnabled(checked);
+                    saveSupabaseConfig({ url: sbUrl, anonKey: sbKey, enabled: checked });
+                    setSbStatus('unknown');
+                    toast.success(checked ? 'Cloud sync enabled' : 'Cloud sync disabled');
+                  }}
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={sbLoading || !sbUrl || !sbKey}
+                onClick={() => {
+                  saveSupabaseConfig({ url: sbUrl, anonKey: sbKey, enabled: sbEnabled });
+                  setSbLoading(true);
+                  toast.promise(testConnection(), {
+                    loading: 'Testing connection...',
+                    success: (res) => {
+                      setSbStatus(res.ok ? 'ok' : 'error');
+                      if (res.ok) return `Connected — table ${TABLE} is reachable`;
+                      throw new Error(res.error ?? 'Connection failed');
+                    },
+                    error: (e) => {
+                      setSbStatus('error');
+                      return e instanceof Error ? e.message : 'Connection failed';
+                    },
+                    finally: () => setSbLoading(false),
+                  });
+                }}
+              >
+                {sbLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+                Test connection
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={!sbEnabled || sbLoading}
+                onClick={() => {
+                  saveSupabaseConfig({ url: sbUrl, anonKey: sbKey, enabled: sbEnabled });
+                  setSbLoading(true);
+                  toast.promise(pushKeys(), {
+                    loading: 'Pushing local data to cloud...',
+                    success: (n) => `Pushed ${n} keys to Supabase`,
+                    error: (e) => (e instanceof Error ? e.message : 'Push failed'),
+                    finally: () => setSbLoading(false),
+                  });
+                }}
+              >
+                <CloudUpload className="h-3.5 w-3.5" /> Push now
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={!sbEnabled || sbLoading}
+                onClick={() => {
+                  saveSupabaseConfig({ url: sbUrl, anonKey: sbKey, enabled: sbEnabled });
+                  setSbLoading(true);
+                  toast.promise(pullAll(), {
+                    loading: 'Pulling cloud data to local...',
+                    success: (n) => `Pulled ${n} keys from Supabase`,
+                    error: (e) => (e instanceof Error ? e.message : 'Pull failed'),
+                    finally: () => setSbLoading(false),
+                  });
+                }}
+              >
+                <CloudDownload className="h-3.5 w-3.5" /> Pull now
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowSql(!showSql)}
+              >
+                {showSql ? 'Hide' : 'Show'} setup SQL
+              </Button>
+            </div>
+
+            {showSql && (
+              <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+                <pre className="text-[11px] font-mono whitespace-pre-wrap text-muted-foreground overflow-x-auto">
+                  {SETUP_SQL}
+                </pre>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => {
+                    navigator.clipboard.writeText(SETUP_SQL);
+                    toast.success('SQL copied to clipboard');
+                  }}
+                >
+                  <Copy className="h-3 w-3" /> Copy SQL
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
 

@@ -1,39 +1,19 @@
 /**
  * storage.ts — unified read/write layer
  *
- * Every write goes to BOTH localStorage (fast, sync, backward compat)
- * and SQLite (via localDb, for .db file export).
+ * Every write goes to localStorage (fast, sync, backward compat),
+ * SQLite (via localDb, for .db file export), and — if enabled —
+ * Supabase cloud (via supabaseDb, debounced 3 s).
  *
  * Reads come from localStorage (synchronous, zero latency).
  * On first load, localDb.ts migrates existing localStorage → SQLite.
  */
 
 import { getConfig, setConfig, deleteConfig, getDocument, setDocument, deleteDocument } from './localDb';
+import { CONFIG_KEYS, DOCUMENT_KEYS } from './syncKeys';
+import { maybeSyncToSupabase } from './supabaseDb';
 
-// ─── Config keys (small values, stored in SQLite `config` table) ──
-
-export const CONFIG_KEYS = [
-  'stockpulse_watchlist',
-  'stockpulse_users',
-  'stockpulse_auth',
-  'stockpulse_admin_auth',
-  'stockpulse_api_config',
-  'sp-lang',
-  'stockpulse_recent_stocks',
-] as const;
-
-// ─── Document keys (large JSON, stored in SQLite `documents` table) ─
-
-export const DOCUMENT_KEYS = [
-  'stockpulse_screener_results',
-  'stockpulse_avs_results',
-  'stockpulse_politician_trades',
-  'stockpulse_trump_trades',
-  'stockpulse_cron_history',
-  'stockpulse_alerts',
-  'stockpulse_alert_config',
-  'stockpulse_market_snapshot',
-] as const;
+export { CONFIG_KEYS, DOCUMENT_KEYS };
 
 // ─── Unified get/set ──────────────────────────────────────────────
 
@@ -49,6 +29,8 @@ export function setItem(key: string, value: string): void {
   } else if (DOCUMENT_KEYS.includes(key as typeof DOCUMENT_KEYS[number])) {
     setDocument(key, value).catch(() => {});
   }
+  // And to Supabase cloud if configured + enabled (debounced, fire-and-forget)
+  maybeSyncToSupabase(key);
 }
 
 export function removeItem(key: string): void {
@@ -58,6 +40,8 @@ export function removeItem(key: string): void {
   } else if (DOCUMENT_KEYS.includes(key as typeof DOCUMENT_KEYS[number])) {
     deleteDocument(key).catch(() => {});
   }
+  // Cloud tombstone: overwrite with empty value (KV design — no deletes)
+  maybeSyncToSupabase(key);
 }
 
 // ─── Convenience: typed helpers for specific keys ─────────────────
