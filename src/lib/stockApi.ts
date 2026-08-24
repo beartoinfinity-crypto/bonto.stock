@@ -10,13 +10,15 @@ export interface FetchResult<T> {
 
 // ─── CORS proxy (browser only — adds CORS headers to any URL) ─────
 
+const SERVER_PROXY = (url: string) => `/api/proxy?url=${encodeURIComponent(url)}`;
+
 const CORS_PROXIES = [
   (url: string) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
   (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
 ];
 
 async function proxyFetch(url: string, timeoutMs = 10000, headers?: Record<string, string>): Promise<Response> {
-  // Try direct first
+  // 1. Try direct first
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -25,6 +27,16 @@ async function proxyFetch(url: string, timeoutMs = 10000, headers?: Record<strin
     if (res.ok) return res;
   } catch { /* CORS blocked — try proxies */ }
 
+  // 2. Server-side proxy (Bonto Express — no CORS restrictions)
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const res = await fetch(SERVER_PROXY(url), { signal: ctrl.signal, headers });
+    clearTimeout(timer);
+    if (res.ok) return res;
+  } catch { /* server proxy unavailable */ }
+
+  // 3. Third-party CORS proxies (legacy fallback)
   for (const proxy of CORS_PROXIES) {
     try {
       const ctrl = new AbortController();

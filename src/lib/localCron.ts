@@ -64,12 +64,15 @@ function cronMatches(expr: string, date: Date): boolean {
 
 // ─── CORS proxy helper ─────────────────────────────────────────────
 
+const SERVER_PROXY = (url: string) => `/api/proxy?url=${encodeURIComponent(url)}`;
+
 const CORS_PROXIES = [
   (url: string) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
   (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
 ];
 
 async function proxyFetch(url: string, timeoutMs = 15000): Promise<Response> {
+  // 1. Direct
   try {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -77,6 +80,17 @@ async function proxyFetch(url: string, timeoutMs = 15000): Promise<Response> {
     clearTimeout(timer);
     if (res.ok) return res;
   } catch { /* try proxies */ }
+
+  // 2. Server-side proxy
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    const res = await fetch(SERVER_PROXY(url), { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (res.ok) return res;
+  } catch { /* server proxy unavailable */ }
+
+  // 3. Third-party CORS proxies (legacy fallback)
   for (const proxy of CORS_PROXIES) {
     try {
       const ctrl = new AbortController();
@@ -86,6 +100,7 @@ async function proxyFetch(url: string, timeoutMs = 15000): Promise<Response> {
       if (res.ok) return res;
     } catch { continue; }
   }
+
   throw new Error('All fetch methods failed');
 }
 
