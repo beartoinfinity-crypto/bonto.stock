@@ -26,6 +26,7 @@ export const SUPABASE_CONFIG_KEY = 'stockpulse_supabase_config';
 export const TABLE = 'stockpulse_kv';
 export const QUOTES_TABLE = 'stock_quotes';
 export const HISTORICAL_TABLE = 'stock_historical';
+export const FEATURED_TRADES_TABLE = 'politician_featured_trades';
 
 export interface SupabaseConfig {
   url: string;
@@ -225,15 +226,36 @@ create table if not exists ${HISTORICAL_TABLE} (
   primary key (symbol, date)
 );
 
+-- 4) Featured politician trades (Trump, Pelosi, etc.)
+create table if not exists ${FEATURED_TRADES_TABLE} (
+  id text primary key,
+  politician text not null,
+  symbol text not null,
+  transaction_type text not null,
+  transaction_date text,
+  filing_date text,
+  amount_from double precision,
+  amount_to double precision,
+  asset_name text,
+  source_name text,
+  source_url text,
+  metadata jsonb,
+  updated_at timestamptz not null default now()
+);
+create index if not exists idx_featured_trades_politician on ${FEATURED_TRADES_TABLE}(politician);
+
 alter table ${TABLE} enable row level security;
 alter table ${QUOTES_TABLE} enable row level security;
 alter table ${HISTORICAL_TABLE} enable row level security;
+alter table ${FEATURED_TRADES_TABLE} enable row level security;
 
 create policy "Allow all for anon" on ${TABLE}
   for all using (true) with check (true);
 create policy "Allow all for anon" on ${QUOTES_TABLE}
   for all using (true) with check (true);
 create policy "Allow all for anon" on ${HISTORICAL_TABLE}
+  for all using (true) with check (true);
+create policy "Allow all for anon" on ${FEATURED_TRADES_TABLE}
   for all using (true) with check (true);`;
 
 // ─── Stock data sync (quotes + historical bars) ────────────────────
@@ -337,4 +359,72 @@ export async function pullStockData(): Promise<{ quotes: number; bars: number }>
   }
 
   return { quotes: quoteCount, bars: barCount };
+}
+
+// ─── Featured politician trades sync ─────────────────────────────
+
+export interface FeaturedTradeRow {
+  id: string;
+  politician: string;
+  symbol: string;
+  transaction_type: string;
+  transaction_date: string | null;
+  filing_date: string | null;
+  amount_from: number | null;
+  amount_to: number | null;
+  asset_name: string | null;
+  source_name: string;
+  source_url: string | null;
+  metadata: Record<string, unknown> | null;
+}
+
+/** Push featured politician trades to Supabase. Upserts by id. */
+export async function pushFeaturedTrades(trades: FeaturedTradeRow[]): Promise<number> {
+  const c = getClient();
+  if (!c) throw new Error('Supabase not configured or disabled');
+  if (!trades.length) return 0;
+
+  const CHUNK = 100;
+  for (let i = 0; i < trades.length; i += CHUNK) {
+    const chunk = trades.slice(i, i + CHUNK).map(t => ({
+      ...t,
+      metadata: t.metadata ? JSON.stringify(t.metadata) : null,
+      updated_at: new Date().toISOString(),
+    }));
+    const { error } = await c.from(FEATURED_TRADES_TABLE).upsert(chunk, { onConflict: 'id' });
+    if (error) throw new Error(`Featured trades push failed: ${error.message}`);
+  }
+  return trades.length;
+}
+
+/** Pull all featured politician trades from Supabase. Returns array. */
+export async function pullFeaturedTrades(): Promise<FeaturedTradeRow[]> {
+  const c = getClient();
+  if (!c) throw new Error('Supabase not configured or disabled');
+
+  const all: FeaturedTradeRow[] = [];
+  let from = 0;
+  const PAGE = 500;
+  for (;;) {
+    const { data, error } = await c.from(FEATURED_TRADES_TABLE).select('*').range(from, from + PAGE - 1);
+    if (error) throw new Error(`Featured trades pull failed: ${error.message}`);
+    if (!data || data.length === 0) break;
+    all.push(...(data as FeaturedTradeRow[]));
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
+  return all;
+}
+
+/** Pull featured trades for a specific politician from Supabase. */
+export async function pullFeaturedTradesFor(politician: string): Promise<FeaturedTradeRow[]> {
+  const c = getClient();
+  if (!c) throw new Error('Supabase not configured or disabled');
+
+  const { data, error } = await c.from(FEATURED_TRADES_TABLE)
+    .select('*')
+    .eq('politician', politician)
+    .order('transaction_date', { ascending: false });
+  if (error) throw new Error(`Featured trades pull failed: ${error.message}`);
+  return (data as FeaturedTradeRow[]) ?? [];
 }

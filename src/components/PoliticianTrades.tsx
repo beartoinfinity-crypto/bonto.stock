@@ -266,14 +266,57 @@ export const PoliticianTrades = () => {
   const [featuredActive, setFeaturedActive] = useState<string | null>(null);
   const [featuredLoading, setFeaturedLoading] = useState(false);
 
+  // ── Load featured trades from Supabase (fast) ──────────────────
+  const loadFeaturedFromCloud = async (politician: typeof FEATURED_POLITICIANS[0]): Promise<TradeRow[]> => {
+    try {
+      const { getClient, pullFeaturedTradesFor } = await import('@/lib/supabaseDb');
+      if (!getClient()) return [];
+      const rows = await pullFeaturedTradesFor(politician.name);
+      return rows.map(r => ({
+        id: r.id,
+        symbol: r.symbol,
+        politician: r.politician,
+        transaction_date: r.transaction_date ?? '',
+        filing_date: r.filing_date,
+        transaction_type: (['BUY', 'SELL', 'EXCHANGE'].includes(r.transaction_type) ? r.transaction_type : 'OTHER') as Side,
+        amount_from: r.amount_from,
+        amount_to: r.amount_to,
+        asset_name: r.asset_name,
+        position_held: null,
+        sources: new Set([r.source_name as SourceId]),
+        source_url: r.source_url ?? undefined,
+        source_name: r.source_name as SourceId,
+      }));
+    } catch { return []; }
+  };
+
   // ── Fetch featured politician trades ────────────────────────────
   const fetchFeatured = async (politician: typeof FEATURED_POLITICIANS[0]) => {
     setFeaturedLoading(true);
     setFeaturedActive(politician.slug);
-    setTrades([]);
     setLoading(true);
     setError(false);
 
+    // 1. Try Supabase first (instant display)
+    const cloudTrades = await loadFeaturedFromCloud(politician);
+    if (cloudTrades.length > 0) {
+      setTrades(cloudTrades);
+      setFetchedAt(Date.now());
+      setHasMore(false);
+      setLoading(false);
+      setFeaturedLoading(false);
+      // Background refresh: fetch live and save to Supabase
+      refreshFeaturedInBackground(politician);
+      return;
+    }
+
+    // 2. No cached data — fetch live
+    await fetchFeaturedLive(politician);
+  };
+
+  // ── Live fetch from external sources ────────────────────────────
+  const fetchFeaturedLive = async (politician: typeof FEATURED_POLITICIANS[0]) => {
+    setTrades([]);
     const allTrades: TradeRow[] = [];
 
     for (const src of politician.sources) {
@@ -294,32 +337,81 @@ export const PoliticianTrades = () => {
       } catch { /* skip failed source */ }
     }
 
-    // Also try CapitolExposed and CongressInvests for cross-check
-    try {
-      const res = await proxyFetch(`https://www.capitolexposed.com/api/v1/trades?page=1&per_page=100`);
-      const json = await res.json();
-      const capitolRows = mapCapitolRows(json);
-      const matching = capitolRows.filter(r =>
-        r.politician.toLowerCase().includes(politician.name.toLowerCase().split(' ').pop() ?? '')
-      );
-      allTrades.push(...matching);
-    } catch { /* skip */ }
-
-    try {
-      const res = await proxyFetch(`https://congressinvests.com/trades?limit=100&offset=0`);
-      const json = await res.json();
-      const congressRows = mapCongressRows(json);
-      const matching = congressRows.filter(r =>
-        r.politician.toLowerCase().includes(politician.name.toLowerCase().split(' ').pop() ?? '')
-      );
-      allTrades.push(...matching);
-    } catch { /* skip */ }
-
     setTrades(mergeInto([], allTrades));
     setFetchedAt(Date.now());
     setHasMore(false);
     setLoading(false);
     setFeaturedLoading(false);
+
+    // Cross-check: fetch CapitolExposed + CongressInvests in background
+    const last = politician.name.toLowerCase().split(' ').pop() ?? '';
+    Promise.allSettled([
+      proxyFetch('https://www.capitolexposed.com/api/v1/trades?page=1&per_page=100').then(r => r.json()).then(json => {
+        const rows = mapCapitolRows(json).filter(r => r.politician.toLowerCase().includes(last));
+        if (rows.length > 0) setTrades(prev => mergeInto(prev, rows));
+      }),
+      proxyFetch('https://congressinvests.com/trades?limit=100&offset=0').then(r => r.json()).then(json => {
+        const rows = mapCongressRows(json).filter(r => r.politician.toLowerCase().includes(last));
+        if (rows.length > 0) setTrades(prev => mergeInto(prev, rows));
+      }),
+    ]).catch(() => {});
+
+    // Save to Supabase
+    saveFeaturedToCloud(politician, allTrades);
+  };
+
+  // ── Background refresh (after cloud load) ───────────────────────
+  const refreshFeaturedInBackground = (politician: typeof FEATURED_POLITICIANS[0]) => {
+    (async () => {
+      const allTrades: TradeRow[] = [];
+      for (const src of politician.sources) {
+        try {
+          if (src === 'unusualwhales') {
+            const res = await fetch(`/api/politician-trades/unusualwhales?politician=${encodeURIComponent(politician.uwSlug)}`);
+            if (res.ok) {
+              const json = await res.json();
+              allTrades.push(...mapUnusualWhalesRows(json));
+            }
+          } else if (src === 'stockspill') {
+            const res = await fetch(`/api/politician-trades/stockspill?member_name=${encodeURIComponent(politician.name)}`);
+            if (res.ok) {
+              const json = await res.json();
+              allTrades.push(...mapStockSpillRows(json));
+            }
+          }
+        } catch { /* skip */ }
+      }
+      if (allTrades.length > 0) {
+        setTrades(mergeInto([], allTrades));
+        setFetchedAt(Date.now());
+        saveFeaturedToCloud(politician, allTrades);
+      }
+    })();
+  };
+
+  // ── Save featured trades to Supabase ────────────────────────────
+  const saveFeaturedToCloud = async (politician: typeof FEATURED_POLITICIANS[0], trades: TradeRow[]) => {
+    try {
+      const { getClient, pushFeaturedTrades } = await import('@/lib/supabaseDb');
+      if (!getClient()) return;
+      const rows = trades.map(t => ({
+        id: t.id,
+        politician: t.politician,
+        symbol: t.symbol,
+        transaction_type: t.transaction_type,
+        transaction_date: t.transaction_date,
+        filing_date: t.filing_date,
+        amount_from: t.amount_from,
+        amount_to: t.amount_to,
+        asset_name: t.asset_name,
+        source_name: t.source_name ?? 'unknown',
+        source_url: t.source_url ?? null,
+        metadata: null,
+      }));
+      await pushFeaturedTrades(rows);
+    } catch (e) {
+      console.warn('[PoliticianTrades] Failed to save to Supabase:', e);
+    }
   };
 
   // ── Initial fetch: 20 records only ─────────────────────────────

@@ -23,6 +23,7 @@ export const DOCUMENT_KEYS = [
   'stockpulse_avs_results',
   'stockpulse_politician_trades',
   'stockpulse_trump_trades',
+  'stockpulse_featured_trades',
   'stockpulse_cron_history',
   'stockpulse_alerts',
   'stockpulse_alert_config',
