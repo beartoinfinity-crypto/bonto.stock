@@ -43,9 +43,8 @@ beforeEach(() => {
 /**
  * Build mock responses in the order fetch() will be called:
  * 1. proxyFetch → fetch(chartUrl)           — chart data
- * 2. getYahooCrumb → fetch(yahoo.com)       — cookie step (no-cors)
- * 3. getYahooCrumb → fetch(getcrumb)        — returns crumb text
- * 4. proxyFetch → fetch(v10Url)             — quoteSummary data
+ * 2. getYahooCrumb → fetch(/api/yahoo/crumb) — server-side crumb
+ * 3. proxyFetch → fetch(v10Url)             — quoteSummary data
  *
  * If the crumb step or v10 step fail, proxyFetch also tries 2 CORS proxies
  * per URL (each is another fetch call), so we may need extra mocks.
@@ -63,8 +62,7 @@ describe('fetchStockQuote — quoteSummary integration', () => {
   it('populates pe, marketCap and sector from v10 with crumb', async () => {
     setupMocks(
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 195.89, fiftyTwoWeekHigh: 199.62, fiftyTwoWeekLow: 164.08, longName: 'Apple Inc.' }, indicators: { quote: [{ close: [190, 192, 195.89], volume: [50e6, 55e6, 60e6] }] } }] } }),
-      'ok',               // crumb step 1
-      'abc123crumb',       // crumb step 2
+      jsonResponse({ crumb: 'abc123crumb' }),  // server-side crumb
       jsonResponse({ quoteSummary: { result: [{ summaryDetail: { trailingPE: { raw: 32.1 }, marketCap: { raw: 3_000_000_000_000 } }, assetProfile: { sector: 'Technology' } }] } }),
     );
 
@@ -79,8 +77,7 @@ describe('fetchStockQuote — quoteSummary integration', () => {
   it('formats marketCap as billions', async () => {
     setupMocks(
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 45.20 }, indicators: { quote: [{ close: [44, 45], volume: [10e6, 12e6] }] } }] } }),
-      'ok',
-      'crumbXYZ',
+      jsonResponse({ crumb: 'crumbXYZ' }),
       jsonResponse({ quoteSummary: { result: [{ summaryDetail: { trailingPE: { raw: 12.5 }, marketCap: { raw: 180_000_000_000 } }, assetProfile: { sector: 'Technology' } }] } }),
     );
 
@@ -91,10 +88,12 @@ describe('fetchStockQuote — quoteSummary integration', () => {
   });
 
   it('falls back to defaults when crumb and summary both fail', async () => {
-    // chart succeeds, then everything else fails (crumb + v10 for both hosts + proxies)
+    // chart succeeds, crumb fails, then v10 fails for both hosts (4 proxy attempts each = 8 errors)
     setupMocks(
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 100.0 }, indicators: { quote: [{ close: [99, 100], volume: [1e6, 2e6] }] } }] } }),
-      'error', 'error', 'error', 'error', 'error', 'error', 'error', 'error', 'error', 'error', 'error', 'error', 'error', 'error',
+      'error', // crumb fails
+      'error', 'error', 'error', 'error', // host 1: server + direct + 2 CORS proxies
+      'error', 'error', 'error', 'error', // host 2: server + direct + 2 CORS proxies
     );
 
     const result = await fetchStockQuote('TEST');
@@ -106,9 +105,9 @@ describe('fetchStockQuote — quoteSummary integration', () => {
   it('falls back when quoteSummary returns empty result', async () => {
     setupMocks(
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 100.0 }, indicators: { quote: [{ close: [99, 100], volume: [1e6, 2e6] }] } }] } }),
-      'ok', 'crumbOK',
+      jsonResponse({ crumb: 'crumbOK' }),
       jsonResponse({ quoteSummary: { result: [{}] } }),
-      'ok', 'crumbOK',
+      jsonResponse({ crumb: 'crumbOK' }),
       jsonResponse({ quoteSummary: { result: [{}] } }),
     );
 
@@ -121,7 +120,7 @@ describe('fetchStockQuote — quoteSummary integration', () => {
   it('returns N/A marketCap when marketCap is missing', async () => {
     setupMocks(
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 10.0 }, indicators: { quote: [{ close: [9, 10], volume: [1e6, 2e6] }] } }] } }),
-      'ok', 'crumbOK',
+      jsonResponse({ crumb: 'crumbOK' }),
       jsonResponse({ quoteSummary: { result: [{ summaryDetail: { trailingPE: { raw: 15.0 } }, assetProfile: { sector: 'Healthcare' } }] } }),
     );
 
@@ -134,7 +133,7 @@ describe('fetchStockQuote — quoteSummary integration', () => {
   it('returns 0 pe when trailingPE is missing', async () => {
     setupMocks(
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 50.0 }, indicators: { quote: [{ close: [49, 50], volume: [3e6, 4e6] }] } }] } }),
-      'ok', 'crumbOK',
+      jsonResponse({ crumb: 'crumbOK' }),
       jsonResponse({ quoteSummary: { result: [{ summaryDetail: { marketCap: { raw: 5_000_000_000 } }, assetProfile: { sector: 'Financial' } }] } }),
     );
 

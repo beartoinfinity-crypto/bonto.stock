@@ -69,27 +69,21 @@ export function resetYahooCrumb() {
 async function getYahooCrumb(): Promise<string | null> {
   if (yahooCrumb && Date.now() < yahooCrumbExpiry) return yahooCrumb;
   try {
-    // Step 1: hit finance.yahoo.com to set session cookies
-    await fetch('https://finance.yahoo.com/', {
-      mode: 'no-cors',
-      credentials: 'include',
-    });
-    // Step 2: get the crumb token — it uses the cookies set above
-    const res = await fetch('https://query2.finance.yahoo.com/v1/test/getcrumb', {
-      credentials: 'include',
-    });
+    // Use server-side crumb endpoint (cookies work from server, not browser)
+    const res = await fetch('/api/yahoo/crumb');
     if (res.ok) {
-      const crumb = (await res.text()).trim();
-      if (crumb && crumb.length > 2 && !crumb.includes('error')) {
+      const data = await res.json();
+      const crumb = data?.crumb;
+      if (crumb && crumb.length > 2) {
         yahooCrumb = crumb;
-        yahooCrumbExpiry = Date.now() + 30 * 60 * 1000; // cache 30 min
-        console.log('[YahooCrumb] Got crumb:', crumb.substring(0, 6) + '...');
+        yahooCrumbExpiry = Date.now() + 30 * 60 * 1000;
+        console.log('[YahooCrumb] Got crumb via server:', crumb.substring(0, 6) + '...');
         return yahooCrumb;
       }
     }
-    console.warn('[YahooCrumb] Failed to get crumb, status:', res.status);
+    console.warn('[YahooCrumb] Server crumb endpoint failed, status:', res.status);
   } catch (e) {
-    console.warn('[YahooCrumb] Error getting crumb:', e);
+    console.warn('[YahooCrumb] Error fetching crumb from server:', e);
   }
   return null;
 }
@@ -104,8 +98,10 @@ function formatMarketCap(raw: number | undefined): string {
   return raw.toLocaleString();
 }
 
-async function fetchQuoteSummary(symbol: string): Promise<{ pe: number; marketCap: string; sector: string } | null> {
-  const hosts = ['https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com'];
+async function fetchQuoteSummary(symbol: string, preferredHost?: string): Promise<{ pe: number; marketCap: string; sector: string } | null> {
+  const hosts = preferredHost
+    ? [preferredHost, ...['https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com'].filter(h => h !== preferredHost)]
+    : ['https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com'];
   const crumb = await getYahooCrumb();
 
   // Try v10/quoteSummary with crumb
@@ -173,8 +169,11 @@ async function quoteFromYahoo(symbol: string): Promise<Stock | null> {
       const avgVol = volumes.length
         ? volumes.slice(-10).reduce((a, b) => a + b, 0) / Math.min(10, volumes.length)
         : meta?.regularMarketVolume || 0;
-      // Fetch P/E and market cap from quoteSummary (non-blocking — fall back to defaults)
-      const summary = await fetchQuoteSummary(symbol, host).catch(() => null);
+      // Fetch P/E and market cap from quoteSummary — pass same host to avoid extra failures
+      const summary = await fetchQuoteSummary(symbol, host).catch((e) => {
+        console.warn(`[quoteSummary] ${symbol} failed on ${host}:`, e);
+        return null;
+      });
       return {
         symbol,
         name: meta?.longName || meta?.shortName || symbol,

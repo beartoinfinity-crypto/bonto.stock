@@ -56,6 +56,58 @@ app.get('/api/proxy', async (req, res) => {
   }
 });
 
+// --- Yahoo Finance crumb proxy --------------------------------------
+// GET /api/yahoo/crumb
+// Fetches Yahoo crumb server-side (cookies work from server, not browser).
+
+let yahooCrumbCache = { crumb: null, expiry: 0 };
+
+app.get('/api/yahoo/crumb', async (req, res) => {
+  if (yahooCrumbCache.crumb && Date.now() < yahooCrumbCache.expiry) {
+    res.set('Access-Control-Allow-Origin', '*');
+    return res.json({ crumb: yahooCrumbCache.crumb });
+  }
+
+  try {
+    // Step 1: hit finance.yahoo.com to set session cookies
+    const ctrl1 = new AbortController();
+    const timer1 = setTimeout(() => ctrl1.abort(), 10000);
+    const cookieRes = await fetch('https://finance.yahoo.com/', {
+      signal: ctrl1.signal,
+      redirect: 'follow',
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+    });
+    clearTimeout(timer1);
+
+    // Step 2: get crumb using cookies from step 1
+    const cookieHeader = cookieRes.headers.get('set-cookie') || '';
+    const ctrl2 = new AbortController();
+    const timer2 = setTimeout(() => ctrl2.abort(), 10000);
+    const crumbRes = await fetch('https://query2.finance.yahoo.com/v1/test/getcrumb', {
+      signal: ctrl2.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Cookie': cookieHeader.split(';')[0],
+      },
+    });
+    clearTimeout(timer2);
+
+    if (crumbRes.ok) {
+      const crumb = (await crumbRes.text()).trim();
+      if (crumb && crumb.length > 2 && !crumb.includes('error')) {
+        yahooCrumbCache = { crumb, expiry: Date.now() + 30 * 60 * 1000 };
+        console.log('[YahooCrumb] Server got crumb:', crumb.substring(0, 6) + '...');
+        res.set('Access-Control-Allow-Origin', '*');
+        return res.json({ crumb });
+      }
+    }
+    res.status(502).json({ error: 'Failed to get Yahoo crumb', status: crumbRes.status });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(502).json({ error: 'Yahoo crumb fetch failed', detail: msg });
+  }
+});
+
 // --- Finnhub social sentiment proxy ---------------------------------
 // GET /api/finnhub/sentiment?symbol=AAPL
 // Requires FINNHUB_API_KEY env var. Free tier: 60 calls/min.
