@@ -1,6 +1,7 @@
 ﻿import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import Papa from 'papaparse';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -326,15 +327,24 @@ app.get('/api/politician-trades/opencabinet', async (req, res) => {
     if (!csvRes.ok) return res.status(csvRes.status).json({ error: `OpenCabinet returned ${csvRes.status}` });
 
     const csv = await csvRes.text();
-    const lines = csv.split('\n').filter(l => l.trim());
-    if (lines.length < 2) return res.json({ trades: [], count: 0 });
+    const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true });
+    if (!parsed.data || parsed.data.length === 0) return res.json({ trades: [], count: 0 });
 
-    const header = lines[0];
     const trades = [];
-    for (let i = 1; i < lines.length; i++) {
-      const row = parseCSVLine(lines[i]);
-      if (!row || row.length < 8) continue;
-      const [name, title, agency, , description, ticker, type, date, amountRange] = row;
+    for (let i = 0; i < parsed.data.length; i++) {
+      const row = parsed.data[i];
+      const name = row.official_name || '';
+      const title = row.official_title || '';
+      const agency = row.agency || '';
+      const description = row.description || '';
+      const ticker = row.ticker || '';
+      const type = row.type || '';
+      const date = row.date || '';
+      const amountRange = row.amount_range || '';
+      const amountMidpoint = row.amount_midpoint || '';
+      const lateFiling = row.late_filing || '';
+      const sourceUrl = row.source_filing_url || '';
+
       if (!name) continue;
       const csvNameLower = name.toLowerCase();
       const polLower = politician.toLowerCase();
@@ -346,58 +356,38 @@ app.get('/api/politician-trades/opencabinet', async (req, res) => {
         || polLower.includes(firstName);
       if (!matches) continue;
       if (!ticker || ticker === '' || ticker === 'N/A') continue;
-      const desc = (description || '').toLowerCase();
+      const desc = description.toLowerCase();
       if (desc.includes('bond') || desc.includes('muni') || desc.includes('note ') || desc.includes('b/e ')) continue;
-      const tt = (type || '').toLowerCase();
+      const tt = type.toLowerCase();
       let side = 'OTHER';
       if (tt === 'purchase') side = 'BUY';
       else if (tt === 'sale') side = 'SELL';
       else if (tt === 'exchange') side = 'EXCHANGE';
-      const { from, to } = parseAmountRangeOC(amountRange || '');
+      const { from, to } = parseAmountRangeOC(amountRange);
       const normalizedPol = name.replace(/[".]/g, '').split(',').map(s => s.trim()).reverse().join(' ').trim();
       trades.push({
         id: `oc-${i}`,
         politician: normalizedPol,
         symbol: ticker,
         transaction_type: side,
-        transaction_date: date || '',
+        transaction_date: date.slice(0, 10),
         filing_date: null,
-        amount_from: from,
+        amount_from: from || (amountMidpoint ? Number(String(amountMidpoint).replace(/[^0-9.]/g, '')) || null : null),
         amount_to: to,
         asset_name: description || null,
         source_name: 'opencabinet',
-        source_url: row[11] || null,
-        metadata: { title, agency, late_filing: row[10] === 'yes' },
+        source_url: sourceUrl || null,
+        metadata: { title, agency, late_filing: lateFiling === 'yes' },
       });
     }
     trades.sort((a, b) => (b.transaction_date || '').localeCompare(a.transaction_date || ''));
     res.set('Access-Control-Allow-Origin', '*');
-    res.json({ trades, count: trades.length, total_in_csv: lines.length - 1 });
+    res.json({ trades, count: trades.length, total_in_csv: parsed.data.length });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(502).json({ error: 'Failed to fetch from OpenCabinet', detail: msg });
   }
 });
-
-function parseCSVLine(line) {
-  const result = [];
-  let current = '';
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (inQuotes) {
-      if (c === '"' && line[i + 1] === '"') { current += '"'; i++; }
-      else if (c === '"') inQuotes = false;
-      else current += c;
-    } else {
-      if (c === '"') inQuotes = true;
-      else if (c === ',') { result.push(current); current = ''; }
-      else current += c;
-    }
-  }
-  result.push(current);
-  return result;
-}
 
 app.use(express.static(path.join(__dirname, 'dist')));
 
