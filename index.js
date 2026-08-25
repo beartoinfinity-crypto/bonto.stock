@@ -356,6 +356,8 @@ app.get('/api/politician-trades/opencabinet', async (req, res) => {
         || polLower.includes(firstName);
       if (!matches) continue;
       if (!ticker || ticker === '' || ticker === 'N/A') continue;
+      const tickerUpper = ticker.toUpperCase();
+      if (tickerUpper === 'THE' || tickerUpper.length <= 1) continue;
       const desc = description.toLowerCase();
       if (desc.includes('bond') || desc.includes('muni') || desc.includes('note ') || desc.includes('b/e ')) continue;
       const tt = type.toLowerCase();
