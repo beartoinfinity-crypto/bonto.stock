@@ -389,6 +389,41 @@ app.get('/api/politician-trades/opencabinet', async (req, res) => {
   }
 });
 
+// --- Diagnostic: check Open Cabinet Trump trade count ----------
+app.get('/api/diag/opencabinet', async (req, res) => {
+  try {
+    const csvRes = await fetch('https://open-cabinet.org/data/all-transactions.csv', {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
+    const csv = await csvRes.text();
+    const parsed = Papa.parse(csv, { header: true, skipEmptyLines: true });
+    const allTrump = parsed.data.filter(r => {
+      const name = (r.official_name || '').toLowerCase();
+      return name.includes('trump') && !name.includes('melania') && !name.includes('ivanka');
+    });
+    const withTicker = allTrump.filter(r => r.ticker && r.ticker !== '' && r.ticker !== 'N/A');
+    const withoutTicker = allTrump.filter(r => !r.ticker || r.ticker === '' || r.ticker === 'N/A');
+    const tickers = [...new Set(withTicker.map(r => r.ticker))];
+    res.json({
+      total_csv_rows: parsed.data.length,
+      trump_total: allTrump.length,
+      trump_with_ticker: withTicker.length,
+      trump_without_ticker: withoutTicker.length,
+      unique_tickers: tickers.sort(),
+      sample_trades: withTicker.slice(0, 5).map(r => ({
+        name: r.official_name,
+        ticker: r.ticker,
+        desc: r.description,
+        type: r.type,
+        date: r.date,
+        amount: r.amount_range,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.use(express.static(path.join(__dirname, 'dist')));
 
 app.get('*', (req, res) => {
