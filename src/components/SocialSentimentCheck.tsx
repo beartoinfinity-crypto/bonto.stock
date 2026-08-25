@@ -179,17 +179,15 @@ export function SocialSentimentCheck({ symbol, action }: SocialSentimentCheckPro
 }
 
 function SourceCard({ source }: { source: SourceResult }) {
-  const icon = source.name === 'Reddit (WSB)'
+  const icon = source.name.includes('Reddit') || source.name.includes('ApeWisdom')
     ? <MessageCircle className="h-3 w-3" />
-    : source.name === 'Google News'
+    : source.name === 'Google News' || source.name === 'MarketWatch' || source.name === 'CNBC'
       ? <Newspaper className="h-3 w-3" />
-      : source.name === 'StockTwits'
+      : source.name === 'StockTwits' || source.name === 'SocialTickers'
         ? <TrendingUp className="h-3 w-3" />
-        : source.name === 'Twitter/X'
-          ? <Globe className="h-3 w-3" />
-          : source.name === 'YouTube'
-            ? <Globe className="h-3 w-3" />
-            : <Globe className="h-3 w-3" />;
+        : source.name === 'Finnhub' || source.name === 'Google Trends'
+          ? <TrendingUp className="h-3 w-3" />
+          : <Globe className="h-3 w-3" />;
 
   const scoreColor = source.score > 0.08
     ? 'text-green-400'
