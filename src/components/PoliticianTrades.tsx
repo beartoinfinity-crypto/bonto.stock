@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
 
 type Side = 'BUY' | 'SELL' | 'EXCHANGE' | 'OTHER';
 type SideFilter = 'ALL' | 'BUY' | 'SELL';
-type SourceId = 'capitol' | 'congress' | 'unusualwhales' | 'stockspill';
+type SourceId = 'capitol' | 'congress' | 'unusualwhales' | 'stockspill' | 'opencabinet';
 
 interface TradeRow {
   id: string;
@@ -34,7 +34,7 @@ interface TradeRow {
 const PAGE_SIZE = 20;
 
 const FEATURED_POLITICIANS = [
-  { name: 'Donald J Trump', uwSlug: 'Donald J Trump', slug: 'donald-trump', sources: ['unusualwhales'] as SourceId[], description: 'President — OGE Form 278T filings' },
+  { name: 'Donald J Trump', uwSlug: 'Donald J Trump', slug: 'donald-trump', sources: ['opencabinet', 'unusualwhales'] as SourceId[], description: 'President — OGE Form 278T filings' },
   { name: 'Nancy Pelosi', uwSlug: 'Nancy Pelosi', slug: 'nancy-pelosi', sources: ['stockspill', 'unusualwhales'] as SourceId[], description: 'House (D-CA) — STOCK Act disclosures' },
 ];
 
@@ -209,6 +209,32 @@ function mapStockSpillRows(json: any): TradeRow[] {
   });
 }
 
+function mapOpenCabinetRows(json: any): TradeRow[] {
+  const trades: any[] = json?.trades ?? [];
+  return trades.filter((r: any) => r.symbol).map((r: any) => {
+    let side: Side = 'OTHER';
+    const tt = (r.transaction_type || '').toUpperCase();
+    if (tt === 'BUY' || tt === 'PURCHASE') side = 'BUY';
+    else if (tt === 'SELL' || tt === 'SALE') side = 'SELL';
+    else if (tt === 'EXCHANGE') side = 'EXCHANGE';
+    return {
+      id: r.id || `oc-${Math.random().toString(36).slice(2)}`,
+      symbol: String(r.symbol || ''),
+      politician: String(r.politician || ''),
+      transaction_date: String(r.transaction_date ?? '').slice(0, 10),
+      filing_date: r.filing_date ? String(r.filing_date).slice(0, 10) : null,
+      transaction_type: side,
+      amount_from: r.amount_from ?? null,
+      amount_to: r.amount_to ?? null,
+      asset_name: r.asset_name ? String(r.asset_name) : null,
+      position_held: null,
+      sources: new Set(['opencabinet'] as SourceId[]),
+      source_url: r.source_url ? String(r.source_url) : undefined,
+      source_name: 'opencabinet' as SourceId,
+    };
+  });
+}
+
 // ─── Merge / dedup helper ──────────────────────────────────────────
 
 function mergeTrade(existing: TradeRow, incoming: TradeRow): TradeRow {
@@ -333,6 +359,12 @@ export const PoliticianTrades = () => {
             const json = await res.json();
             allTrades.push(...mapStockSpillRows(json));
           }
+        } else if (src === 'opencabinet') {
+          const res = await fetch(`/api/politician-trades/opencabinet?politician=${encodeURIComponent(politician.name)}`);
+          if (res.ok) {
+            const json = await res.json();
+            allTrades.push(...mapOpenCabinetRows(json));
+          }
         }
       } catch { /* skip failed source */ }
     }
@@ -377,6 +409,12 @@ export const PoliticianTrades = () => {
             if (res.ok) {
               const json = await res.json();
               allTrades.push(...mapStockSpillRows(json));
+            }
+          } else if (src === 'opencabinet') {
+            const res = await fetch(`/api/politician-trades/opencabinet?politician=${encodeURIComponent(politician.name)}`);
+            if (res.ok) {
+              const json = await res.json();
+              allTrades.push(...mapOpenCabinetRows(json));
             }
           }
         } catch { /* skip */ }
@@ -538,6 +576,7 @@ export const PoliticianTrades = () => {
     congress: 'CongressInvests',
     unusualwhales: 'UnusualWhales',
     stockspill: 'StockSpill',
+    opencabinet: 'OpenCabinet',
   };
 
   const SOURCE_COLORS: Record<SourceId, string> = {
@@ -545,6 +584,7 @@ export const PoliticianTrades = () => {
     congress: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
     unusualwhales: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
     stockspill: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    opencabinet: 'bg-green-500/15 text-green-400 border-green-500/30',
   };
 
   return (
