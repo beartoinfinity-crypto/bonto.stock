@@ -1,6 +1,6 @@
 # StockPulse Domain Model
 
-## Language
+## Glossary
 
 **Stock quote**: A snapshot of a stock's price, volume, and fundamentals at a point in time. Stored as JSON in the `stock_quotes` Supabase table keyed by symbol.
 
@@ -20,16 +20,6 @@
 
 **Crumb token**: A Yahoo Finance authentication token fetched once and cached for 30 minutes. Required for the v10 quoteSummary API but not for the v8 chart API.
 
-## Storage Layers
+## Storage & Data Sources
 
-1. **Supabase** (primary): Source of truth. Written first (debounced 3s). Hydrated on boot via `pullAll()`.
-2. **SQLite** (backup): Offline archive. Written second (fire-and-forget). Persisted via File System API or IndexedDB.
-3. **localStorage** (cache): Sync read cache. Instant reads. Always written on every `setItem()`.
-
-## Data Sources
-
-- **Yahoo Finance**: v8 chart (OHLCV), v10 quoteSummary (fundamentals with crumb)
-- **CapitolExposed**: Recent congressional trades (House/Senate, paginated API)
-- **CongressInvests**: Full congressional trade history back to 2015
-- **UnusualWhales**: Trump OGE Form 278T filings (HTML scraping of `__NEXT_DATA__`)
-- **StockSpill**: Congress trades stored in a separate Supabase project (`artscweyrracfffoqvur`)
+See [`docs/CODEBASE.md`](docs/CODEBASE.md) for storage hierarchy (Supabase → SQLite → localStorage), Supabase table schemas, and all external data source details.

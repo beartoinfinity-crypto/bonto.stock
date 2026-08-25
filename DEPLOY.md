@@ -27,16 +27,6 @@ npm run build
 npm start                  # Express on http://localhost:10000
 ```
 
-## Express Server (`index.js`)
-
-The server does three things:
-
-1. **Serves `dist/`** — SPA with catch-all route for client-side routing
-2. **`/api/proxy?url=<encoded>`** — CORS proxy with SSRF protection (blocks localhost, private IPs)
-3. **`/api/politician-trades/*`** — Server-side endpoints for external data sources:
-   - `GET /api/politician-trades/unusualwhales?politician=<name>` — scrapes UnusualWhales profile page
-   - `GET /api/politician-trades/stockspill?member_name=<name>` — queries StockSpill Supabase
-
 ## Environment Variables
 
 | Variable | Default | Description |
@@ -79,3 +69,5 @@ Server-side sync that runs even when no browser is open:
 | Server proxy 502 | Render outbound requests may be blocked |
 | Trump shows no records | Verify the UnusualWhales URL uses `Donald J Trump` (no period) |
 | Render slow to respond | Free tier sleeps after inactivity; first request takes 30-50s |
+
+For Express server architecture and API endpoints, see [`docs/CODEBASE.md`](docs/CODEBASE.md).
