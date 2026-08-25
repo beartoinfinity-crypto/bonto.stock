@@ -555,12 +555,14 @@ export const PoliticianTrades = () => {
   const filtered = useMemo(() => {
     const pq = politicianQ.trim().toLowerCase();
     const sq = symbolQ.trim().toUpperCase();
-    return trades.filter((t) => {
-      if (side !== 'ALL' && t.transaction_type !== side) return false;
-      if (pq && !t.politician.toLowerCase().includes(pq)) return false;
-      if (sq && !t.symbol.toUpperCase().includes(sq)) return false;
-      return true;
-    });
+    return trades
+      .filter((t) => {
+        if (side !== 'ALL' && t.transaction_type !== side) return false;
+        if (pq && !t.politician.toLowerCase().includes(pq)) return false;
+        if (sq && !t.symbol.toUpperCase().includes(sq)) return false;
+        return true;
+      })
+      .sort((a, b) => new Date(b.transaction_date).getTime() - new Date(a.transaction_date).getTime());
   }, [trades, side, politicianQ, symbolQ]);
 
   const hasActiveFilter = politicianQ.trim() !== '' || symbolQ.trim() !== '' || side !== 'ALL';
