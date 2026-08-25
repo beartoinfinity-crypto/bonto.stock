@@ -335,7 +335,16 @@ app.get('/api/politician-trades/opencabinet', async (req, res) => {
       const row = parseCSVLine(lines[i]);
       if (!row || row.length < 8) continue;
       const [name, title, agency, , description, ticker, type, date, amountRange] = row;
-      if (!name || !name.toLowerCase().includes(politician)) continue;
+      if (!name) continue;
+      const csvNameLower = name.toLowerCase();
+      const polLower = politician.toLowerCase();
+      const nameParts = csvNameLower.replace(/"/g, '').split(',').map(s => s.trim());
+      const lastName = nameParts[0] || '';
+      const firstName = nameParts[1] || '';
+      const matches = csvNameLower.includes(polLower)
+        || polLower.includes(lastName)
+        || polLower.includes(firstName);
+      if (!matches) continue;
       if (!ticker || ticker === '' || ticker === 'N/A') continue;
       const desc = (description || '').toLowerCase();
       if (desc.includes('bond') || desc.includes('muni') || desc.includes('note ') || desc.includes('b/e ')) continue;
