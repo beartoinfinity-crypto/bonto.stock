@@ -416,6 +416,27 @@ export async function pullFeaturedTrades(): Promise<FeaturedTradeRow[]> {
   return all;
 }
 
+/** One-time cleanup: rename old "Last, First" politician names to "First Last" format. */
+export async function normalizeFeaturedTradeNames(): Promise<number> {
+  const c = getClient();
+  if (!c) return 0;
+  const renames: Array<{ from: string; to: string }> = [
+    { from: 'Trump, Donald J', to: 'Donald J Trump' },
+    { from: 'Pelosi, Nancy', to: 'Nancy Pelosi' },
+  ];
+  let total = 0;
+  for (const { from, to } of renames) {
+    const { data } = await c.from(FEATURED_TRADES_TABLE)
+      .select('id').eq('politician', from);
+    if (!data?.length) continue;
+    const ids = data.map(r => r.id);
+    const { error } = await c.from(FEATURED_TRADES_TABLE)
+      .update({ politician: to }).in('id', ids);
+    if (!error) total += ids.length;
+  }
+  return total;
+}
+
 /** Pull featured trades for a specific politician from Supabase. */
 export async function pullFeaturedTradesFor(politician: string): Promise<FeaturedTradeRow[]> {
   const c = getClient();
