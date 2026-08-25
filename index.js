@@ -305,6 +305,14 @@ app.get('/api/politician-trades/stockspill', async (req, res) => {
 // Fetches the full CSV from open-cabinet.org/data/all-transactions.csv
 // and filters by official_name. Returns stock trades only (excludes bonds/muni).
 
+function parseAmountRangeOC(s) {
+  const clean = (v) => Number(v.replace(/[^0-9.]/g, '')) || null;
+  if (!s) return { from: null, to: null };
+  const parts = s.split(/\s*[-–]\s*/);
+  if (parts.length === 2) return { from: clean(parts[0]), to: clean(parts[1]) };
+  return { from: clean(s), to: null };
+}
+
 app.get('/api/politician-trades/opencabinet', async (req, res) => {
   const politician = (req.query.politician || 'Trump').toLowerCase();
   try {
@@ -336,7 +344,7 @@ app.get('/api/politician-trades/opencabinet', async (req, res) => {
       if (tt === 'purchase') side = 'BUY';
       else if (tt === 'sale') side = 'SELL';
       else if (tt === 'exchange') side = 'EXCHANGE';
-      const { from, to } = parseAmountRange(amountRange || '');
+      const { from, to } = parseAmountRangeOC(amountRange || '');
       trades.push({
         id: `oc-${i}`,
         politician: name,
