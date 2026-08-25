@@ -403,8 +403,29 @@ async function fetchStockSpillTrades(memberName: string): Promise<FeaturedTradeI
   }
 }
 
+async function fetchOpenCabinetTrades(politician: string): Promise<FeaturedTradeInput[]> {
+  const res = await fetch(`/api/politician-trades/opencabinet?politician=${encodeURIComponent(politician)}`);
+  if (!res.ok) return [];
+  const json = await res.json();
+  const trades: any[] = json?.trades ?? [];
+  return trades.map((r: any) => ({
+    id: r.id || `oc-${Math.random().toString(36).slice(2)}`,
+    politician: r.politician || politician,
+    symbol: r.symbol || '',
+    transaction_type: r.transaction_type || 'OTHER',
+    transaction_date: r.transaction_date || '',
+    filing_date: r.filing_date || null,
+    amount_from: r.amount_from ?? 0,
+    amount_to: r.amount_to ?? 0,
+    asset_name: r.asset_name || null,
+    source_name: 'opencabinet',
+    source_url: r.source_url || null,
+    metadata: r.metadata || {},
+  }));
+}
+
 const FEATURED_POLITICIANS_CRON = [
-  { name: 'Donald J Trump', uwSlug: 'Donald J Trump', sources: ['unusualwhales' as const] },
+  { name: 'Donald J Trump', uwSlug: 'Donald J Trump', sources: ['opencabinet' as const, 'unusualwhales' as const] },
   { name: 'Nancy Pelosi', uwSlug: 'Nancy Pelosi', sources: ['stockspill' as const, 'unusualwhales' as const] },
 ];
 
@@ -420,6 +441,9 @@ async function runSyncFeaturedTrades(): Promise<{ ok: boolean; message: string }
           allTrades.push(...trades);
         } else if (src === 'stockspill') {
           const trades = await fetchStockSpillTrades(pol.name);
+          allTrades.push(...trades);
+        } else if (src === 'opencabinet') {
+          const trades = await fetchOpenCabinetTrades(pol.name);
           allTrades.push(...trades);
         }
       } catch { /* skip failed source */ }
@@ -506,7 +530,7 @@ export const CRON_JOBS: CronJob[] = [
     id: 'sync-featured-trades',
     label: 'Featured trades → Supabase',
     schedule: '0 8 * * *',
-    description: 'Fetch Trump (UnusualWhales) + Pelosi (StockSpill + UnusualWhales) politician trades, store to Supabase (primary).',
+    description: 'Fetch Trump (Open Cabinet + UnusualWhales) + Pelosi (StockSpill + UnusualWhales) politician trades, store to Supabase (primary).',
     enabled: loadEnabledState()['sync-featured-trades'] ?? false,
     run: runSyncFeaturedTrades,
   },
