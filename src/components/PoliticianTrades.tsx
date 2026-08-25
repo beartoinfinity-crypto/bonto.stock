@@ -34,7 +34,7 @@ interface TradeRow {
 const PAGE_SIZE = 20;
 
 const FEATURED_POLITICIANS = [
-  { name: 'Donald J. Trump', uwSlug: 'Donald J Trump', slug: 'donald-trump', sources: ['unusualwhales'] as SourceId[], description: 'President — OGE Form 278T filings' },
+  { name: 'Donald J Trump', uwSlug: 'Donald J Trump', slug: 'donald-trump', sources: ['unusualwhales'] as SourceId[], description: 'President — OGE Form 278T filings' },
   { name: 'Nancy Pelosi', uwSlug: 'Nancy Pelosi', slug: 'nancy-pelosi', sources: ['stockspill', 'unusualwhales'] as SourceId[], description: 'House (D-CA) — STOCK Act disclosures' },
 ];
 

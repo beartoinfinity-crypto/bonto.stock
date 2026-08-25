@@ -354,9 +354,10 @@ app.get('/api/politician-trades/opencabinet', async (req, res) => {
       else if (tt === 'sale') side = 'SELL';
       else if (tt === 'exchange') side = 'EXCHANGE';
       const { from, to } = parseAmountRangeOC(amountRange || '');
+      const normalizedPol = name.replace(/[".]/g, '').split(',').map(s => s.trim()).reverse().join(' ').trim();
       trades.push({
         id: `oc-${i}`,
-        politician: name,
+        politician: normalizedPol,
         symbol: ticker,
         transaction_type: side,
         transaction_date: date || '',

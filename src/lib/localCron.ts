@@ -408,25 +408,20 @@ async function fetchOpenCabinetTrades(politician: string): Promise<FeaturedTrade
   if (!res.ok) return [];
   const json = await res.json();
   const trades: any[] = json?.trades ?? [];
-  return trades.map((r: any) => {
-    const csvName = r.politician || '';
-    const parts = csvName.replace(/"/g, '').split(',').map((s: string) => s.trim());
-    const normalizedName = parts.length === 2 ? `${parts[1]} ${parts[0]}` : csvName;
-    return {
-      id: r.id || `oc-${Math.random().toString(36).slice(2)}`,
-      politician: normalizedName || politician,
-      symbol: r.symbol || '',
-      transaction_type: r.transaction_type || 'OTHER',
-      transaction_date: r.transaction_date || '',
-      filing_date: r.filing_date || null,
-      amount_from: r.amount_from ?? 0,
-      amount_to: r.amount_to ?? 0,
-      asset_name: r.asset_name || null,
-      source_name: 'opencabinet',
-      source_url: r.source_url || null,
-      metadata: r.metadata || {},
-    };
-  });
+  return trades.map((r: any) => ({
+    id: r.id || `oc-${Math.random().toString(36).slice(2)}`,
+    politician: r.politician || politician,
+    symbol: r.symbol || '',
+    transaction_type: r.transaction_type || 'OTHER',
+    transaction_date: r.transaction_date || '',
+    filing_date: r.filing_date || null,
+    amount_from: r.amount_from ?? 0,
+    amount_to: r.amount_to ?? 0,
+    asset_name: r.asset_name || null,
+    source_name: 'opencabinet',
+    source_url: r.source_url || null,
+    metadata: r.metadata || {},
+  }));
 }
 
 const FEATURED_POLITICIANS_CRON = [

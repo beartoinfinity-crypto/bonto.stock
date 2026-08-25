@@ -422,6 +422,8 @@ export async function normalizeFeaturedTradeNames(): Promise<number> {
   if (!c) return 0;
   const renames: Array<{ from: string; to: string }> = [
     { from: 'Trump, Donald J', to: 'Donald J Trump' },
+    { from: 'Trump, Donald J.', to: 'Donald J Trump' },
+    { from: 'Donald J. Trump', to: 'Donald J Trump' },
     { from: 'Pelosi, Nancy', to: 'Nancy Pelosi' },
   ];
   let total = 0;
