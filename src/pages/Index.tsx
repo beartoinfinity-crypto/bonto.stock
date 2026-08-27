@@ -4,7 +4,7 @@ import { useLanguage } from '@/lib/i18n';
 import { Header } from '@/components/Header';
 import { StockSearch } from '@/components/StockSearch';
 import { StockMetrics } from '@/components/StockMetrics';
-import { PriceChart } from '@/components/PriceChart';
+import { TVChart } from '@/components/TVChart';
 import { ChartAnalyst } from '@/components/ChartAnalyst';
 import { TechnicalIndicators } from '@/components/TechnicalIndicators';
 import { MultiTimeframeRSI } from '@/components/MultiTimeframeRSI';
@@ -178,7 +178,7 @@ const Index = () => {
 
               {/* Price Chart */}
               <div className="animate-fade-in" style={{ animationDelay: '0.1s' }}>
-                <PriceChart data={historicalData} symbol={selectedStock.symbol} lastUpdated={lastUpdated} onRefresh={refetch} />
+                <TVChart data={historicalData} symbol={selectedStock.symbol} lastUpdated={lastUpdated} onRefresh={refetch} />
               </div>
 
               {/* Analyst Commentary */}
