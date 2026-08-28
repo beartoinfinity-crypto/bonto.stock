@@ -394,7 +394,7 @@ export default function MasterMatrix() {
                     return (
                       <TableRow key={r.symbol}>
                         <TableCell className="font-mono font-medium">
-                          <Link to={`/?symbol=${r.symbol}`} className="hover:text-primary">{r.symbol}</Link>
+                          <Link to={`/masters-matrix/${r.symbol}`} className="hover:text-primary">{r.symbol}</Link>
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1.5">
@@ -493,8 +493,8 @@ export default function MasterMatrix() {
                           </div>
                           <div className="flex flex-wrap gap-1.5">
                             {rows.map(([symbol, row]) => (
-                              <Link key={symbol} to={`/?symbol=${symbol}`}>
-                                <Badge variant="outline" className="gap-1.5">
+                              <Link key={symbol} to={`/masters-matrix/${symbol}`}>
+                                <Badge variant="outline" className="gap-1.5 hover:border-primary">
                                   <span className="font-mono">{symbol}</span>
                                   <span className="font-mono font-bold text-success">{row.buyCount}/12</span>
                                 </Badge>

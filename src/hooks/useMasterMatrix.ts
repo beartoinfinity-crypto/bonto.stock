@@ -25,6 +25,8 @@ import { fetchStoredHistory } from '@/lib/supabaseHistory';
 const MATRIX_KEY = 'stockpulse_master_matrix';
 const CUSTOM_KEY = 'stockpulse_master_matrix_custom';
 
+export const MASTER_MATRIX_STORAGE_KEY = MATRIX_KEY;
+
 // ─── Persistent daily-matrix shapes ────────────────────────────────
 
 export interface MatrixStockRow {
@@ -48,7 +50,7 @@ interface MatrixStore {
 
 // ─── Matrix load / save helpers ────────────────────────────────────
 
-function loadMatrix(): DailySnapshot[] {
+export function loadMatrix(): DailySnapshot[] {
   try {
     const raw = storage.getJson<MatrixStore>(MATRIX_KEY);
     if (raw && Array.isArray(raw.snapshots)) return raw.snapshots;
