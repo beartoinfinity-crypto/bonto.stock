@@ -1,6 +1,7 @@
-// useMasterMatrix.ts — fetch + analyze the S&P 500 universe with the 12
-// trading masters, rank into a "top 50", and record/accumulate daily
-// snapshots into a persistent matrix (localStorage + SQLite + Supabase).
+// useMasterMatrix.ts — analyze an index universe (S&P 500 / NASDAQ-100 / all)
+// plus user-added custom stocks with the 12 trading masters, rank into a
+// "top 50", and record/accumulate daily snapshots into a persistent matrix
+// (localStorage + SQLite + Supabase).
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { fetchStockQuote, fetchHistoricalData } from '@/lib/stockApi';
@@ -9,10 +10,12 @@ import * as storage from '@/lib/storage';
 import {
   analyzeStock,
   buildStockInput,
+  filterStocksByUniverse,
   filterToSP500,
   rankByScore,
   StockMasterResult,
   summarizeMasterResult,
+  UniverseId,
   MASTER_MATRIX_SIZE,
   MASTER_ORDER,
   Verdict,
@@ -20,6 +23,7 @@ import {
 import { fetchStoredHistory } from '@/lib/supabaseHistory';
 
 const MATRIX_KEY = 'stockpulse_master_matrix';
+const CUSTOM_KEY = 'stockpulse_master_matrix_custom';
 
 // ─── Persistent daily-matrix shapes ────────────────────────────────
 
@@ -62,8 +66,48 @@ function saveMatrix(snapshots: DailySnapshot[]): void {
   }
 }
 
+function loadCustomSymbols(): string[] {
+  try {
+    const raw = storage.getJson<string[]>(CUSTOM_KEY);
+    if (Array.isArray(raw)) return raw.filter(Boolean).map(s => s.toUpperCase());
+  } catch {
+    /* ignore */
+  }
+  return [];
+}
+
+function saveCustomSymbols(symbols: string[]): void {
+  try {
+    storage.setJson(CUSTOM_KEY, symbols);
+  } catch (e) {
+    console.warn('Failed to save custom symbols:', e);
+  }
+}
+
 function todayStr(d = new Date()): string {
   return d.toISOString().slice(0, 10);
+}
+
+// Build a placeholder Stock entry for a user-added symbol that isn't in the
+// curated popularStocks list. Live quote fetch overwrites the real metadata.
+function makeCustomStock(symbol: string): Stock {
+  return {
+    symbol,
+    name: symbol.toUpperCase(),
+    sector: 'Custom',
+    price: 0,
+    change: 0,
+    changePercent: 0,
+    volume: 0,
+    marketCap: '',
+    pe: 0,
+    week52High: 0,
+    week52Low: 0,
+  };
+}
+
+export function isValidSymbol(symbol: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9.\-]{0,5}$/.test(symbol.trim());
 }
 
 // ─── Hook state/result types ───────────────────────────────────────
@@ -92,6 +136,11 @@ export interface UseMasterMatrixResult {
   setSectorFilter: (s: string) => void;
   verdictFilter: VerdictFilter;
   setVerdictFilter: (v: VerdictFilter) => void;
+  universeId: UniverseId;
+  setUniverseId: (u: UniverseId) => void;
+  customSymbols: string[];
+  addCustomSymbol: (symbol: string) => boolean;
+  removeCustomSymbol: (symbol: string) => void;
   snapshots: DailySnapshot[];
   recordedToday: boolean;
   lastRecordedAt: string | null;
@@ -128,7 +177,18 @@ interface StoredCache {
 }
 
 export function useMasterMatrix(): UseMasterMatrixResult {
-  const universe = useMemoSP500(popularStocks);
+  const [universeId, setUniverseId] = useState<UniverseId>('sp500');
+  const [customSymbols, setCustomSymbols] = useState<string[]>(() => loadCustomSymbols());
+
+  // The working universe = selected index filter + all custom symbols.
+  const universe = useMemo(() => {
+    const base = filterStocksByUniverse(popularStocks, universeId);
+    const known = new Set(base.map(s => s.symbol));
+    const custom = customSymbols
+      .filter(sym => !known.has(sym))
+      .map(makeCustomStock);
+    return [...base, ...custom];
+  }, [universeId, customSymbols]);
 
   const [results, setResults] = useState<StockMasterResult[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -141,6 +201,29 @@ export function useMasterMatrix(): UseMasterMatrixResult {
   const [search, setSearch] = useState('');
   const [sectorFilter, setSectorFilter] = useState('all');
   const [verdictFilter, setVerdictFilter] = useState<VerdictFilter>('all');
+
+  const addCustomSymbol = useCallback((symbol: string): boolean => {
+    const sym = symbol.trim().toUpperCase();
+    if (!isValidSymbol(sym)) return false;
+    let added = false;
+    setCustomSymbols(prev => {
+      const existing = new Set(prev.map(s => s.toUpperCase()));
+      if (existing.has(sym)) return prev;
+      added = true;
+      const next = [...prev, sym];
+      saveCustomSymbols(next);
+      return next;
+    });
+    return added;
+  }, []);
+
+  const removeCustomSymbol = useCallback((symbol: string) => {
+    setCustomSymbols(prev => {
+      const next = prev.filter(s => s.toUpperCase() !== symbol.toUpperCase());
+      saveCustomSymbols(next);
+      return next;
+    });
+  }, []);
 
   const runAnalysis = useCallback(async (force = false) => {
     if (!force) {
@@ -173,12 +256,15 @@ export function useMasterMatrix(): UseMasterMatrixResult {
         ]).then(([quote, hist]) => {
           const price = quote?.data?.price ?? stock.price;
           const changePercent = quote?.data?.changePercent ?? stock.changePercent;
+          const resolved = quote?.data
+            ? { ...stock, ...quote.data }
+            : stock;
           const histData = Array.isArray(hist?.data) && hist.data.length > 0
             ? hist.data
             : generateHistoricalData(price);
-          const input = buildStockInput({ ...stock, price }, histData);
+          const input = buildStockInput({ ...resolved, price }, histData);
           const masters = analyzeStock(stock.symbol, input);
-          return summarizeMasterResult(stock.symbol, stock, price, changePercent, masters, {
+          return summarizeMasterResult(stock.symbol, resolved, price, changePercent, masters, {
             isSimulated: !hist?.isRealData,
           });
         });
@@ -220,13 +306,15 @@ export function useMasterMatrix(): UseMasterMatrixResult {
         return;
       }
 
+      const inUniverse = new Set(universe.map(s => s.symbol.toUpperCase()));
       const analyzed: StockMasterResult[] = [];
-      const symbols = stored.coveredSymbols;
+      const symbols = stored.coveredSymbols.filter(s => inUniverse.has(s.toUpperCase()));
       for (let i = 0; i < symbols.length; i++) {
         const symbol = symbols[i];
         const bars = stored.history.get(symbol);
-        const stock = popularStocks.find(s => s.symbol === symbol);
-        if (!stock || !bars || bars.length === 0) continue;
+        const curated = popularStocks.find(s => s.symbol === symbol);
+        const stock: Stock = curated ?? makeCustomStock(symbol);
+        if (!bars || bars.length === 0) continue;
         const latest = bars[bars.length - 1];
         const prev = bars[bars.length - 2];
         const price = latest.close;
@@ -256,13 +344,13 @@ export function useMasterMatrix(): UseMasterMatrixResult {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [universe]);
 
   useEffect(() => {
+    // Re-run when the universe (index or custom symbols) changes.
     runAnalysis();
-    // once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [universe]);
 
   const recordToday = useCallback(() => {
     setSnapshots(prev => {
@@ -321,6 +409,11 @@ export function useMasterMatrix(): UseMasterMatrixResult {
     setSectorFilter,
     verdictFilter,
     setVerdictFilter,
+    universeId,
+    setUniverseId,
+    customSymbols,
+    addCustomSymbol,
+    removeCustomSymbol,
     snapshots,
     recordedToday,
     lastRecordedAt,
@@ -355,7 +448,7 @@ function saveToCache(entries: StockMasterResult[]): void {
   }
 }
 
-// Small hook to memoize the SP500-filtered universe.
+// Kept for backward-compat with the old memo helper usage.
 function useMemoSP500(stocks: Stock[]): Stock[] {
   return useMemo(() => filterToSP500(stocks), [stocks]);
 }

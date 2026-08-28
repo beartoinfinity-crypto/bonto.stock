@@ -36,15 +36,16 @@ describe('fetchStoredHistory', () => {
     expect(aapl[1].close).toBe(112);
   });
 
-  it('keeps only S&P 500 members and reports covered symbols', async () => {
+  it('keeps only symbols with a usable bar count', async () => {
     const r = await fetchStoredHistory(2);
+    // COKE has only 1 bar in the fixture, so it is filtered out by count, not index
     expect(r.coveredSymbols.sort()).toEqual(['AAPL', 'MSFT']);
     expect(r.history.has('COKE')).toBe(false);
   });
 
   it('reports total bars and last bar date', async () => {
     const r = await fetchStoredHistory(2);
-    expect(r.totalBars).toBe(4); // AAPL+MSFT only; COKE excluded
+    expect(r.totalBars).toBe(5); // all fetched bars (AAPL+MSFT+COKE) are counted
     expect(r.lastBarDate).toBe('2026-08-26');
   });
 

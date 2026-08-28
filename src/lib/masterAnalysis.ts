@@ -597,4 +597,47 @@ export function filterToSP500<T extends { symbol: string }>(stocks: T[]): T[] {
   return stocks.filter(s => SP500_TICKERS.has(s.symbol));
 }
 
+// ─── NASDAQ-100 constituent filter ─────────────────────────────────
+// Curated set of genuine Nasdaq-100 members among the app's curated universe
+// (popularStocks). Excludes S&P-only financials/energy/industrials/REITs and
+// non-index names (TSM, SOFI, SQ, HOOD).
+
+export const NASDAQ100_TICKERS: ReadonlySet<string> = new Set([
+  'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'AMD', 'INTC',
+  'CRM', 'ORCL', 'ADBE', 'AVGO', 'QCOM', 'MU', 'LLY',
+  'PEP', 'SBUX', 'COST', 'TMUS',
+  'COIN', 'MSTR', 'PLTR', 'SNOW', 'NET', 'DDOG', 'CRWD', 'UBER', 'ABNB',
+  'SHOP', 'ARM', 'NFLX', 'AMGN', 'GILD', 'CSCO', 'INTU', 'ADI', 'PANW',
+  'MAR', 'TTD', 'FTNT', 'ASML', 'PDD', 'MELI', 'KDP', 'ODFL', 'CPRT',
+]);
+
+export function filterToNASDAQ100<T extends { symbol: string }>(stocks: T[]): T[] {
+  return stocks.filter(s => NASDAQ100_TICKERS.has(s.symbol));
+}
+
+// ─── Universe selection (used by the Master Matrix page) ───────────
+
+export type UniverseId = 'sp500' | 'nasdaq100' | 'all';
+
+export interface UniverseDef {
+  id: UniverseId;
+  label: string;
+  short: string;
+}
+
+export const UNIVERSES: UniverseDef[] = [
+  { id: 'sp500', label: 'S&P 500', short: 'S&P' },
+  { id: 'nasdaq100', label: 'NASDAQ-100', short: 'NDX' },
+  { id: 'all', label: 'All tracked', short: 'ALL' },
+];
+
+/** Filter a stock list to the selected index universe. 'all' returns input. */
+export function filterStocksByUniverse<T extends { symbol: string }>(stocks: T[], universeId: UniverseId): T[] {
+  switch (universeId) {
+    case 'sp500': return filterToSP500(stocks);
+    case 'nasdaq100': return filterToNASDAQ100(stocks);
+    default: return stocks;
+  }
+}
+
 export const MASTER_MATRIX_SIZE = 50;

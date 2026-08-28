@@ -8,7 +8,6 @@
 // rebuilt from this past data.
 
 import { StockData } from './stockData';
-import { SP500_TICKERS } from './masterAnalysis';
 import { SUPABASE_STOCK_PROJECT_URL, SUPABASE_STOCK_ANON_KEY } from './supabaseConfig';
 
 // Prefer committed public anon credentials (available in every build, incl.
@@ -36,7 +35,7 @@ export interface StoredHistoryResult {
   history: Map<string, StockData[]>;
   /** total bars fetched */
   totalBars: number;
-  /** symbols found that are S&P 500 members */
+  /** symbols that have enough bars to analyze */
   coveredSymbols: string[];
   /** most recent bar date across all symbols */
   lastBarDate: string | null;
@@ -49,8 +48,7 @@ export function isSupabaseHistoryConfigured(): boolean {
 
 /**
  * Fetch every row of stock_price_history (paginated) and group by symbol into
- * ascending daily StockData[] arrays. Returns only S&P 500 member symbols that
- * have usable bar counts.
+ * ascending daily StockData[] arrays. Returns all symbols with a usable bar count.
  */
 export async function fetchStoredHistory(minBars = 100): Promise<StoredHistoryResult> {
   if (!SUPABASE_URL || !SUPABASE_KEY) {
@@ -92,7 +90,7 @@ export async function fetchStoredHistory(minBars = 100): Promise<StoredHistoryRe
       if (!rows.length) break;
 
       for (const r of rows) {
-        if (r.symbol == null || !SP500_TICKERS.has(r.symbol)) continue;
+        if (r.symbol == null) continue;
         if (!bySymbol.has(r.symbol)) bySymbol.set(r.symbol, []);
         bySymbol.get(r.symbol)!.push(r);
         totalBars++;

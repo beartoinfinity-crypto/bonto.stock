@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   RefreshCw, Search, Filter, ArrowUpDown, Database, Grid3X3,
   CalendarPlus, CheckCircle2, Circle, Crown, TrendingUp, TrendingDown,
+  Plus, X, Globe,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -16,6 +17,7 @@ import {
 } from '@/components/ui/accordion';
 import { Header } from '@/components/Header';
 import { useMasterMatrix, VerdictFilter } from '@/hooks/useMasterMatrix';
+import { UNIVERSES } from '@/lib/masterAnalysis';
 import { cn } from '@/lib/utils';
 
 function verdictCellClass(v: string): string {
@@ -43,6 +45,8 @@ export default function MasterMatrix() {
     results, isLoading, progress, totalStocks, lastUpdated, fromCache,
     search, setSearch, sectorFilter, setSectorFilter,
     verdictFilter, setVerdictFilter,
+    universeId, setUniverseId,
+    customSymbols, addCustomSymbol, removeCustomSymbol,
     snapshots, recordedToday, lastRecordedAt,
     runAnalysis, loadFromSupabase, dataSource, supabaseInfo,
     recordToday, masterLabels, sectors,
@@ -50,6 +54,7 @@ export default function MasterMatrix() {
 
   const [sortField, setSortField] = useState<'score' | 'price' | 'change' | 'symbol'>('score');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [customInput, setCustomInput] = useState('');
 
   const orderedResults = [...results].sort((a, b) => {
     let cmp = 0;
@@ -91,8 +96,8 @@ export default function MasterMatrix() {
               Master Matrix
             </h1>
             <p className="text-muted-foreground mt-2">
-              Top {Math.min(totalStocks, 50)} S&amp;P 500 stocks screened by the 12 trading masters. Each day's
-              results are recorded into an accumulating matrix.
+              Top {Math.min(totalStocks, 50)} stocks in the selected universe screened by the 12 trading
+              masters. Each day's results are recorded into an accumulating matrix.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -129,7 +134,7 @@ export default function MasterMatrix() {
           <Card className="mb-6">
             <CardContent className="py-4">
               <div className="flex justify-between mb-2 text-sm">
-                <span className="text-muted-foreground">Analyzing S&amp;P 500 universe with 12 masters...</span>
+                <span className="text-muted-foreground">Analyzing the {UNIVERSES.find(u => u.id === universeId)?.label ?? 'S&amp;P 500'} universe with 12 masters...</span>
                 <span className="font-mono">{progress} / {totalStocks}</span>
               </div>
               <Progress value={totalStocks > 0 ? (progress / totalStocks) * 100 : 0} className="h-2" />
@@ -164,6 +169,80 @@ export default function MasterMatrix() {
             </CardContent>
           </Card>
         )}
+
+        {/* Universe + custom stocks */}
+        <Card className="mb-6">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Globe className="h-4 w-4 text-muted-foreground" />
+              Universe &amp; Custom Stocks
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex flex-wrap items-end gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">Index universe</label>
+                <div className="flex gap-2">
+                  {UNIVERSES.map(u => (
+                    <Button
+                      key={u.id}
+                      size="sm"
+                      variant={universeId === u.id ? 'default' : 'outline'}
+                      onClick={() => setUniverseId(u.id)}
+                      disabled={isLoading}
+                    >
+                      {u.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+              <div className="space-y-1.5 flex-1 max-w-xs min-w-[220px]">
+                <label className="text-xs text-muted-foreground">Add a stock by ticker</label>
+                <div className="flex gap-2">
+                  <Input
+                    value={customInput}
+                    onChange={e => setCustomInput(e.target.value.toUpperCase())}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        if (addCustomSymbol(customInput)) setCustomInput('');
+                      }
+                    }}
+                    placeholder="e.g. SPY, NVDA, BRK.B"
+                    className="font-mono"
+                  />
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    onClick={() => { if (addCustomSymbol(customInput)) setCustomInput(''); }}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  1–6 letters (allow . and -). Live data or stored Supabase history is used if available.
+                </p>
+              </div>
+            </div>
+
+            {customSymbols.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-muted-foreground">Custom:</span>
+                {customSymbols.map(sym => (
+                  <Badge key={sym} variant="secondary" className="gap-1.5 font-mono">
+                    {sym}
+                    <button
+                      className="text-muted-foreground hover:text-destructive"
+                      onClick={() => removeCustomSymbol(sym)}
+                      aria-label={`Remove ${sym}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Status + stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">

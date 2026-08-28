@@ -4,6 +4,9 @@ import {
   summarizeMasterResult,
   rankByScore,
   filterToSP500,
+  filterToNASDAQ100,
+  filterStocksByUniverse,
+  NASDAQ100_TICKERS,
   SP500_TICKERS,
   MASTER_ORDER,
   buildStockInput,
@@ -63,6 +66,32 @@ describe('masterAnalysis', () => {
     for (const f of filtered) {
       expect(SP500_TICKERS.has(f.symbol)).toBe(true);
     }
+  });
+
+  it('filterToNASDAQ100 keeps constituents and excludes non-NDX names', () => {
+    const stocks = popularStocks.map(s => ({ symbol: s.symbol }));
+    const filtered = filterToNASDAQ100(stocks);
+    expect(filtered.some(f => f.symbol === 'AAPL')).toBe(true);
+    expect(filtered.some(f => f.symbol === 'NVDA')).toBe(true);
+    // Financials/energy/industrials/REITs are S&P-only, not Nasdaq-100
+    expect(filtered.some(f => f.symbol === 'JPM')).toBe(false);
+    expect(filtered.some(f => f.symbol === 'XOM')).toBe(false);
+    expect(filtered.some(f => f.symbol === 'GE')).toBe(false);
+    // Nasdaq-100 membership present in popularStocks
+    expect(filtered.some(f => f.symbol === 'COIN' || f.symbol === 'MSTR' || f.symbol === 'ARM')).toBe(true);
+    for (const f of filtered) {
+      expect(NASDAQ100_TICKERS.has(f.symbol)).toBe(true);
+    }
+  });
+
+  it('filterStocksByUniverse dispatches on universe id', () => {
+    const stocks = popularStocks.map(s => ({ symbol: s.symbol }));
+    const sp = filterStocksByUniverse(stocks, 'sp500');
+    const ndx = filterStocksByUniverse(stocks, 'nasdaq100');
+    const all = filterStocksByUniverse(stocks, 'all');
+    expect(sp.every(f => SP500_TICKERS.has(f.symbol))).toBe(true);
+    expect(ndx.every(f => NASDAQ100_TICKERS.has(f.symbol))).toBe(true);
+    expect(all).toHaveLength(stocks.length);
   });
 
   it('buildStockInput parses marketCap strings into numbers', () => {
