@@ -17,6 +17,7 @@ import {
   MASTER_ORDER,
   Verdict,
 } from '@/lib/masterAnalysis';
+import { fetchStoredHistory } from '@/lib/supabaseHistory';
 
 const MATRIX_KEY = 'stockpulse_master_matrix';
 
@@ -68,6 +69,14 @@ function todayStr(d = new Date()): string {
 // ─── Hook state/result types ───────────────────────────────────────
 
 export type VerdictFilter = 'all' | 'any-buy' | Verdict;
+export type MasterDataSource = 'live' | 'supabase' | null;
+
+export interface SupabaseSourceInfo {
+  coveredSymbols: string[];
+  totalBars: number;
+  lastBarDate: string | null;
+  error: string | null;
+}
 
 export interface UseMasterMatrixResult {
   universe: Stock[];
@@ -87,6 +96,10 @@ export interface UseMasterMatrixResult {
   recordedToday: boolean;
   lastRecordedAt: string | null;
   runAnalysis: (force?: boolean) => Promise<void>;
+  /** Build the matrix purely from history already stored in Supabase. */
+  loadFromSupabase: () => Promise<void>;
+  dataSource: MasterDataSource;
+  supabaseInfo: SupabaseSourceInfo | null;
   recordToday: () => void;
   masterLabels: { id: string; name: string }[];
   sectors: string[];
@@ -122,6 +135,8 @@ export function useMasterMatrix(): UseMasterMatrixResult {
   const [progress, setProgress] = useState(0);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [fromCache, setFromCache] = useState(false);
+  const [dataSource, setDataSource] = useState<MasterDataSource>(null);
+  const [supabaseInfo, setSupabaseInfo] = useState<SupabaseSourceInfo | null>(null);
   const [snapshots, setSnapshots] = useState<DailySnapshot[]>(() => loadMatrix());
   const [search, setSearch] = useState('');
   const [sectorFilter, setSectorFilter] = useState('all');
@@ -134,6 +149,7 @@ export function useMasterMatrix(): UseMasterMatrixResult {
         setResults(cached.entries);
         setLastUpdated(new Date(cached.computedAt));
         setFromCache(true);
+        setDataSource('live');
         setIsLoading(false);
         setProgress(universe.length);
         return;
@@ -142,6 +158,7 @@ export function useMasterMatrix(): UseMasterMatrixResult {
 
     setIsLoading(true);
     setFromCache(false);
+    setDataSource('live');
     setProgress(0);
 
     const analyzed: StockMasterResult[] = [];
@@ -181,6 +198,65 @@ export function useMasterMatrix(): UseMasterMatrixResult {
     setLastUpdated(new Date());
     setIsLoading(false);
   }, [universe]);
+
+  // Build the matrix from history already stored in Supabase (stock_price_history),
+  // without live per-stock fetching. Runs the 12 masters on each stored bar series.
+  const loadFromSupabase = useCallback(async () => {
+    setIsLoading(true);
+    setFromCache(false);
+    setProgress(0);
+    try {
+      const stored = await fetchStoredHistory();
+      setSupabaseInfo({
+        coveredSymbols: stored.coveredSymbols,
+        totalBars: stored.totalBars,
+        lastBarDate: stored.lastBarDate,
+        error: stored.error,
+      });
+      if (!stored.ok || stored.history.size === 0) {
+        setResults([]);
+        setDataSource(null);
+        setIsLoading(false);
+        return;
+      }
+
+      const analyzed: StockMasterResult[] = [];
+      const symbols = stored.coveredSymbols;
+      for (let i = 0; i < symbols.length; i++) {
+        const symbol = symbols[i];
+        const bars = stored.history.get(symbol);
+        const stock = popularStocks.find(s => s.symbol === symbol);
+        if (!stock || !bars || bars.length === 0) continue;
+        const latest = bars[bars.length - 1];
+        const prev = bars[bars.length - 2];
+        const price = latest.close;
+        const prevClose = prev ? prev.close : price;
+        const changePercent = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
+        const input = buildStockInput({ ...stock, price }, bars);
+        const masters = analyzeStock(symbol, input);
+        analyzed.push(
+          summarizeMasterResult(symbol, stock, price, changePercent, masters, { isSimulated: false })
+        );
+        setProgress(i + 1);
+      }
+
+      const ranked = analyzed.sort(rankByScore).slice(0, MASTER_MATRIX_SIZE);
+      setResults(ranked);
+      setDataSource('supabase');
+      setLastUpdated(new Date());
+    } catch (e) {
+      setSupabaseInfo({
+        coveredSymbols: [],
+        totalBars: 0,
+        lastBarDate: null,
+        error: e instanceof Error ? e.message : 'Failed to read Supabase history',
+      });
+      setResults([]);
+      setDataSource(null);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     runAnalysis();
@@ -249,6 +325,9 @@ export function useMasterMatrix(): UseMasterMatrixResult {
     recordedToday,
     lastRecordedAt,
     runAnalysis,
+    loadFromSupabase,
+    dataSource,
+    supabaseInfo,
     recordToday,
     masterLabels: MASTER_ORDER.map(id => ({ id, name: masterNames[id] ?? id })),
     sectors,

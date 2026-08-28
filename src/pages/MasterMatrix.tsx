@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  RefreshCw, Search, Filter, ArrowUpDown, Database, Zap, Grid3X3,
+  RefreshCw, Search, Filter, ArrowUpDown, Database, Grid3X3,
   CalendarPlus, CheckCircle2, Circle, Crown, TrendingUp, TrendingDown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -44,7 +44,8 @@ export default function MasterMatrix() {
     search, setSearch, sectorFilter, setSectorFilter,
     verdictFilter, setVerdictFilter,
     snapshots, recordedToday, lastRecordedAt,
-    runAnalysis, recordToday, masterLabels, sectors,
+    runAnalysis, loadFromSupabase, dataSource, supabaseInfo,
+    recordToday, masterLabels, sectors,
   } = useMasterMatrix();
 
   const [sortField, setSortField] = useState<'score' | 'price' | 'change' | 'symbol'>('score');
@@ -97,13 +98,24 @@ export default function MasterMatrix() {
           <div className="flex items-center gap-2">
             {lastUpdated && (
               <span className="text-xs text-muted-foreground hidden sm:inline-flex items-center gap-1">
-                {fromCache ? <Database className="h-3.5 w-3.5" /> : <Zap className="h-3.5 w-3.5" />}
-                {fromCache ? 'Cached' : 'Live'} · {lastUpdated.toLocaleString()}
+                <Database className="h-3.5 w-3.5" />
+                {dataSource === 'supabase' ? 'Stored (Supabase)' : fromCache ? 'Cached' : 'Live'} · {lastUpdated.toLocaleString()}
               </span>
             )}
+            <Button
+              variant={dataSource === 'supabase' ? 'default' : 'outline'}
+              size="sm"
+              className="gap-2"
+              onClick={() => loadFromSupabase()}
+              disabled={isLoading}
+              title="Rebuild the matrix from OHLCV history already stored in Supabase (no live fetch)"
+            >
+              <Database className={cn('h-4 w-4', isLoading && dataSource === 'supabase' && 'animate-pulse')} />
+              Stored Data
+            </Button>
             <Button variant="outline" size="sm" className="gap-2" onClick={() => runAnalysis(true)} disabled={isLoading}>
               <RefreshCw className={cn('h-4 w-4', isLoading && 'animate-spin')} />
-              Re-run Analysis
+              Live
             </Button>
             <Button size="sm" className="gap-2" onClick={recordToday} disabled={results.length === 0}>
               <CalendarPlus className="h-4 w-4" />
@@ -121,6 +133,34 @@ export default function MasterMatrix() {
                 <span className="font-mono">{progress} / {totalStocks}</span>
               </div>
               <Progress value={totalStocks > 0 ? (progress / totalStocks) * 100 : 0} className="h-2" />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Supabase stored-data status */}
+        {supabaseInfo && (
+          <Card className="mb-6 border-primary/30 bg-primary/5">
+            <CardContent className="py-3">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                <span className="inline-flex items-center gap-1.5 font-medium text-primary">
+                  <Database className="h-4 w-4" />
+                  {dataSource === 'supabase' ? 'Built from stored Supabase history' : 'Supabase history loaded'}
+                </span>
+                <span className="text-muted-foreground">
+                  {supabaseInfo.coveredSymbols.length} S&amp;P 500 stocks · {supabaseInfo.totalBars.toLocaleString()} daily bars
+                </span>
+                {supabaseInfo.lastBarDate && (
+                  <span className="text-muted-foreground">through {supabaseInfo.lastBarDate}</span>
+                )}
+                {supabaseInfo.error && (
+                  <span className="text-destructive">{supabaseInfo.error}</span>
+                )}
+                {(supabaseInfo.coveredSymbols.length > 0) && (
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {supabaseInfo.coveredSymbols.join(', ')}
+                  </span>
+                )}
+              </div>
             </CardContent>
           </Card>
         )}
@@ -221,7 +261,7 @@ export default function MasterMatrix() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Crown className="h-4 w-4 text-warning" />
-              Daily Master Matrix — top {MASTER_MATRIX_SIZE_LABEL}
+              Daily Master Matrix — {dataSource === 'supabase' ? `${results.length} stored` : `top ${MASTER_MATRIX_SIZE_LABEL}`}
             </CardTitle>
             <CardDescription>
               Rows are stocks; columns are the 12 masters. B=BUY H=HOLD W=WATCH S=SELL A=AVOID.
