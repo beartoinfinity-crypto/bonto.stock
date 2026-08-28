@@ -102,6 +102,23 @@ describe('fetchStockQuote — quoteSummary integration', () => {
     expect(result.data?.sector).toBe('Unknown');
   });
 
+  it('falls back to curated local fundamentals when quoteSummary is unreachable for a tracked symbol', async () => {
+    setupMocks(
+      jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 100.0 }, indicators: { quote: [{ close: [99, 100], volume: [1e6, 2e6] }] } }] } }),
+      'error', // crumb fails
+      'error', 'error', 'error', 'error', // host 1: server + direct + 2 CORS proxies
+      'error', 'error', 'error', 'error', // host 2: server + direct + 2 CORS proxies
+    );
+
+    const result = await fetchStockQuote('AAPL');
+    // AAPL is in popularStocks, so even without live summary we show real values
+    expect(result.data?.sector).toBe('Technology');
+    expect(result.data?.pe).toBeGreaterThan(0);
+    expect(result.data?.marketCap).toBeTruthy();
+    expect(result.data?.marketCap).not.toBe('N/A');
+    expect(result.data?.name).toBe('Apple Inc.');
+  });
+
   it('falls back when quoteSummary returns empty result', async () => {
     setupMocks(
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 100.0 }, indicators: { quote: [{ close: [99, 100], volume: [1e6, 2e6] }] } }] } }),

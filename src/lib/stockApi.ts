@@ -98,6 +98,19 @@ function formatMarketCap(raw: number | undefined): string {
   return raw.toLocaleString();
 }
 
+// Curated offline fundamentals (sector / market cap / P/E / name) for the
+// tracked universe. Used as a reliable fallback whenever the live Yahoo
+// quoteSummary endpoint is unreachable, so the UI never shows Unknown/N/A.
+function localFundamentals(symbol: string): { sector: string; marketCap: string; pe: number; name: string | undefined } {
+  const s = popularStocks.find(p => p.symbol.toUpperCase() === symbol.toUpperCase());
+  return {
+    sector: s?.sector ?? 'Unknown',
+    marketCap: s?.marketCap ?? 'N/A',
+    pe: s?.pe ?? 0,
+    name: s?.name,
+  };
+}
+
 async function fetchQuoteSummary(symbol: string, preferredHost?: string): Promise<{ pe: number; marketCap: string; sector: string } | null> {
   const hosts = preferredHost
     ? [preferredHost, ...['https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com'].filter(h => h !== preferredHost)]
@@ -174,16 +187,17 @@ async function quoteFromYahoo(symbol: string): Promise<Stock | null> {
         console.warn(`[quoteSummary] ${symbol} failed on ${host}:`, e);
         return null;
       });
+      const local = localFundamentals(symbol);
       return {
         symbol,
-        name: meta?.longName || meta?.shortName || symbol,
-        sector: summary?.sector ?? 'Unknown',
+        name: meta?.longName || meta?.shortName || local.name || symbol,
+        sector: summary?.sector ?? local.sector,
         price,
         change: price - prevClose,
         changePercent: prevClose ? ((price - prevClose) / prevClose) * 100 : 0,
         volume: Math.round(avgVol),
-        marketCap: summary?.marketCap ?? 'N/A',
-        pe: summary?.pe ?? 0,
+        marketCap: summary?.marketCap ?? local.marketCap,
+        pe: summary?.pe ?? local.pe,
         week52High: meta?.fiftyTwoWeekHigh || 0,
         week52Low: meta?.fiftyTwoWeekLow || 0,
       };
@@ -230,19 +244,20 @@ async function quoteFromStooq(symbol: string): Promise<Stock | null> {
     const change = prevClose > 0 ? close - prevClose : 0;
     const changePercent = prevClose > 0 ? ((close - prevClose) / prevClose) * 100 : 0;
 
-    // Fetch P/E and market cap from Yahoo quoteSummary (non-blocking — fall back to defaults)
+    // Fetch P/E and market cap from Yahoo quoteSummary (non-blocking — fall back to curated local data)
     const summary = await fetchQuoteSummary(symbol).catch(() => null);
+    const local = localFundamentals(symbol);
 
     return {
       symbol,
-      name: (cols[8] || symbol).trim(),
-      sector: summary?.sector ?? 'Unknown',
+      name: (cols[8] || symbol).trim() || local.name || symbol,
+      sector: summary?.sector ?? local.sector,
       price: close,
       change,
       changePercent,
       volume,
-      marketCap: summary?.marketCap ?? 'N/A',
-      pe: summary?.pe ?? 0,
+      marketCap: summary?.marketCap ?? local.marketCap,
+      pe: summary?.pe ?? local.pe,
       week52High: 0,
       week52Low: 0,
     };
@@ -316,7 +331,16 @@ export async function fetchStockQuote(symbol: string, forceRefresh = false): Pro
   if (!forceRefresh) {
     const cached = await getQuote(symbol);
     if (cached) {
-      return { data: cached as Stock, error: null, isRealData: true, fromCache: true };
+      // Self-heal stale/blank fundamentals from curated local data.
+      const local = localFundamentals(symbol);
+      const merged: Stock = {
+        ...cached,
+        sector: cached.sector && cached.sector !== 'Unknown' ? cached.sector : local.sector,
+        marketCap: cached.marketCap && cached.marketCap !== 'N/A' ? cached.marketCap : local.marketCap,
+        pe: cached.pe && cached.pe > 0 ? cached.pe : local.pe,
+        name: cached.name && cached.name !== 'Unknown' ? cached.name : (local.name ?? cached.name),
+      };
+      return { data: merged, error: null, isRealData: true, fromCache: true };
     }
   }
 
