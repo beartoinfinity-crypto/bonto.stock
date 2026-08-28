@@ -1,14 +1,15 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ArrowLeft, CalendarPlus, Crown, History, TrendingUp, TrendingDown, Minus,
+  DatabaseZap, Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Header } from '@/components/Header';
-import { loadMatrix } from '@/hooks/useMasterMatrix';
+import { loadMatrix, backfillStockHistory, BackfillResult } from '@/hooks/useMasterMatrix';
 import { MASTER_ORDER } from '@/lib/masterAnalysis';
 import { cn } from '@/lib/utils';
 
@@ -53,12 +54,29 @@ export default function StockHistory() {
   const { symbol } = useParams<{ symbol: string }>();
   const sym = symbol?.toUpperCase() ?? '';
 
+  const [refresh, setRefresh] = useState(0);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillResult, setBackfillResult] = useState<BackfillResult | null>(null);
+
   const snapshots = useMemo(() => {
     const all = loadMatrix();
     return all
       .filter(s => s.stocks[sym])
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [sym]);
+  }, [sym, refresh]);
+
+  const handleBackfill = async () => {
+    if (!sym || backfilling) return;
+    setBackfilling(true);
+    setBackfillResult(null);
+    try {
+      const r = await backfillStockHistory(sym, 365);
+      setBackfillResult(r);
+      setRefresh(x => x + 1);
+    } finally {
+      setBackfilling(false);
+    }
+  };
 
   const rows = snapshots.map(s => ({ date: s.date, source: s.source, row: s.stocks[sym] }));
   const first = rows[0];
@@ -100,6 +118,30 @@ export default function StockHistory() {
                   {last.source === 'supabase' ? 'Stored' : 'Live'}
                 </Badge>
               </div>
+            )}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button
+              size="sm"
+              className="gap-2"
+              onClick={handleBackfill}
+              disabled={backfilling || !sym}
+              title="Run the 12 masters against stored OHLCV history for every day of the past year and fill in historical snapshots"
+            >
+              {backfilling
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <DatabaseZap className="h-4 w-4" />}
+              {backfilling ? 'Backfilling...' : 'Backfill past year'}
+            </Button>
+            {backfillResult && (
+              <span className={cn(
+                'text-xs',
+                backfillResult.ok ? 'text-success' : 'text-destructive'
+              )}>
+                {backfillResult.ok
+                  ? `Backfilled ${backfillResult.daysBackfilled} days (${backfillResult.fromDate} → ${backfillResult.toDate})`
+                  : backfillResult.error}
+              </span>
             )}
           </div>
         </div>

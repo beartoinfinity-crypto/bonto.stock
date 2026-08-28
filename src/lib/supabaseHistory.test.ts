@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fetchStoredHistory } from './supabaseHistory';
+import { fetchStoredHistory, fetchStoredHistoryForSymbol } from './supabaseHistory';
 
 // Mocks fetch so the module can pull paginated stock_price_history rows
 // without a real network call.
@@ -7,7 +7,7 @@ const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
 // Two symbols x two dates, delivered across two 1000-cap pages to exercise
-// pagination. Only S&P 500 members are kept (COKE is intentionally excluded).
+// pagination. COKE has only 1 bar (filtered out by the min-bars threshold).
 const ALL_ROWS = [
   { symbol: 'AAPL', date: '2026-08-25', open: 100, high: 110, low: 95, close: 105, volume: 1000 },
   { symbol: 'AAPL', date: '2026-08-26', open: 105, high: 115, low: 100, close: 112, volume: 1200 },
@@ -22,7 +22,13 @@ beforeEach(() => {
     const u = new URL(url);
     const offset = Number(u.searchParams.get('offset') ?? 0);
     const limit = Number(u.searchParams.get('limit') ?? 1000);
-    const page = ALL_ROWS.slice(offset, offset + limit);
+    const symParam = u.searchParams.get('symbol'); // e.g. "eq.AAPL"
+    let rows = ALL_ROWS;
+    if (symParam) {
+      const wanted = symParam.replace(/^eq\./, '');
+      rows = ALL_ROWS.filter(r => r.symbol === wanted);
+    }
+    const page = rows.slice(offset, offset + limit);
     return { ok: true, json: async () => page };
   });
 });
@@ -72,5 +78,23 @@ describe('fetchStoredHistory', () => {
     expect(r.history.get('NVDA')!.length).toBe(1005);
     // offset should have advanced past the first page
     expect(mockFetch.mock.calls.length).toBeGreaterThan(1);
+  });
+});
+
+describe('fetchStoredHistoryForSymbol', () => {
+  it('returns only that symbol stacked ascending by date', async () => {
+    const bars = await fetchStoredHistoryForSymbol('AAPL');
+    expect(bars.map(b => b.date)).toEqual(['2026-08-25', '2026-08-26']);
+    expect(bars[1].close).toBe(112);
+  });
+
+  it('is case-insensitive on the requested symbol', async () => {
+    const bars = await fetchStoredHistoryForSymbol('aapl');
+    expect(bars).toHaveLength(2);
+  });
+
+  it('returns empty array when the symbol has no stored bars', async () => {
+    const bars = await fetchStoredHistoryForSymbol('ZZZZ');
+    expect(bars).toEqual([]);
   });
 });

@@ -20,7 +20,7 @@ import {
   MASTER_ORDER,
   Verdict,
 } from '@/lib/masterAnalysis';
-import { fetchStoredHistory } from '@/lib/supabaseHistory';
+import { fetchStoredHistory, fetchStoredHistoryForSymbol } from '@/lib/supabaseHistory';
 
 const MATRIX_KEY = 'stockpulse_master_matrix';
 const CUSTOM_KEY = 'stockpulse_master_matrix_custom';
@@ -87,6 +87,69 @@ function saveCustomSymbols(symbols: string[]): void {
   }
 }
 
+/**
+ * Standalone backfill: compute a stock's 12-master analysis for each stored
+ * historical day (last `maxDays` days, default a full year) and write those as
+ * daily snapshots into the persisted matrix. Replaces any existing snapshots
+ * within the backfilled date range for this symbol, keeping other dates intact.
+ */
+export async function backfillStockHistory(symbol: string, maxDays = 365): Promise<BackfillResult> {
+  const sym = symbol.toUpperCase();
+  const bars = await fetchStoredHistoryForSymbol(sym);
+  if (bars.length < 10) {
+    return {
+      ok: false,
+      error: `No usable stored history for ${sym} (found ${bars.length} bars).`,
+      symbol: sym,
+      daysBackfilled: 0,
+      fromDate: null,
+      toDate: null,
+    };
+  }
+
+  const stock: Stock = popularStocks.find(s => s.symbol === sym) ?? makeCustomStock(sym);
+  const startIndex = Math.max(0, bars.length - maxDays);
+  const days: DailySnapshot[] = [];
+
+  for (let i = startIndex; i < bars.length; i++) {
+    const day = bars[i];
+    const prev = bars[i - 1];
+    const price = day.close;
+    const prevClose = prev ? prev.close : price;
+    const changePercent = prevClose ? ((price - prevClose) / prevClose) * 100 : 0;
+    const input = buildStockInput(
+      { ...stock, price, change: price - prevClose, volume: day.volume },
+      bars.slice(0, i + 1)
+    );
+    const masters = analyzeStock(sym, input);
+    const summary = summarizeMasterResult(sym, stock, price, changePercent, masters, { isSimulated: false });
+    days.push({
+      date: day.date,
+      capturedAt: `${day.date}T00:00:00.000Z`,
+      source: 'supabase',
+      stocks: { [sym]: matrixRowFromResult(summary) },
+    });
+  }
+
+  const existing = loadMatrix();
+  const fromDate = days[0]?.date;
+  const toDate = days[days.length - 1]?.date;
+  const keep = fromDate && toDate
+    ? existing.filter(s => s.date < fromDate || s.date > toDate)
+    : existing;
+  const next = [...keep, ...days].sort((a, b) => a.date.localeCompare(b.date));
+  saveMatrix(next);
+
+  return {
+    ok: true,
+    error: null,
+    symbol: sym,
+    daysBackfilled: days.length,
+    fromDate,
+    toDate,
+  };
+}
+
 function todayStr(d = new Date()): string {
   return d.toISOString().slice(0, 10);
 }
@@ -113,6 +176,19 @@ export function isValidSymbol(symbol: string): boolean {
   return /^[A-Za-z][A-Za-z0-9.\-]{0,5}$/.test(symbol.trim());
 }
 
+// Convert a fully-analyzed stock result into a persisted matrix row.
+function matrixRowFromResult(r: StockMasterResult): MatrixStockRow {
+  const verdicts: Record<string, Verdict> = {};
+  for (const m of r.analyses) verdicts[m.id] = m.verdict;
+  return {
+    price: r.price,
+    changePercent: r.changePercent,
+    verdicts,
+    buyCount: r.buyCount,
+    score: r.score,
+  };
+}
+
 // ─── Hook state/result types ───────────────────────────────────────
 
 export type VerdictFilter = 'all' | 'any-buy' | Verdict;
@@ -123,6 +199,15 @@ export interface SupabaseSourceInfo {
   totalBars: number;
   lastBarDate: string | null;
   error: string | null;
+}
+
+export interface BackfillResult {
+  ok: boolean;
+  error: string | null;
+  symbol: string;
+  daysBackfilled: number;
+  fromDate: string | null;
+  toDate: string | null;
 }
 
 export interface UseMasterMatrixResult {
@@ -153,6 +238,9 @@ export interface UseMasterMatrixResult {
   dataSource: MasterDataSource;
   supabaseInfo: SupabaseSourceInfo | null;
   recordToday: () => void;
+  /** Compute a stock's 12-master analysis for every stored historical day and
+   *  write those as historical daily snapshots (backfill the past year). */
+  backfillHistory: (symbol: string, maxDays?: number) => Promise<BackfillResult>;
   masterLabels: { id: string; name: string }[];
   sectors: string[];
 }
@@ -349,6 +437,14 @@ export function useMasterMatrix(): UseMasterMatrixResult {
     }
   }, [universe]);
 
+  // Backfill a stock's full history: run the 12 masters against the stored OHLCV
+  // bars for each past day and record those days as historical snapshots.
+  const backfillHistory = useCallback(async (symbol: string, maxDays = 365): Promise<BackfillResult> => {
+    const result = await backfillStockHistory(symbol, maxDays);
+    setSnapshots(loadMatrix());
+    return result;
+  }, []);
+
   useEffect(() => {
     // Re-run when the universe (index or custom symbols) changes.
     runAnalysis();
@@ -430,6 +526,7 @@ export function useMasterMatrix(): UseMasterMatrixResult {
     dataSource,
     supabaseInfo,
     recordToday,
+    backfillHistory,
     masterLabels: MASTER_ORDER.map(id => ({ id, name: masterNames[id] ?? id })),
     sectors,
   };

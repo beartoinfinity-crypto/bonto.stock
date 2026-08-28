@@ -142,3 +142,34 @@ export async function fetchStoredHistory(minBars = 100): Promise<StoredHistoryRe
     lastBarDate,
   };
 }
+
+/**
+ * Fetch the full stored OHLCV bar series for a single symbol (paginated),
+ * sorted ascending by date. Returns [] when the symbol has no stored data.
+ */
+export async function fetchStoredHistoryForSymbol(symbol: string): Promise<StockData[]> {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return [];
+  const headers: Record<string, string> = {
+    apikey: SUPABASE_KEY,
+    Authorization: `Bearer ${SUPABASE_KEY}`,
+    'Content-Type': 'application/json',
+  };
+  const bars: StockData[] = [];
+  try {
+    const sym = encodeURIComponent(symbol.toUpperCase());
+    let offset = 0;
+    for (;;) {
+      const url = `${SUPABASE_URL}/rest/v1/${HISTORY_TABLE}?select=date,open,high,low,close,volume&symbol=eq.${sym}&order=date.asc&limit=${PAGE}&offset=${offset}`;
+      const res = await fetch(url, { headers });
+      if (!res.ok) break;
+      const rows = (await res.json()) as StockData[];
+      if (!rows.length) break;
+      bars.push(...rows);
+      if (rows.length < PAGE) break;
+      offset += PAGE;
+    }
+  } catch {
+    /* network failure -> empty series */
+  }
+  return bars;
+}
