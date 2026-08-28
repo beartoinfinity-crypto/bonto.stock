@@ -28,4 +28,5 @@ export const DOCUMENT_KEYS = [
   'stockpulse_alerts',
   'stockpulse_alert_config',
   'stockpulse_market_snapshot',
+  'stockpulse_master_matrix',
 ] as const;
