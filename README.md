@@ -36,6 +36,8 @@ npm start          # serve dist/ via Express
 | `/screener` | Screener | Batch-screen all stocks by signal confidence |
 | `/tactical` | Tactical Engine | Per-stock trade planner with position sizing |
 | `/masters` | Trading Masters | 12 legendary investors analyze any stock |
+| `/masters-matrix` | Master Matrix | Rank S&P 500 / NASDAQ-100 / custom stocks into a top-50 matrix by 12-master verdicts |
+| `/masters-matrix/:symbol` | Stock History | Per-stock daily 12-master history, with past-year backfill |
 | `/settings` | Settings | Auth, watchlist, DB export/import, cloud sync |
 | `/admin` | Admin | Cron job management (password-protected) |
 

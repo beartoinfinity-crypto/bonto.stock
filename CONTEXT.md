@@ -20,6 +20,14 @@
 
 **Crumb token**: A Yahoo Finance authentication token fetched once and cached for 30 minutes. Required for the v10 quoteSummary API but not for the v8 chart API.
 
+**Master**: One of 12 rule-based investor strategies (Buffett, Munger, Fisher, etc.) evaluated against a stock's daily OHLCV bars. See `masterAnalysis.ts`.
+
+**Verdict**: A master's judgement on a stock — B (BUY), H (HOLD), W (WAIT), S (SELL), or A (AVOID). Aggregated into a BUY/SELL/AVOID count out of 12.
+
+**Universe**: Which stock set the Master Matrix ranks over — `sp500` (SP500_TICKERS), `nasdaq100` (NASDAQ100_TICKERS), or `all`. Plus user-typed custom symbols.
+
+**Daily snapshot**: One day's 12-master verdict summary for a stock. Tagged `source: 'live' | 'supabase'` and accumulated per stock; past days are backfillable from stored bars. Stored in localStorage (key `stockpulse_master_matrix`), not cloud-synced.
+
 ## Storage & Data Sources
 
 See [`docs/CODEBASE.md`](docs/CODEBASE.md) for storage hierarchy (Supabase → SQLite → localStorage), Supabase table schemas, and all external data source details.

@@ -89,7 +89,7 @@ Five jobs, run while a tab is open:
 
 Key: `proxyFetch()` chains server proxy → direct → CORS proxies (legacy).
 
-### `src/lib/stockApi.ts` — Yahoo Finance (377 lines)
+### `src/lib/stockApi.ts` — Yahoo Finance (364 lines)
 
 Fetch chain: `proxyFetch()` → server proxy first → direct → CORS proxies.
 
@@ -99,6 +99,51 @@ Fetch chain: `proxyFetch()` → server proxy first → direct → CORS proxies.
 | `fetchHistoricalData(symbol)` | 10y daily OHLCV. Yahoo v8 → Stooq → synthetic |
 | `getYahooCrumb()` | `/api/yahoo/crumb`, cached 30 min |
 | `fetchQuoteSummary(symbol)` | Yahoo v10: P/E, market cap, sector |
+| `localFundamentals(symbol)` | Curated fallback (name, sector, marketCap, pe) from `popularStocks`. Used when live `quoteSummary` returns null. |
+
+**Fundamentals fallback chain:** `quoteFromYahoo`/`quoteFromStooq` try live `fetchQuoteSummary`, then fall back to `localFundamentals()`. The cached-quote return path in `fetchStockQuote` also self-heals stale/blank fundamentals by merging curated values. Custom symbols not in `popularStocks` will still show `Unknown/N/A/0` when the live endpoint is unreachable.
+
+### `src/lib/masterAnalysis.ts` — 12 Trading Masters (594 lines)
+
+Rule-based engine (no AI/ML) implementing 12 investor strategies. Each master returns a verdict over a stock's historical bars.
+
+| Export | Purpose |
+|--------|---------|
+| `analyzeStock(rows, symbol, options)` | Runs all 12 masters over daily OHLCV rows → `MasterResult[]` |
+| `summarizeMasterResult(results)` | Aggregates verdicts → BUY/SELL/AVOID count (#/12), overall score, action |
+| `MasterId` / `MASTERS` | 12 named strategies (Buffett, Munger, Fisher, etc.) |
+| `UniverseId` / `UNIVERSES` | `'sp500'` `'nasdaq100'` `'all'` plus `filterStocksByUniverse()` |
+| `SP500_TICKERS` / `filterToSP500` | ~500 constituents |
+| `NASDAQ100_TICKERS` / `filterToNASDAQ100` | ~100 constituents |
+| `Verdict` | B (BUY) / H (HOLD) / W (WAIT) / S (SELL) / A (AVOID) |
+
+### `src/lib/supabaseHistory.ts` — Stored OHLCV (158 lines)
+
+Pulls real daily bars from the **`stock_price_history`** Supabase table (32 covered S&P 500 stocks, ~81k bars through 2026-08-27, ~2,643 bars/symbol) — the data source for Master Matrix snapshots and per-stock history backfill. *Distinct from `stock_historical` (same data intent, different table).*
+
+| Function | Purpose |
+|----------|---------|
+| `fetchStoredHistory()` | All symbols with bars (min-bar filtered), paginated `order=date.asc` |
+| `fetchStoredHistoryForSymbol(symbol)` | Bars for one symbol, case-insensitive `symbol=eq.` |
+
+### `src/lib/supabaseConfig.ts` — Committed Config (11 lines)
+
+Public, committed anon `supabaseUrl`/`supabaseKey` (project `qwezfxdfaistnabwqols`) + project ref. `.env` is gitignored; this file is the deployment source.
+
+### `src/hooks/useMasterMatrix.ts` — Master Matrix Hook (511 lines)
+
+Central state for the Master Matrix and history pages.
+
+| Concern | Detail |
+|---------|--------|
+| Universe | `universeId`/`setUniverseId` (`'sp500'`/`'nasdaq100'`/`'all'`); feeds `filterStocksByUniverse()` |
+| Custom symbols | `customSymbols` persisted at `stockpulse_master_matrix_custom`; `addCustomSymbol`/`removeCustomSymbol` via `isValidSymbol` regex `/^[A-Za-z][A-Za-z0-9.\-]{0,5}$/`; synthetic `makeCustomStock()` |
+| Matrix rows | `MatrixStockRow` incl. `sellCount` (SELL+AVOID count) |
+| Snapshots | `DailySnapshot` incl. `source: 'live' \| 'supabase'`; accumulated per stock |
+| History storage | localStorage key `stockpulse_master_matrix` (single source of truth for past snapshots) |
+| Backfill | `loadMatrix` exported; standalone `backfillStockHistory(symbol, maxDays=365)` computes per-day analyses from stored bars and merges snapshots (replaces that date range, keeps others). Hook's `backfillHistory` is a thin wrapper |
+
+### `src/lib/syncKeys.ts` — Synced Keys (31 lines)
 
 ### `src/lib/stockData.ts` — Analytics Engine (866 lines)
 
@@ -110,7 +155,7 @@ Forecasting: `generateForecast()` (trend + confidence bands), `generateMonteCarl
 
 ### `src/lib/supabaseDb.ts` — Supabase Cloud (453 lines)
 
-Tables: `stockpulse_kv`, `stock_quotes`, `stock_historical`, `politician_featured_trades`.
+Tables: `stockpulse_kv`, `stock_quotes`, `stock_historical`, `stock_price_history` (real OHLCV bars, read via `supabaseHistory.ts`), `politician_featured_trades`.
 
 Key: `maybeSyncToSupabase(key)` debounced 3s push. `pullAll()` paginated 500/page. `pushFeaturedTrades()` chunked 100/batch.
 
@@ -135,6 +180,8 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 |-------|------|--------------------|
 | `/` | Index — Dashboard (891 lines) | `useStockData` |
 | `/masters` | TradingMasters — Strategy perf (510 lines) | Radar charts, 5 strategies |
+| `/masters-matrix` | MasterMatrix — Top-50 matrix (521 lines) | `useMasterMatrix`; universe/custom-stock picker, rank, rows link to history |
+| `/masters-matrix/:symbol` | StockHistory — Per-stock history (275 lines) | `useMasterMatrix`; 12-master verdicts per day, stats, "Backfill past year" |
 | `/tactical` | Tactical — Trade planner (662 lines) | `useTacticalHistory`, `tacticalEngine` |
 | `/screener` | Screener — Batch screen (604 lines) | `useScreenerData` |
 | `/settings` | Settings — Config (767 lines) | Auth, watchlist, Supabase, DB ops |
@@ -181,6 +228,8 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | Supabase primary | Cloud-first; localStorage is sync cache |
 | Server proxy | CORS + SSRF protection, single caching point |
 | No AI/ML | Rule-based signals, template narratives |
+| Matrix history localStorage-only | Master Matrix daily snapshots live in `stockpulse_master_matrix` (localStorage), NOT via `storage.ts`/Supabase. Deliberate — past daily snapshots are user-local. Don't "fix" into cloud sync. Supabase feeds them (`stock_price_history` bars + backfill), it doesn't store them |
+| Stored-bars universe | Only 32 S&P 500 symbols have `stock_price_history` bars (~81k total); outer-universe rows fall back to live/`supabase`-tagged snapshots |
 | Browser cron | No always-on server (Render free tier sleeps) |
 | Three-tier fetch | Server proxy → direct → CORS proxies (legacy) |
 | SQLite backup | Survives Supabase outages, offline-capable |

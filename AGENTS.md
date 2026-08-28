@@ -4,7 +4,7 @@
 
 1. Set Node on PATH: `$env:Path = "C:\Program Files\nodejs;" + $env:Path`
 2. Run `npm run build` before committing — `dist/` is committed to git (Render serves it directly)
-3. Run `npm run test` after changes — 7 tests across 2 files, must pass
+3. Run `npm run test` after changes — 24 tests across 4 files, must pass
 4. Use `npm.cmd` (not `npm`) in PowerShell commands
 
 ## Gotchas
@@ -15,6 +15,7 @@
 - **Third-party CORS proxies** — often dead. Server proxy (`/api/proxy`) is the primary path
 - **StockSpill Supabase** — project `artscweyrracfffoqvur`, anon key hardcoded in `index.js` (read-only)
 - **Vite has no proxy config** — `/api/*` endpoints only work on Render (Express), not localhost dev server
+- **Master Matrix history is localStorage-only** (key `stockpulse_master_matrix`) — does NOT go through `storage.ts`'s Supabase path. Supabase only *feeds* it (`stock_price_history` bars). Only 32 S&P 500 symbols have stored bars; the rest show live/`supabase`-tagged snapshots
 
 ## Conventions
 
