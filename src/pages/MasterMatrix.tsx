@@ -402,6 +402,11 @@ export default function MasterMatrix() {
                               {r.buyCount}/12
                             </span>
                             {r.buyCount >= 6 && <Crown className="h-3.5 w-3.5 text-warning" />}
+                            {r.sellCount > 0 && (
+                              <span className="font-mono text-xs font-semibold text-destructive" title="SELL + AVOID">
+                                S{r.sellCount}
+                              </span>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell className="font-mono">${r.price?.toFixed(2) ?? '—'}</TableCell>

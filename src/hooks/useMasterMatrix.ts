@@ -34,6 +34,7 @@ export interface MatrixStockRow {
   changePercent: number;
   verdicts: Record<string, Verdict>; // masterId -> verdict
   buyCount: number;
+  sellCount: number; // SELL + AVOID
   score: number;
 }
 
@@ -185,6 +186,7 @@ function matrixRowFromResult(r: StockMasterResult): MatrixStockRow {
     changePercent: r.changePercent,
     verdicts,
     buyCount: r.buyCount,
+    sellCount: r.analyses.filter(a => a.verdict === 'SELL' || a.verdict === 'AVOID').length,
     score: r.score,
   };
 }
@@ -464,6 +466,7 @@ export function useMasterMatrix(): UseMasterMatrixResult {
           changePercent: r.changePercent,
           verdicts,
           buyCount: r.buyCount,
+          sellCount: r.analyses.filter(a => a.verdict === 'SELL' || a.verdict === 'AVOID').length,
           score: r.score,
         };
       }

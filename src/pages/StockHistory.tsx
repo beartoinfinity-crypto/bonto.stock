@@ -234,8 +234,15 @@ export default function StockHistory() {
                               {r.source === 'supabase' ? 'S' : 'L'}
                             </Badge>
                           </TableCell>
-                          <TableCell className={cn('text-center font-mono font-bold', r.row.buyCount >= 6 ? 'text-success' : r.row.buyCount >= 3 ? 'text-warning' : 'text-muted-foreground')}>
-                            {r.row.buyCount}/12
+                          <TableCell className="text-center">
+                            <div className={cn('font-mono font-bold', r.row.buyCount >= 6 ? 'text-success' : r.row.buyCount >= 3 ? 'text-warning' : 'text-muted-foreground')}>
+                              {r.row.buyCount}/12
+                            </div>
+                            {r.row.sellCount > 0 && (
+                              <div className="font-mono text-[10px] font-semibold text-destructive">
+                                S{r.row.sellCount}
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell className="text-center">
                             {delta === null ? (
