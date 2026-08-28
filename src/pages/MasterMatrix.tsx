@@ -475,6 +475,17 @@ export default function MasterMatrix() {
                             <span className="text-sm font-semibold flex items-center gap-2">
                               <CalendarPlus className="h-4 w-4 text-primary" />
                               {snap.date} — {Object.keys(snap.stocks).length} stocks
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  'text-[10px] px-1.5 py-0',
+                                  snap.source === 'supabase'
+                                    ? 'border-primary/40 text-primary'
+                                    : 'border-muted-foreground/40 text-muted-foreground'
+                                )}
+                              >
+                                {snap.source === 'supabase' ? 'Stored' : 'Live'}
+                              </Badge>
                             </span>
                             <span className="text-xs text-muted-foreground">
                               {new Date(snap.capturedAt).toLocaleTimeString()}

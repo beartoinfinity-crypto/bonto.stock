@@ -38,6 +38,7 @@ export interface MatrixStockRow {
 export interface DailySnapshot {
   date: string;                 // YYYY-MM-DD
   capturedAt: string;           // ISO timestamp
+  source: 'live' | 'supabase';  // where the snapshot's numbers came from
   stocks: Record<string, MatrixStockRow>; // keyed by symbol
 }
 
@@ -369,12 +370,17 @@ export function useMasterMatrix(): UseMasterMatrixResult {
         };
       }
       const existing = prev.filter(s => s.date !== date);
-      const snapshot: DailySnapshot = { date, capturedAt: now, stocks };
+      const snapshot: DailySnapshot = {
+        date,
+        capturedAt: now,
+        source: dataSource === 'supabase' ? 'supabase' : 'live',
+        stocks,
+      };
       const next = [...existing, snapshot].sort((a, b) => a.date.localeCompare(b.date));
       saveMatrix(next);
       return next;
     });
-  }, [results]);
+  }, [results, dataSource]);
 
   const recordedToday = snapshots.some(s => s.date === todayStr());
   const lastRecordedAt = snapshots.length > 0
