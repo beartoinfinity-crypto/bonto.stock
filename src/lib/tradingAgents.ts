@@ -322,11 +322,14 @@ function researchManager(analysts: AnalystReport[]): ResearchPreview {
 
   let spreadNotes = '';
   if (bullish.length && bearish.length) {
-    spreadNotes = `${bullish.length} analyst(s) bullish vs ${bearish.length} bearish — the research stack is genuinely contested.`;
+    const neutralBit = neutral.length ? `, ${neutral.length} neutral` : '';
+    spreadNotes = `${bullish.length} bullish vs ${bearish.length} bearish${neutralBit} (of ${analysts.length}) — the research stack is genuinely contested.`;
   } else if (bullish.length) {
-    spreadNotes = 'All active analysts lean bullish; no material bearish dissent.';
+    const neutralBit = neutral.length ? ` ${neutral.length} neutral` : '';
+    spreadNotes = `All ${bullish.length} active analysts lean bullish${neutralBit}; no material bearish dissent.`;
   } else if (bearish.length) {
-    spreadNotes = 'All active analysts lean bearish; no material bullish support.';
+    const neutralBit = neutral.length ? ` ${neutral.length} neutral` : '';
+    spreadNotes = `All ${bearish.length} active analysts lean bearish${neutralBit}; no material bullish support.`;
   } else {
     spreadNotes = 'Every analyst is neutral — low signal across the board.';
   }
