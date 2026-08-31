@@ -223,17 +223,30 @@ function fundamentalsAnalyst(symbol: string, deps: EngineDeps, masters: MasterAn
 
   const bias: AgentBias = score > 0.1 ? 'bullish' : score < -0.1 ? 'bearish' : 'neutral';
 
+  // The qualitative summary is driven primarily by the raw master VOTE split
+  // (bulls vs bears), not just the confidence-weighted score. This stops a
+  // borderline weighted score (e.g. a couple of high-confidence BUYs outweighing
+  // low-confidence SELLs) from being overstated as a confident "edge".
+  const bullCount = fundamentalMasters.filter((m) => m.verdict === 'BUY').length;
+  const bearCount = fundamentalMasters.filter((m) => m.verdict === 'SELL' || m.verdict === 'AVOID').length;
+  const margin = bullCount - bearCount;
+  const summary = margin >= 2
+    ? 'The valuation-focused masters are broadly constructive — a clear majority see a value/quality edge.'
+    : margin <= -2
+      ? 'The valuation-focused masters are broadly concerned — most flag the company as expensive or overextended.'
+      : bullCount > bearCount
+        ? 'Valuation masters lean bullish but are split — only a slight majority see a value edge; not a strong signal.'
+        : bearCount > bullCount
+          ? 'Valuation masters lean bearish but are split — more flag it as overextended than cheap; not decisive.'
+          : 'Valuation masters are evenly split — no clear fundamental edge either way.';
+
   return {
     id: 'fundamentals', name: 'Fundamentals Analyst', role: 'Valuation & quality',
     bias, confidence: Math.round(clamp(45 + Math.abs(score) * 60, 25, 90)),
     score: Math.round(clamp(score * 100, -100, 100)),
-    summary: bias === 'bullish'
-      ? 'The valuation-focused masters see the company trading with a value/quality edge.'
-      : bias === 'bearish'
-        ? 'The valuation-focused masters flag the company as expensive or overextended.'
-        : 'Valuation masters are split — no clear fundamental edge either way.',
+    summary,
     evidence: evidence.slice(0, 6),
-    keyMetric: `${fundamentalMasters.filter((m) => m.verdict === 'BUY').length}/${fundamentalMasters.length} bulls vs ${fundamentalMasters.filter((m) => m.verdict === 'SELL' || m.verdict === 'AVOID').length} bears`,
+    keyMetric: `${bullCount}/${fundamentalMasters.length} bulls vs ${bearCount} bears`,
   };
 }
 
