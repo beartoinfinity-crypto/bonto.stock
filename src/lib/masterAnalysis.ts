@@ -148,8 +148,8 @@ export function analyzeStock(symbol: string, data: MasterAnalysisInput): MasterA
     name: 'Warren Buffett / Ben Graham',
     title: 'Value Investor',
     philosophy: 'Buy a dollar of business for 50 cents. Demand a durable moat, low debt, high ROE, and a margin of safety.',
-    verdict: inBuyZone ? 'BUY' : trendUp ? 'HOLD' : 'WATCH',
-    confidence: inBuyZone ? 75 : trendUp ? 60 : 40,
+    verdict: inBuyZone ? 'BUY' : trendUp ? 'HOLD' : trendDown ? 'AVOID' : 'WATCH',
+    confidence: inBuyZone ? 75 : trendUp ? 60 : trendDown ? 62 : 40,
     strengths: [
       inBuyZone ? `${Math.abs(pctFromHigh).toFixed(0)}% below 52-week high — potential margin of safety` : null,
       trendUp ? 'Price above SMA200 — long-term uptrend intact' : null,
@@ -270,8 +270,8 @@ export function analyzeStock(symbol: string, data: MasterAnalysisInput): MasterA
     name: 'Charlie Munger',
     title: 'Mental Models',
     philosophy: 'Invert, always invert. Avoid stupidity rather than seek brilliance. Lattice of mental models. "Too Hard" pile. Patience. Say no to most ideas.',
-    verdict: mungerBuy ? 'BUY' : 'WATCH',
-    confidence: mungerBuy ? 65 : 45,
+    verdict: mungerBuy ? 'BUY' : trendDown ? 'AVOID' : 'WATCH',
+    confidence: mungerBuy ? 65 : trendDown ? 58 : 45,
     strengths: [
       trendUp ? 'Price trend is constructive' : null,
       pctFromHigh < -10 ? 'Not at extreme highs — room for error' : null,
@@ -293,15 +293,15 @@ export function analyzeStock(symbol: string, data: MasterAnalysisInput): MasterA
   });
 
   // 6. Howard Marks - Risk
-  const fearGreed = trendUp ? (pctFromHigh > -5 ? 'Greed' : 'Neutral') : 'Fear';
-  const marksBuy = fearGreed === 'Fear' || trendDown;
+  const greed = trendUp && pctFromHigh > -5;
+  const deepFear = pctFromHigh < -20;
   masters.push({
     id: 'marks',
     name: 'Howard Marks',
     title: 'Risk Cycles',
     philosophy: 'Risk = chance of permanent loss, not volatility. Markets swing euphoria ↔ despair. Buy when fearful, sell when greedy. Second-level thinking.',
-    verdict: marksBuy ? 'BUY' : fearGreed === 'Greed' ? 'SELL' : 'HOLD',
-    confidence: marksBuy ? 70 : fearGreed === 'Greed' ? 65 : 50,
+    verdict: greed ? 'SELL' : deepFear ? 'BUY' : trendDown ? 'AVOID' : 'HOLD',
+    confidence: greed ? 65 : deepFear ? 70 : trendDown ? 58 : 50,
     strengths: [
       trendDown ? 'Market is fearful — opportunity for contrarian' : null,
       pctFromHigh < -20 ? 'Significant drawdown — potential mean reversion' : null,
@@ -311,19 +311,23 @@ export function analyzeStock(symbol: string, data: MasterAnalysisInput): MasterA
       trendUp && pctFromHigh > -5 ? 'Market euphoria — risk of permanent loss is elevated' : null,
       isParabolic ? 'Speculative excess — second-level thinkers sell here' : null,
     ].filter(Boolean) as string[],
-    specificAdvice: marksBuy
+    specificAdvice: deepFear
       ? 'Second-level thinking says: "Everyone is worried, so prices are low. This is where risk/reward is favourable." But stress-test the downside first — what if it drops another 30%?'
-      : 'Prices are high and optimism is rampant. Marks says: "The most dangerous thing is to buy something at the peak of its popularity." Take profits or tighten stops.',
+      : greed
+        ? 'Prices are high and optimism is rampant. Marks says: "The most dangerous thing is to buy something at the peak of its popularity." Take profits or tighten stops.'
+        : trendDown
+          ? 'Risk management says: a deteriorating stock carries elevated risk of loss. Neither buy the dip nor hold complacently — reduce exposure until sentiment improves.'
+          : 'Marks: "The safest moment to buy is when everyone is most pessimistic." Wait for a clearer fear/greed signal.',
     metrics: [
-      { label: 'Market Mood', value: fearGreed, good: fearGreed === 'Fear' },
-      { label: 'Risk Level', value: fearGreed === 'Greed' ? 'High' : 'Moderate', good: fearGreed !== 'Greed' },
+      { label: 'Market Mood', value: greed ? 'Greed' : deepFear ? 'Fear' : trendDown ? 'Wary' : 'Neutral', good: deepFear },
+      { label: 'Risk Level', value: greed ? 'High' : trendDown ? 'Elevated' : 'Moderate', good: !greed },
       { label: 'Cycle Position', value: trendUp ? 'Late cycle' : 'Early cycle', good: !trendUp },
     ],
   });
 
   // 7. John Templeton - Contrarian
   const maxPessimism = pctFromHigh < -30;
-  const templetonBuy = maxPessimism || (trendDown && pctFromHigh < -20);
+  const templetonBuy = maxPessimism; // buy only at true maximum pessimism, not mild downtrends
   masters.push({
     id: 'templeton',
     name: 'John Templeton',
