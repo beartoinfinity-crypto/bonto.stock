@@ -356,8 +356,8 @@ function researcherDebate(research: ResearchPreview, analysts: AnalystReport[], 
     ? `Bear case: ${bearInputs[0].analyst} leads with a ${Math.round(bearInputs[0].score)} tilt against. ${bearInputs.length > 1 ? `${bearInputs.length} bearish voices` : 'The only bearish voice'} argue downside is being under-priced.`
     : 'Bear case: There is currently no meaningful bearish signal from any analyst worker.';
 
-  debate.push({ speaker: 'bull', stance: 'bullish', label: 'Bull Researcher', message: bullMessage, points: Math.round(clamp(bullStrength * 3, 0, 100)) });
-  debate.push({ speaker: 'bear', stance: 'bearish', label: 'Bear Researcher', message: bearMessage, points: Math.round(clamp(bearStrength * 3, 0, 100)) });
+  debate.push({ speaker: 'bull', stance: 'bullish', label: 'Bull Researcher', message: bullMessage, points: Math.round(clamp(bullStrength, 0, 100)) });
+  debate.push({ speaker: 'bear', stance: 'bearish', label: 'Bear Researcher', message: bearMessage, points: Math.round(clamp(bearStrength, 0, 100)) });
 
   const net = bullStrength - bearStrength;
   const judgeBias: AgentBias = net > 20 ? 'bullish' : net < -20 ? 'bearish' : 'neutral';
@@ -367,7 +367,7 @@ function researcherDebate(research: ResearchPreview, analysts: AnalystReport[], 
       ? `Judge ruling: the bear thesis outweighs the bull (net=${net.toFixed(1)}). Verdict leans bearish.`
       : `Judge ruling: the debate is a toss-up (net=${net.toFixed(1)}). Verdict stays neutral.`;
 
-  debate.push({ speaker: 'judge', stance: judgeBias, label: 'Debate Judge', message: judgeMessage, points: Math.round(clamp(Math.abs(net) * 3, 0, 100)) });
+  debate.push({ speaker: 'judge', stance: judgeBias, label: 'Debate Judge', message: judgeMessage, points: Math.round(clamp(Math.abs(net), 0, 100)) });
 
   return debate;
 }
