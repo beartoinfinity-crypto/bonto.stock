@@ -28,6 +28,8 @@
 
 **Daily snapshot**: One day's 12-master verdict summary for a stock. Tagged `source: 'live' | 'supabase'` and accumulated per stock; past days are backfillable from stored bars. Stored in localStorage (key `stockpulse_master_matrix`), not cloud-synced.
 
+**TradingAgents rating**: The final 5-tier decision produced by `runTradingAgents()` — `Buy`, `Overweight`, `Hold`, `Underweight`, or `Sell`. Derived entirely by rule from the multi-agent pipeline (analyst team → research manager → bull/bear debate → trader → risk committee → portfolio manager). No AI/ML.
+
 ## Storage & Data Sources
 
 See [`docs/CODEBASE.md`](docs/CODEBASE.md) for storage hierarchy (Supabase → SQLite → localStorage), Supabase table schemas, and all external data source details.

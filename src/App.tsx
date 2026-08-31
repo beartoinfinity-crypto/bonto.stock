@@ -7,6 +7,7 @@ import Index from "./pages/Index";
 import Screener from "./pages/Screener";
 import Tactical from "./pages/Tactical";
 import TradingMasters from "./pages/TradingMasters";
+import TradingAgentsPage from "./pages/TradingAgentsPage";
 import MasterMatrix from "./pages/MasterMatrix";
 import StockHistory from "./pages/StockHistory";
 import NotFound from "./pages/NotFound";
@@ -55,6 +56,7 @@ const App = () => (
             <Route path="/screener" element={<Screener />} />
             <Route path="/tactical" element={<Tactical />} />
             <Route path="/masters" element={<TradingMasters />} />
+            <Route path="/trading-agents" element={<TradingAgentsPage />} />
             <Route path="/masters-matrix" element={<MasterMatrix />} />
             <Route path="/masters-matrix/:symbol" element={<StockHistory />} />
             <Route path="/settings" element={<Settings />} />

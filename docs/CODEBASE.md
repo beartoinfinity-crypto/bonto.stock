@@ -117,6 +117,18 @@ Rule-based engine (no AI/ML) implementing 12 investor strategies. Each master re
 | `NASDAQ100_TICKERS` / `filterToNASDAQ100` | ~100 constituents |
 | `Verdict` | `BUY` / `HOLD` / `WATCH` / `SELL` / `AVOID` |
 
+### `src/lib/tradingAgents.ts` — Trading Agents Engine (573 lines)
+
+Rule-based reimplementation of the TradingAgents multi-agent workflow — **no AI/ML/LLM**. It runs a staged pipeline over a stock's quote + historical bars, reusing the existing analyzers (`generateSignals`, `analyzeStock`, `analyzeMarketConditions`, `calculateLiquidityConditions`, `fetchSentiment`), and returns a 5-tier final decision.
+
+| Export | Purpose |
+|--------|---------|
+| `runTradingAgents(symbol, deps, stock)` → `TradingAgentsResult` | Async entry point; runs the whole pipeline |
+| `TradingAgentsResult` | `analysts[]`, `researchPreview`, `debate[]`, `traderPlan`, `riskDebate[]`, `portfolio`, `final`, plus `marketCondition`/`liquidity`/`sentiment`/`forecast` |
+| `AnalystReport` | Per-worker output: `bias`, `confidence`, `score` (-100..+100), `summary`, `evidence[]`, `keyMetric` |
+
+Pipeline stages (mirror the Python framework): **1. Analyst Team** (technical, fundamentals, sentiment, market) → **2. Research Manager** (consensus synthesis) → **3. Researcher Debate** (bull vs bear researchers + a judge) → **4. Trader Agent** (action/entry/stop/target + confidence) → **5. Risk Management** (aggressive/conservative/neutral debaters) → **6. Portfolio Manager** (approve/reject + position weight) → **7. Final Decision** (Buy / Overweight / Hold / Underweight / Sell).
+
 ### `src/lib/supabaseHistory.ts` — Stored OHLCV (158 lines)
 
 Pulls real daily bars from the **`stock_price_history`** Supabase table (32 covered S&P 500 stocks, ~81k bars through 2026-08-27, ~2,643 bars/symbol) — the data source for Master Matrix snapshots and per-stock history backfill. *Distinct from `stock_historical` (same data intent, different table).*
@@ -180,6 +192,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 |-------|------|--------------------|
 | `/` | Index — Dashboard (891 lines) | `useStockData` |
 | `/masters` | TradingMasters — 12-investor analyzer (281 lines) | `analyzeStock` + `summarizeMasterResult`; verdict summary boxes (BUY/HOLD/WATCH/SELL-AVOID), per-master cards |
+| `/trading-agents` | TradingAgentsPage — multi-agent report (391 lines) | `runTradingAgents`; analyst team, bull/bear debate, trader plan, risk committee, portfolio decision, final 5-tier rating |
 | `/masters-matrix` | MasterMatrix — Top-50 matrix (521 lines) | `useMasterMatrix`; universe/custom-stock picker, rank, rows link to history |
 | `/masters-matrix/:symbol` | StockHistory — Per-stock history (275 lines) | `useMasterMatrix`; 12-master verdicts per day, stats, "Backfill past year" |
 | `/tactical` | Tactical — Trade planner (662 lines) | `useTacticalHistory`, `tacticalEngine` |
@@ -214,6 +227,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | File | Lines | Purpose |
 |------|-------|---------|
 | `tacticalEngine.ts` | 755 | Regime state machine, 3 entry weapons, position sizing, trailing exit, iceberg execution, `replayEngine()` backtest. |
+| `tradingAgents.ts` | 573 | Rule-based reimplementation of the TradingAgents multi-agent workflow → 5-tier final rating. No AI/ML. |
 | `strategyRecommendation.ts` | 581 | Market condition analysis → strategy recommendation with confidence + suitability. |
 | `stockScreener.ts` | — | `screenerStocks` list, filter types. |
 | `useScreenerData.ts` | 361 | Fetches all screener stocks, runs recommendations, caches results. |
