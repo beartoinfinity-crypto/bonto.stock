@@ -327,8 +327,15 @@ function Report({ result }: { result: TradingAgentsResult }) {
               {result.portfolio.approved ? 'Approved' : 'Rejected'}
             </span>
             <Badge variant="outline">{result.portfolio.positionWeight}% position size</Badge>
+            <Badge variant={biasBadgeVariant(result.portfolio.signal === 'BUY' ? 'bullish' : result.portfolio.signal === 'SELL' ? 'bearish' : 'neutral')}>
+              Signal: {result.portfolio.signal}
+            </Badge>
           </div>
           <p className="text-sm text-muted-foreground">{result.portfolio.note}</p>
+          <div className="rounded-lg border p-3">
+            <div className="text-xs font-medium text-muted-foreground mb-1">PM Opinion</div>
+            <p className="text-sm">{result.portfolio.opinion}</p>
+          </div>
         </CardContent>
       </Card>
     </div>

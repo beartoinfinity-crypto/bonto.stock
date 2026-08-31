@@ -76,7 +76,9 @@ export interface PortfolioDecision {
   positionWeight: number;                // 0-100 % of capital
   stopLoss: number;
   takeProfit: number;
-  note: string;
+  signal: 'BUY' | 'SELL' | 'HOLD';       // the PM's net actionable call
+  opinion: string;                       // narrative judgement + final conclusion
+  note: string;                          // detailed sizing/rejection note
 }
 
 export type FinalRating = 'Buy' | 'Overweight' | 'Hold' | 'Underweight' | 'Sell';
@@ -471,12 +473,27 @@ function portfolioManager(traderPlan: TraderPlan, risk: RiskVerdict[], deps: Eng
       : `PM approved the trade — all ${approvers.length} risk debaters allow it. Position capped at ${positionWeight}%.`
     : `PM rejected the trade — only ${approvers.length}/3 risk debaters allow it. Falling back to HOLD.`;
 
+  // The PM's net actionable call (signal) and a qualitative opinion that
+  // ties together the trader plan, the risk committee and the final conclusion.
+  const signal: PortfolioDecision['signal'] = action;
+  const opinion = approved
+    ? action === 'BUY'
+      ? `The Portfolio Manager sees a favourable risk/reward and an acceptable risk picture. The ${
+          blocking.length ? `${blocking.length} dissenting debater(s)` : 'risk committee'
+        } keep(s) size conservative, but the direction is constructive. Conclusion: proceed with a ${positionWeight}% position.`
+      : action === 'SELL'
+        ? `The Portfolio Manager agrees that reducing or avoiding exposure is the right call given the bearish backdrop. Conclusion: stand aside / lighten, no long position.`
+        : `The trader's plan was to hold, and the risk committee raised no objection. The Portfolio Manager confirms HOLD with no new capital deployed. Conclusion: maintain current exposure.`
+    : `The Portfolio Manager rejects the proposed ${traderPlan.action} because the risk debaters do not provide a majority sign-off. Conclusion: do not initiate; revert to HOLD.`;
+
   return {
     approved,
     action,
     positionWeight,
     stopLoss: traderPlan.stopLoss,
     takeProfit: traderPlan.takeProfit,
+    signal,
+    opinion,
     note,
   };
 }
