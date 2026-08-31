@@ -436,7 +436,7 @@ export function ChartAnalyst({ data, symbol }: ChartAnalystProps) {
         <div className="flex items-center justify-between">
           <CardTitle className="text-lg flex items-center gap-2">
             <BarChart3 className="h-5 w-5 text-primary" />
-            Analyst Commentary ??{symbol}
+            Analyst Commentary — {symbol}
           </CardTitle>
           <Badge variant="outline" className={cn('text-xs', outlookBadge.className)}>
             <TrendIcon className="h-3 w-3 mr-1" />
@@ -530,7 +530,7 @@ export function ChartAnalyst({ data, symbol }: ChartAnalystProps) {
                   </div>
                   <ul className="text-[11px] text-muted-foreground space-y-0.5">
                     {f.keyLevels.map((l, i) => (
-                      <li key={i}>??{l}</li>
+                      <li key={i}>• {l}</li>
                     ))}
                   </ul>
                   <p className="text-xs text-foreground/90 leading-relaxed">{f.insight}</p>
