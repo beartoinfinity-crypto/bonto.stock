@@ -348,6 +348,16 @@ function researcherDebate(research: ResearchPreview, analysts: AnalystReport[], 
   const bullStrength = bullInputs.reduce((s, i) => s + i.score * (i.conf / 100), 0);
   const bearStrength = bearInputs.reduce((s, i) => s + i.score * (i.conf / 100), 0);
 
+  // Normalize each camp to its SHARE of the combined weighted strength so the
+  // two numbers always sum to ~100 and clearly show which side dominates. Raw
+  // conviction can be high on both sides (each camp near its absolute cap), which
+  // hid the verdict; a relative split makes the winner obvious. Direction is still
+  // gated by the judge, which needs an absolute net gap > 20, so a weak-consensus
+  // dead-heat cannot spuriously trigger a trade.
+  const totalStrength = bullStrength + bearStrength;
+  const bullShare = totalStrength > 0 ? (bullStrength / totalStrength) * 100 : 0;
+  const bearShare = totalStrength > 0 ? (bearStrength / totalStrength) * 100 : 0;
+
   const bullMessage = bullInputs.length
     ? `Bull case: ${bullInputs[0].analyst} leads with a ${Math.round(bullInputs[0].score)} tilt. ${bullInputs.length > 1 ? `${bullInputs.length} bullish voices` : 'The only bullish voice'} argue the current price understates the opportunity.`
     : 'Bull case: There is currently no meaningful bullish signal from any analyst worker.';
@@ -356,8 +366,8 @@ function researcherDebate(research: ResearchPreview, analysts: AnalystReport[], 
     ? `Bear case: ${bearInputs[0].analyst} leads with a ${Math.round(bearInputs[0].score)} tilt against. ${bearInputs.length > 1 ? `${bearInputs.length} bearish voices` : 'The only bearish voice'} argue downside is being under-priced.`
     : 'Bear case: There is currently no meaningful bearish signal from any analyst worker.';
 
-  debate.push({ speaker: 'bull', stance: 'bullish', label: 'Bull Researcher', message: bullMessage, points: Math.round(clamp(bullStrength, 0, 100)) });
-  debate.push({ speaker: 'bear', stance: 'bearish', label: 'Bear Researcher', message: bearMessage, points: Math.round(clamp(bearStrength, 0, 100)) });
+  debate.push({ speaker: 'bull', stance: 'bullish', label: 'Bull Researcher', message: bullMessage, points: Math.round(clamp(bullShare, 0, 100)) });
+  debate.push({ speaker: 'bear', stance: 'bearish', label: 'Bear Researcher', message: bearMessage, points: Math.round(clamp(bearShare, 0, 100)) });
 
   const net = bullStrength - bearStrength;
   const judgeBias: AgentBias = net > 20 ? 'bullish' : net < -20 ? 'bearish' : 'neutral';
