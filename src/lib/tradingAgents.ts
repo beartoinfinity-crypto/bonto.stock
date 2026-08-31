@@ -74,6 +74,7 @@ export interface PortfolioDecision {
   approved: boolean;
   action: 'BUY' | 'SELL' | 'HOLD';
   positionWeight: number;                // 0-100 % of capital
+  sizingPersona: RiskPersona;            // persona whose tolerance capped the size
   stopLoss: number;
   takeProfit: number;
   signal: 'BUY' | 'SELL' | 'HOLD';       // the PM's net actionable call
@@ -100,6 +101,7 @@ export interface TradingAgentsResult {
     action: TraderPlan['action'];
     confidence: number;                  // 0-100
     positionWeight: number;              // recommended % of capital (risk-capped)
+    sizingPersona: RiskPersona;          // persona whose tolerance capped the size
     conviction: number;                  // 0-100 strength of the rating, for the hero bar
   };
   marketCondition: MarketCondition | null;
@@ -273,7 +275,7 @@ function marketAnalyst(condition: MarketCondition, liquidity: LiquidityResult): 
   const evidence = [
     `Market regime: ${regime} (score ${Math.round(regimeScore)}).`,
     `Volatility: ${volatility}.`,
-    `Liquidity: ${liquidity.ratingLabel} (${liq}/100).`,
+    `Liquidity: ${liquidity.ratingLabel} (${liq.toFixed(2)}/100).`,
     `Liquidity advice: ${liquidity.actionAdvice}.`,
   ];
 
@@ -497,10 +499,15 @@ function portfolioManager(traderPlan: TraderPlan, risk: RiskVerdict[], deps: Eng
         : `The trader's plan was to hold, and the risk committee raised no objection. The Portfolio Manager confirms HOLD with no new capital deployed. Conclusion: maintain current exposure.`
     : `The Portfolio Manager rejects the proposed ${traderPlan.action} because the risk debaters do not provide a majority sign-off. Conclusion: do not initiate; revert to HOLD.`;
 
+  // The persona whose tolerance produced the final (least-permissive) size.
+  const capApprover = [...approvers].sort((a, b) => a.maxWeight - b.maxWeight)[0];
+  const sizingPersona: RiskPersona = traderPlan.action === 'HOLD' ? 'Neutral' : capApprover?.persona ?? 'Neutral';
+
   return {
     approved,
     action,
     positionWeight,
+    sizingPersona,
     stopLoss: traderPlan.stopLoss,
     takeProfit: traderPlan.takeProfit,
     signal,
@@ -536,7 +543,7 @@ function finalDecision(analysts: AnalystReport[], research: ResearchPreview, deb
     ? 50
     : Math.round(clamp(TIER_BASE[rating] + (confidence - 50) * 0.4, 5, 100));
 
-  return { rating, action, confidence, positionWeight: portfolio.positionWeight, conviction };
+  return { rating, action, confidence, positionWeight: portfolio.positionWeight, sizingPersona: portfolio.sizingPersona, conviction };
 }
 
 // --- Public entry point ------------------------------------------------------

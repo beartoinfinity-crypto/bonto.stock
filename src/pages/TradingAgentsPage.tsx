@@ -61,6 +61,16 @@ function biasBadgeVariant(bias: string): 'default' | 'secondary' | 'destructive'
   return 'secondary';
 }
 
+// Sovereign risk-policy cap on position size per portfolio-manager persona.
+// The PM never sizes above the governing persona's base weight (the actual
+// sized % can be lower once the risk score penalty + least-permissive debater
+// are applied).
+const PERSONA_CAP: Record<string, number> = {
+  Aggressive: 40,
+  Neutral: 25,
+  Conservative: 15,
+};
+
 // Order + labels for the pipeline stepper. Icons mirror the report cards.
 const PIPELINE_STAGES: { id: StageInfo['id']; label: string; desc: string }[] = [
   { id: 'analysts', label: 'Analyst Team', desc: 'Research reports' },
@@ -343,7 +353,9 @@ function Report({ result, status }: { result: TradingAgentsResult; status: Stage
             <span className={`font-semibold ${result.portfolio.approved ? 'text-emerald-500' : 'text-red-500'}`}>
               {result.portfolio.approved ? 'Approved' : 'Rejected'}
             </span>
-            <Badge variant="outline">{result.portfolio.positionWeight}% position size</Badge>
+            <Badge variant="outline" title={`${result.portfolio.sizingPersona} persona max is ${PERSONA_CAP[result.portfolio.sizingPersona]}%, risk-scaled to ${result.portfolio.positionWeight}%`}>
+              {result.portfolio.sizingPersona} cap {PERSONA_CAP[result.portfolio.sizingPersona]}% · position {result.portfolio.positionWeight}%
+            </Badge>
             <Badge variant={biasBadgeVariant(result.portfolio.signal === 'BUY' ? 'bullish' : result.portfolio.signal === 'SELL' ? 'bearish' : 'neutral')}>
               Signal: {result.portfolio.signal}
             </Badge>
@@ -395,7 +407,7 @@ function FinalHero({ result, ratingStyle }: { result: TradingAgentsResult; ratin
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <Metric label="Action" value={final.action} />
           <Metric label="Confidence" value={`${final.confidence}%`} />
-          <Metric label="Position Size" value={`${final.positionWeight}%`} />
+          <Metric label="Position Size" value={`${final.positionWeight}% (${final.sizingPersona} cap ${PERSONA_CAP[final.sizingPersona]}%)`} />
           <Metric label="Price" value={`$${result.price.toFixed(2)}`} />
         </div>
       </CardContent>
