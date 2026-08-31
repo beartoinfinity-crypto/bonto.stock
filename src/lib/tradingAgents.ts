@@ -139,6 +139,7 @@ function technicalAnalyst(historical: StockData[], price: number): AnalystReport
   const evidence: string[] = [];
   let score = 0;
   let strongCount = 0;
+  let nonHoldCount = 0;
 
   if (signals.length === 0) {
     return {
@@ -151,14 +152,20 @@ function technicalAnalyst(historical: StockData[], price: number): AnalystReport
   }
 
   signals.forEach((s) => {
+    // strength weighting normalized to a ±1 unit (strong=1, moderate≈0.67,
+    // weak≈0.33) so an individual signal can't saturate the score; we then
+    // average rather than sum, otherwise several concurrent signals always
+    // clamp the aggregate to ±100 and the true mix is lost.
     const dir = s.type === 'buy' ? 1 : s.type === 'sell' ? -1 : 0;
-    const w = s.strength === 'strong' ? 1.5 : s.strength === 'moderate' ? 1 : 0.5;
-    score += dir * w * (s.confidence / 100);
+    const unit = s.strength === 'strong' ? 1 : s.strength === 'moderate' ? 0.66 : 0.33;
     if (s.type !== 'hold') {
+      score += dir * unit * (s.confidence / 100);
+      nonHoldCount++;
       evidence.push(`${s.strategy}: ${s.type.toUpperCase()} (${s.confidence}%) — ${s.reason}`);
     }
     if (s.type !== 'hold' && s.strength === 'strong') strongCount++;
   });
+  score = nonHoldCount ? score / nonHoldCount : 0;
 
   const rsi = calculateRSI(historical, 14);
   const lastRsi = rsi[rsi.length - 1] ?? 50;
@@ -202,17 +209,20 @@ function fundamentalsAnalyst(symbol: string, deps: EngineDeps, masters: MasterAn
   let votes = 0;
 
   fundamentalMasters.forEach((m) => {
-    const v = verdictScore[m.verdict];
-    score += v * (m.confidence / 100);
+    // verdictScore spans ±2; divide by 2 to get a ±1 unit, then average across
+    // masters. Summing raw ±2 weights across six masters always clamps to ±100
+    // and loses the actual bullish/bearish split.
+    score += (verdictScore[m.verdict] / 2) * (m.confidence / 100);
     votes += 1;
     evidence.push(`${m.name}: ${m.verdict} (${m.confidence}%) — ${m.specificAdvice}`);
   });
+  score = votes ? score / votes : 0;
 
-  const bias: AgentBias = score > 0.25 ? 'bullish' : score < -0.25 ? 'bearish' : 'neutral';
+  const bias: AgentBias = score > 0.1 ? 'bullish' : score < -0.1 ? 'bearish' : 'neutral';
 
   return {
     id: 'fundamentals', name: 'Fundamentals Analyst', role: 'Valuation & quality',
-    bias, confidence: Math.round(clamp(45 + Math.abs(score) * 40, 25, 90)),
+    bias, confidence: Math.round(clamp(45 + Math.abs(score) * 60, 25, 90)),
     score: Math.round(clamp(score * 100, -100, 100)),
     summary: bias === 'bullish'
       ? 'The valuation-focused masters see the company trading with a value/quality edge.'
@@ -521,8 +531,27 @@ function finalDecision(analysts: AnalystReport[], research: ResearchPreview, deb
 }
 
 // --- Public entry point ------------------------------------------------------
-export async function runTradingAgents(symbol: string, deps: EngineDeps, stock: Stock): Promise<TradingAgentsResult> {
+export type StageId = 'analysts' | 'research' | 'debate' | 'trader' | 'risk' | 'portfolio' | 'final';
+
+export interface StageInfo {
+  id: StageId;
+  label: string;
+  status: 'running' | 'done';
+  detail?: string;
+}
+
+export async function runTradingAgents(
+  symbol: string,
+  deps: EngineDeps,
+  stock: Stock,
+  onStage?: (stage: StageInfo) => void,
+): Promise<TradingAgentsResult> {
   const symbolUp = symbol.toUpperCase();
+
+  const done = (id: StageId, label: string, detail?: string) => onStage?.({ id, label, status: 'done', detail });
+  const run = (id: StageId, label: string, detail?: string) => onStage?.({ id, label, status: 'running', detail });
+
+  run('analysts', 'Analyst Team', 'technical, fundamentals, sentiment and market reports');
   const masters = analyzeStock(symbolUp, {
     price: deps.price,
     previousClose: deps.previousClose,
@@ -559,12 +588,31 @@ export async function runTradingAgents(symbol: string, deps: EngineDeps, stock: 
     ),
   ];
 
+  done('analysts', 'Analyst Team', `${analysts.length} reports gathered`);
+
+  run('research', 'Research Manager', 'synthesising analyst consensus');
   const researchPreview = researchManager(analysts);
+  done('research', 'Research Manager');
+
+  run('debate', 'Researcher Debate', 'bull vs bear with a judge');
   const debate = researcherDebate(researchPreview, analysts, deps);
+  done('debate', 'Researcher Debate', `${debate.length} statements`);
+
+  run('trader', 'Trader Agent', 'composing entry / stop / target');
   const traderPlan = traderAgent(researchPreview, debate, deps, condition);
+  done('trader', 'Trader Agent', traderPlan.action);
+
+  run('risk', 'Risk Management', 'aggressive / neutral / conservative');
   const risk = riskDebate(traderPlan, deps, condition);
+  done('risk', 'Risk Management');
+
+  run('portfolio', 'Portfolio Manager', 'approval and position sizing');
   const portfolio = portfolioManager(traderPlan, risk, deps, researchPreview);
+  done('portfolio', 'Portfolio Manager', portfolio.approved ? 'Approved' : 'Rejected');
+
+  run('final', 'Final Decision', '5-tier rating');
   const final = finalDecision(analysts, researchPreview, debate, traderPlan, portfolio);
+  done('final', 'Final Decision', final.rating);
 
   const sentiment = await sentimentPromise;
 

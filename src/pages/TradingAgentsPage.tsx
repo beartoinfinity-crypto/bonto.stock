@@ -9,9 +9,9 @@ import { Header } from '@/components/Header';
 import { popularStocks, Stock, StockData, generateHistoricalData } from '@/lib/stockData';
 import { fetchStockQuote, fetchHistoricalData } from '@/lib/stockApi';
 import { toast } from 'sonner';
-import { runTradingAgents, TradingAgentsResult, AnalystReport, DebateEntry, RiskVerdict } from '@/lib/tradingAgents';
+import { runTradingAgents, TradingAgentsResult, AnalystReport, DebateEntry, RiskVerdict, StageInfo } from '@/lib/tradingAgents';
 import {
-  TrendingUp, TrendingDown, Minus, Search, SearchCode, Scale, Shield, Target,
+  TrendingUp, TrendingDown, Minus, SearchCode, Scale, Shield, Target,
   Briefcase, Brain, Users, Gavel, Crosshair, AlertTriangle, CheckCircle, XCircle,
   BarChart3, Waves, Wallet, Radio, Loader2,
 } from 'lucide-react';
@@ -61,12 +61,31 @@ function biasBadgeVariant(bias: string): 'default' | 'secondary' | 'destructive'
   return 'secondary';
 }
 
+// Order + labels for the pipeline stepper. Icons mirror the report cards.
+const PIPELINE_STAGES: { id: StageInfo['id']; label: string; desc: string }[] = [
+  { id: 'analysts', label: 'Analyst Team', desc: 'Research reports' },
+  { id: 'research', label: 'Research Mgr', desc: 'Investment preview' },
+  { id: 'debate', label: 'Debate', desc: 'Bull vs bear + judge' },
+  { id: 'trader', label: 'Trader Agent', desc: 'Entry / stop / target' },
+  { id: 'risk', label: 'Risk Mgmt', desc: 'Risk committee' },
+  { id: 'portfolio', label: 'Portfolio Mgr', desc: 'Approval & sizing' },
+  { id: 'final', label: 'Final Rating', desc: '5-tier decision' },
+];
+
+type StageStatus = Record<StageInfo['id'], 'pending' | 'running' | 'done'>;
+
+const ALL_DONE: StageStatus = {
+  analysts: 'done', research: 'done', debate: 'done',
+  trader: 'done', risk: 'done', portfolio: 'done', final: 'done',
+};
+
 export default function TradingAgentsPage() {
   const { selectedStock, historicalData: histData, isLoading, setSelectedStock } = useStockData();
   const [search, setSearch] = useState('');
   const [result, setResult] = useState<TradingAgentsResult | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [stageStatus, setStageStatus] = useState<StageStatus | null>(null);
   // Resolved data for a user-typed symbol outside the curated universe.
   // Kept separate from the hook so we never fall back to a wrong mock stock.
   const [custom, setCustom] = useState<{ stock: Stock; historical: StockData[] } | null>(null);
@@ -87,6 +106,24 @@ export default function TradingAgentsPage() {
   const handleRun = async () => {
     setRunning(true);
     setError(null);
+    setResult(null);
+    // Reset the stepper to all-pending, then drive it via onStage.
+    const pending: StageStatus = Object.fromEntries(PIPELINE_STAGES.map((s) => [s.id, 'pending'])) as StageStatus;
+    setStageStatus(pending);
+
+    const update = (stage: StageInfo) => {
+      setStageStatus((prev) => {
+        const next = { ...(prev ?? pending) };
+        if (stage.status === 'done') {
+          next[stage.id] = 'done';
+          // any still-pending stages before this one are effectively done
+        } else {
+          next[stage.id] = 'running';
+        }
+        return next;
+      });
+    };
+
     try {
       // For a custom symbol we use the self-consistent resolved stock+history.
       const input = custom
@@ -99,7 +136,7 @@ export default function TradingAgentsPage() {
           }
         : engineInput;
       const stock = custom ? custom.stock : selectedStock;
-      const res = await runTradingAgents(symbol, input, stock);
+      const res = await runTradingAgents(symbol, input, stock, update);
       setResult(res);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run the TradingAgents pipeline.');
@@ -140,9 +177,11 @@ export default function TradingAgentsPage() {
       setCustom(null);
       setSelectedStock(found);
       setSearch('');
+      // same-symbol re-run / switch -> kick off analysis for this symbol
+      void handleRun();
       return;
     }
-    // Non-curated symbol (e.g. BE, DRAM): resolve a self-consistent stock.
+    // Non-curated symbol (e.g. BE, DRAM): resolve a self-consistent stock, then run.
     setRunning(true);
     setError(null);
     try {
@@ -153,9 +192,9 @@ export default function TradingAgentsPage() {
       if (!resolved.stock.name || resolved.stock.sector === 'Custom') {
         toast.info(`Live data unavailable for "${s}"; using derived data.`, { duration: 5000 });
       }
+      void handleRun();
     } catch {
       setError(`Could not resolve symbol "${s}".`);
-    } finally {
       setRunning(false);
     }
   };
@@ -180,22 +219,32 @@ export default function TradingAgentsPage() {
         </div>
 
         <Card>
-          <CardContent className="p-4 flex flex-col sm:flex-row gap-3">
-            <div className="flex-1 flex gap-2">
-              <Input
-                placeholder="Search symbols (e.g. NVDA)"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && submitSearch()}
-              />
-              <Button variant="outline" size="icon" onClick={submitSearch}>
-                <Search className="h-4 w-4" />
+          <CardContent className="p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row gap-3 items-stretch">
+              <div className="flex-1 flex gap-2">
+                <Input
+                  placeholder="Enter ticker, e.g. NVDA, AAPL or a custom symbol"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && submitSearch()}
+                  disabled={running}
+                />
+                <Button variant="outline" onClick={submitSearch} disabled={running} className="shrink-0">
+                  Search
+                </Button>
+              </div>
+              <Button onClick={handleRun} disabled={running || isLoading} className="gap-2 shrink-0">
+                {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <SearchCode className="h-4 w-4" />}
+                {running ? 'Analyzing…' : 'Analyze'}
               </Button>
             </div>
-            <Button onClick={handleRun} disabled={running || isLoading} className="gap-2">
-              {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <SearchCode className="h-4 w-4" />}
-              {running ? 'Running pipeline…' : 'Run TradingAgents'}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span>Now analyzing</span>
+              <Badge variant="outline" className="font-mono">{symbol || '—'}</Badge>
+              {!running && !result && (
+                <span className="hidden sm:inline">— type a ticker and hit <b>Analyze</b> to run the full pipeline in one step</span>
+              )}
+            </div>
           </CardContent>
         </Card>
 
@@ -211,32 +260,28 @@ export default function TradingAgentsPage() {
           <Card>
             <CardContent className="p-10 text-center text-muted-foreground">
               <SearchCode className="h-10 w-10 mx-auto mb-3 text-muted-foreground/40" />
-              <p>Select a symbol and run the pipeline to produce a full multi-agent report for {symbol || 'your stock'}.</p>
+              <p>Select or type a symbol and press <b>Analyze</b> to produce a full multi-agent report for {symbol || 'your stock'}.</p>
             </CardContent>
           </Card>
         )}
 
         {running && (
-          <Card>
-            <CardContent className="p-10 flex flex-col items-center gap-3 text-muted-foreground">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p>Gathering analyst reports, running the debate and risk committee…</p>
-            </CardContent>
-          </Card>
+          <StageStepper status={stageStatus} running />
         )}
 
-        {result && <Report result={result} />}
+        {result && <Report result={result} status={stageStatus ?? ALL_DONE} />}
       </main>
     </div>
   );
 }
 
-function Report({ result }: { result: TradingAgentsResult }) {
+function Report({ result, status }: { result: TradingAgentsResult; status: StageStatus }) {
   const final = result.final;
   const ratingStyle = RATING_STYLES[final.rating];
 
   return (
     <div className="space-y-5">
+      <StageStepper status={status} running={false} />
       <FinalHero result={result} ratingStyle={ratingStyle} />
 
       <Card>
@@ -394,6 +439,54 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: '
       <div className="text-xs text-muted-foreground">{label}</div>
       <div className={`font-semibold ${cls}`}>{value}</div>
     </div>
+  );
+}
+
+function StageStepper({ status, running }: { status: StageStatus; running: boolean }) {
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Radio className="h-4 w-4 text-primary" /> Pipeline Progress
+          {running && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ol className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {PIPELINE_STAGES.map((s, i) => {
+            const st = status?.[s.id] ?? (running ? 'pending' : 'done');
+            const isDone = st === 'done';
+            const isRunningNow = st === 'running';
+            return (
+              <li
+                key={s.id}
+                className={`flex items-start gap-2 rounded-lg border p-2.5 ${
+                  isRunningNow
+                    ? 'border-primary/50 bg-primary/5'
+                    : isDone
+                      ? 'border-border bg-muted/30'
+                      : 'border-border opacity-60'
+                }`}
+              >
+                <div className="mt-0.5 shrink-0">
+                  {isDone ? (
+                    <CheckCircle className="h-4 w-4 text-emerald-500" />
+                  ) : isRunningNow ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  ) : (
+                    <span className="font-mono text-xs text-muted-foreground/50">{i + 1}</span>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <div className={`text-sm font-medium ${isRunningNow ? 'text-primary' : ''}`}>{s.label}</div>
+                  <div className="text-xs text-muted-foreground truncate">{s.desc}</div>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      </CardContent>
+    </Card>
   );
 }
 
