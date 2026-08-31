@@ -6,7 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { useStockData } from '@/hooks/useStockData';
 import { Header } from '@/components/Header';
-import { popularStocks, Stock } from '@/lib/stockData';
+import { popularStocks, Stock, StockData, generateHistoricalData } from '@/lib/stockData';
+import { fetchStockQuote, fetchHistoricalData } from '@/lib/stockApi';
 import { toast } from 'sonner';
 import { runTradingAgents, TradingAgentsResult, AnalystReport, DebateEntry, RiskVerdict } from '@/lib/tradingAgents';
 import {
@@ -66,6 +67,9 @@ export default function TradingAgentsPage() {
   const [result, setResult] = useState<TradingAgentsResult | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Resolved data for a user-typed symbol outside the curated universe.
+  // Kept separate from the hook so we never fall back to a wrong mock stock.
+  const [custom, setCustom] = useState<{ stock: Stock; historical: StockData[] } | null>(null);
 
   const symbol = selectedStock.symbol;
 
@@ -84,7 +88,18 @@ export default function TradingAgentsPage() {
     setRunning(true);
     setError(null);
     try {
-      const res = await runTradingAgents(symbol, engineInput, selectedStock);
+      // For a custom symbol we use the self-consistent resolved stock+history.
+      const input = custom
+        ? {
+            price: custom.stock.price,
+            previousClose: custom.stock.price - custom.stock.change,
+            volume: custom.stock.volume,
+            marketCap: custom.stock.marketCap,
+            historical: custom.historical,
+          }
+        : engineInput;
+      const stock = custom ? custom.stock : selectedStock;
+      const res = await runTradingAgents(symbol, input, stock);
       setResult(res);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to run the TradingAgents pipeline.');
@@ -93,17 +108,55 @@ export default function TradingAgentsPage() {
     }
   };
 
-  const submitSearch = () => {
+  // Resolve a symbol outside the curated universe: use live data when real,
+  // otherwise synthesize a consistent stock+history keyed to THIS symbol.
+  const resolveCustom = async (s: string): Promise<{ stock: Stock; historical: StockData[] }> => {
+    const [quoteRes, histRes] = await Promise.all([
+      fetchStockQuote(s, true).catch(() => ({ data: null as Stock | null, isRealData: false })),
+      fetchHistoricalData(s, true).catch(() => ({ data: null as StockData[] | null, isRealData: false })),
+    ]);
+
+    const historical = (histRes.data && histRes.data.length ? histRes.data : generateHistoricalData(quoteRes.data?.price || 25, 0.02)) as StockData[];
+
+    if (quoteRes.isRealData && quoteRes.data && quoteRes.data.price > 0) {
+      return { stock: quoteRes.data, historical };
+    }
+
+    // Live quote unavailable — derive a stub from the most recent close.
+    const lastClose = historical.length ? historical[historical.length - 1].close : 25;
+    const stub = makeCustomStock(s);
+    stub.price = lastClose;
+    stub.previousClose = historical.length > 1 ? historical[historical.length - 2].close : lastClose;
+    stub.change = stub.price - stub.previousClose;
+    stub.changePercent = stub.previousClose ? (stub.change / stub.previousClose) * 100 : 0;
+    return { stock: stub, historical };
+  };
+
+  const submitSearch = async () => {
     const s = search.trim().toUpperCase();
     if (!s) return;
     const found = popularStocks.find((p) => p.symbol === s);
-    // For symbols outside the curated universe (e.g. BE, DRAM) build a
-    // placeholder stock — useStockData then resolves the real quote/history.
-    const target = found ?? makeCustomStock(s);
-    setSelectedStock(target);
-    setSearch('');
-    if (!found) {
-      toast.info(`Added "${s}" — fetching live data…`, { duration: 4000 });
+    if (found) {
+      setCustom(null);
+      setSelectedStock(found);
+      setSearch('');
+      return;
+    }
+    // Non-curated symbol (e.g. BE, DRAM): resolve a self-consistent stock.
+    setRunning(true);
+    setError(null);
+    try {
+      const resolved = await resolveCustom(s);
+      setCustom(resolved);
+      setSelectedStock(resolved.stock);
+      setSearch('');
+      if (!resolved.stock.name || resolved.stock.sector === 'Custom') {
+        toast.info(`Live data unavailable for "${s}"; using derived data.`, { duration: 5000 });
+      }
+    } catch {
+      setError(`Could not resolve symbol "${s}".`);
+    } finally {
+      setRunning(false);
     }
   };
 
