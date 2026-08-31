@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -80,86 +80,40 @@ const ALL_DONE: StageStatus = {
 };
 
 export default function TradingAgentsPage() {
-  const { selectedStock, historicalData: histData, isLoading, setSelectedStock } = useStockData();
+  const { selectedStock, setSelectedStock } = useStockData();
   const [search, setSearch] = useState('');
   const [result, setResult] = useState<TradingAgentsResult | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stageStatus, setStageStatus] = useState<StageStatus | null>(null);
-  // Resolved data for a user-typed symbol outside the curated universe.
-  // Kept separate from the hook so we never fall back to a wrong mock stock.
-  const [custom, setCustom] = useState<{ stock: Stock; historical: StockData[] } | null>(null);
 
   const symbol = selectedStock.symbol;
 
-  const engineInput = useMemo(
-    () => ({
-      price: selectedStock.price,
-      previousClose: selectedStock.price - selectedStock.change,
-      volume: selectedStock.volume,
-      marketCap: selectedStock.marketCap,
-      historical: histData,
-    }),
-    [selectedStock, histData],
-  );
-
-  const handleRun = async () => {
-    setRunning(true);
-    setError(null);
-    setResult(null);
-    // Reset the stepper to all-pending, then drive it via onStage.
-    const pending: StageStatus = Object.fromEntries(PIPELINE_STAGES.map((s) => [s.id, 'pending'])) as StageStatus;
-    setStageStatus(pending);
-
-    const update = (stage: StageInfo) => {
-      setStageStatus((prev) => {
-        const next = { ...(prev ?? pending) };
-        if (stage.status === 'done') {
-          next[stage.id] = 'done';
-          // any still-pending stages before this one are effectively done
-        } else {
-          next[stage.id] = 'running';
-        }
-        return next;
-      });
-    };
-
-    try {
-      // For a custom symbol we use the self-consistent resolved stock+history.
-      const input = custom
-        ? {
-            price: custom.stock.price,
-            previousClose: custom.stock.price - custom.stock.change,
-            volume: custom.stock.volume,
-            marketCap: custom.stock.marketCap,
-            historical: custom.historical,
-          }
-        : engineInput;
-      const stock = custom ? custom.stock : selectedStock;
-      const res = await runTradingAgents(symbol, input, stock, update);
-      setResult(res);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to run the TradingAgents pipeline.');
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  // Resolve a symbol outside the curated universe: use live data when real,
-  // otherwise synthesize a consistent stock+history keyed to THIS symbol.
-  const resolveCustom = async (s: string): Promise<{ stock: Stock; historical: StockData[] }> => {
+  // Resolve a symbol into a self-consistent stock + history, regardless of
+  // whether it's a curated universe symbol or a typed custom one. Uses live data
+  // when available, otherwise falls back to the curated entry or a synthetic
+  // series. Crucially this does NOT depend on selectedStock/histData state, so a
+  // run always uses THIS symbol's own data — eliminating the stale-result race
+  // where handleRun fired before the newly selected symbol's data had settled.
+  const resolveForSymbol = async (s: string): Promise<{ stock: Stock; historical: StockData[] }> => {
+    const curated = popularStocks.find((p) => p.symbol === s) ?? null;
     const [quoteRes, histRes] = await Promise.all([
       fetchStockQuote(s, true).catch(() => ({ data: null as Stock | null, isRealData: false })),
       fetchHistoricalData(s, true).catch(() => ({ data: null as StockData[] | null, isRealData: false })),
     ]);
 
-    const historical = (histRes.data && histRes.data.length ? histRes.data : generateHistoricalData(quoteRes.data?.price || 25, 0.02)) as StockData[];
+    const historical = (histRes.data && histRes.data.length
+      ? histRes.data
+      : generateHistoricalData(quoteRes.data?.price || curated?.price || 25, 0.02)) as StockData[];
 
     if (quoteRes.isRealData && quoteRes.data && quoteRes.data.price > 0) {
       return { stock: quoteRes.data, historical };
     }
 
-    // Live quote unavailable — derive a stub from the most recent close.
+    // Live quote unavailable — use the curated default if we have one.
+    if (curated) return { stock: curated, historical };
+
+    // Otherwise derive a stub from the most recent close.
     const lastClose = historical.length ? historical[historical.length - 1].close : 25;
     const stub = makeCustomStock(s);
     stub.price = lastClose;
@@ -169,32 +123,45 @@ export default function TradingAgentsPage() {
     return { stock: stub, historical };
   };
 
-  const submitSearch = async () => {
-    const s = search.trim().toUpperCase();
-    if (!s) return;
-    const found = popularStocks.find((p) => p.symbol === s);
-    if (found) {
-      setCustom(null);
-      setSelectedStock(found);
-      setSearch('');
-      // same-symbol re-run / switch -> kick off analysis for this symbol
-      void handleRun();
-      return;
-    }
-    // Non-curated symbol (e.g. BE, DRAM): resolve a self-consistent stock, then run.
+  const analyze = async (s: string) => {
+    const sym = s.trim().toUpperCase();
+    if (!sym) return;
     setRunning(true);
     setError(null);
+    setResult(null);
+    const pending: StageStatus = Object.fromEntries(PIPELINE_STAGES.map((st) => [st.id, 'pending'])) as StageStatus;
+    setStageStatus(pending);
+
+    const update = (stage: StageInfo) => {
+      setStageStatus((prev) => {
+        const next = { ...(prev ?? pending) };
+        if (stage.status === 'done') next[stage.id] = 'done';
+        else next[stage.id] = 'running';
+        return next;
+      });
+    };
+
     try {
-      const resolved = await resolveCustom(s);
-      setCustom(resolved);
+      const resolved = await resolveForSymbol(sym);
+      // Sync the display symbol/badge, but the engine below uses the freshly
+      // resolved data explicitly so there is no dependence on state settling.
       setSelectedStock(resolved.stock);
       setSearch('');
       if (!resolved.stock.name || resolved.stock.sector === 'Custom') {
-        toast.info(`Live data unavailable for "${s}"; using derived data.`, { duration: 5000 });
+        toast.info(`Live data unavailable for "${sym}"; using derived data.`, { duration: 5000 });
       }
-      void handleRun();
-    } catch {
-      setError(`Could not resolve symbol "${s}".`);
+      const input = {
+        price: resolved.stock.price,
+        previousClose: resolved.stock.price - resolved.stock.change,
+        volume: resolved.stock.volume,
+        marketCap: resolved.stock.marketCap,
+        historical: resolved.historical,
+      };
+      const res = await runTradingAgents(sym, input, resolved.stock, update);
+      setResult(res);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Could not analyze "${sym}".`);
+    } finally {
       setRunning(false);
     }
   };
@@ -226,14 +193,14 @@ export default function TradingAgentsPage() {
                   placeholder="Enter ticker, e.g. NVDA, AAPL or a custom symbol"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && submitSearch()}
+                  onKeyDown={(e) => e.key === 'Enter' && analyze(search)}
                   disabled={running}
                 />
-                <Button variant="outline" onClick={submitSearch} disabled={running} className="shrink-0">
+                <Button variant="outline" onClick={() => analyze(search)} disabled={running} className="shrink-0">
                   Search
                 </Button>
               </div>
-              <Button onClick={handleRun} disabled={running || isLoading} className="gap-2 shrink-0">
+              <Button onClick={() => analyze(search.trim() ? search : symbol)} disabled={running} className="gap-2 shrink-0">
                 {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <SearchCode className="h-4 w-4" />}
                 {running ? 'Analyzing…' : 'Analyze'}
               </Button>
