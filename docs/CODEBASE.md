@@ -129,6 +129,13 @@ Rule-based reimplementation of the TradingAgents multi-agent workflow — **no A
 
 Pipeline stages (mirror the Python framework): **1. Analyst Team** (technical, fundamentals, sentiment, market) → **2. Research Manager** (consensus synthesis) → **3. Researcher Debate** (bull vs bear researchers + a judge) → **4. Trader Agent** (action/entry/stop/target + confidence) → **5. Risk Management** (aggressive/conservative/neutral debaters) → **6. Portfolio Manager** (approve/reject + position weight) → **7. Final Decision** (Buy / Overweight / Hold / Underweight / Sell).
 
+Key behavioral details of recent fixes (all rule-based):
+
+- **Research Manager consensus** (`researchManager`): the `weighted` tilt is the **per-analyst confidence-weighted average** of each report's `score`, divided by the analyst count — so it sits truthfully on the −100..+100 scale and never overstates a tilt. `overallBias` uses `> 25 / < −25` thresholds on that average. The `spreadNotes` split line reports **all** analysts (`X bullish vs Y bearish, N neutral (of 4)`), so bullish+bearish+neutral always totals the analyst count.
+- **Researcher Debate points** (`researcherDebate`): bull/bear researcher points are **relative share** (`bullStrength/(bullStrength+bearStrength)×100`, likewise bear), so bull+bear ≈ 100 rather than saturating at an arbitrary ×3 cap. The judge's points are `clamp(|net|, 0, 100)`. The Trader agent's `bullPts/bearPts > 45` guard is now a majority-share gate, while the judge still needs absolute `|net| > 20` to set direction.
+- **Fundamentals analyst** (`fundamentalsAnalyst`): the headline reads `${bullCount}/${total} bulls vs ${bearCount} bears` and the summary is driven by the raw master **vote split** (`margin ≥ 2` bullish, `≤ −2` bearish, else lean/evenly-split), not solely by weighted bias. Masters run through the shared `masterAnalysis.ts` engine with `FUNDAMENTAL_MASTER_IDS` = `['buffett-graham','greenblatt','peter-lynch','munger','marks','templeton']`.
+- **Portfolio Manager** (`portfolioManager`): exposes `sizingPersona` (a `PERSONA_CAP` map) and the decision panel shows `{persona} cap {base}% · position {n}%`; liquidity evidence uses `toFixed(2)`.
+
 ### `src/lib/supabaseHistory.ts` — Stored OHLCV (158 lines)
 
 Pulls real daily bars from the **`stock_price_history`** Supabase table (32 covered S&P 500 stocks, ~81k bars through 2026-08-27, ~2,643 bars/symbol) — the data source for Master Matrix snapshots and per-stock history backfill. *Distinct from `stock_historical` (same data intent, different table).*
