@@ -110,12 +110,12 @@ Rule-based engine (no AI/ML) implementing 12 investor strategies. Each master re
 | Export | Purpose |
 |--------|---------|
 | `analyzeStock(rows, symbol, options)` | Runs all 12 masters over daily OHLCV rows → `MasterResult[]` |
-| `summarizeMasterResult(results)` | Aggregates verdicts → BUY/SELL/AVOID count (#/12), overall score, action |
+| `summarizeMasterResult(results)` | Aggregates verdicts → BUY/HOLD/WATCH/SELL+AVOID counts, score, action |
 | `MasterId` / `MASTERS` | 12 named strategies (Buffett, Munger, Fisher, etc.) |
 | `UniverseId` / `UNIVERSES` | `'sp500'` `'nasdaq100'` `'all'` plus `filterStocksByUniverse()` |
 | `SP500_TICKERS` / `filterToSP500` | ~500 constituents |
 | `NASDAQ100_TICKERS` / `filterToNASDAQ100` | ~100 constituents |
-| `Verdict` | B (BUY) / H (HOLD) / W (WAIT) / S (SELL) / A (AVOID) |
+| `Verdict` | `BUY` / `HOLD` / `WATCH` / `SELL` / `AVOID` |
 
 ### `src/lib/supabaseHistory.ts` — Stored OHLCV (158 lines)
 
@@ -179,13 +179,13 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | Route | Page | Key Hook/Component |
 |-------|------|--------------------|
 | `/` | Index — Dashboard (891 lines) | `useStockData` |
-| `/masters` | TradingMasters — Strategy perf (510 lines) | Radar charts, 5 strategies |
+| `/masters` | TradingMasters — 12-investor analyzer (281 lines) | `analyzeStock` + `summarizeMasterResult`; verdict summary boxes (BUY/HOLD/WATCH/SELL-AVOID), per-master cards |
 | `/masters-matrix` | MasterMatrix — Top-50 matrix (521 lines) | `useMasterMatrix`; universe/custom-stock picker, rank, rows link to history |
 | `/masters-matrix/:symbol` | StockHistory — Per-stock history (275 lines) | `useMasterMatrix`; 12-master verdicts per day, stats, "Backfill past year" |
 | `/tactical` | Tactical — Trade planner (662 lines) | `useTacticalHistory`, `tacticalEngine` |
 | `/screener` | Screener — Batch screen (604 lines) | `useScreenerData` |
 | `/settings` | Settings — Config (767 lines) | Auth, watchlist, Supabase, DB ops |
-| `/admin` | Admin — Cron mgmt (275 lines) | `localCron` jobs, run history |
+| `/admin` | Admin — Cron mgmt (255 lines) | `localCron` jobs, run history |
 | `/api-settings` | ApiSettings — API keys (265 lines) | Provider configs |
 | `*` | NotFound — 404 (24 lines) | — |
 

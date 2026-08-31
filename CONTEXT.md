@@ -22,7 +22,7 @@
 
 **Master**: One of 12 rule-based investor strategies (Buffett, Munger, Fisher, etc.) evaluated against a stock's daily OHLCV bars. See `masterAnalysis.ts`.
 
-**Verdict**: A master's judgement on a stock — B (BUY), H (HOLD), W (WAIT), S (SELL), or A (AVOID). Aggregated into a BUY/SELL/AVOID count out of 12.
+**Verdict**: A master's judgement on a stock — one of `BUY`, `HOLD`, `WATCH`, `SELL`, or `AVOID`. Trading Masters tallies each type into summary boxes (BUY / HOLD / WATCH / SELL+AVOID); the Master Matrix ranks by BUY count out of 12.
 
 **Universe**: Which stock set the Master Matrix ranks over — `sp500` (SP500_TICKERS), `nasdaq100` (NASDAQ100_TICKERS), or `all`. Plus user-typed custom symbols.
 
