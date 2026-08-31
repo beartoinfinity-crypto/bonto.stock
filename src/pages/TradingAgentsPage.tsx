@@ -293,10 +293,15 @@ function Report({ result }: { result: TradingAgentsResult }) {
             <Badge variant="outline">Confidence {result.traderPlan.confidence}%</Badge>
           </div>
           <div className="grid grid-cols-3 gap-3 text-center">
-            <Metric label="Entry" value={result.traderPlan.entry.toFixed(2)} />
-            <Metric label="Stop Loss" value={result.traderPlan.stopLoss.toFixed(2)} tone={result.traderPlan.action === 'SELL' ? 'up' : 'down'} />
-            <Metric label="Take Profit" value={result.traderPlan.takeProfit.toFixed(2)} tone={result.traderPlan.action === 'SELL' ? 'down' : 'up'} />
+            <Metric label={result.traderPlan.action === 'SELL' ? 'Entry (Short)' : 'Entry'} value={result.traderPlan.entry.toFixed(2)} />
+            <Metric label={result.traderPlan.action === 'SELL' ? 'Stop Loss (above entry)' : 'Stop Loss'} value={result.traderPlan.stopLoss.toFixed(2)} tone={result.traderPlan.action === 'SELL' ? 'up' : 'down'} />
+            <Metric label={result.traderPlan.action === 'SELL' ? 'Take Profit (below entry)' : 'Take Profit'} value={result.traderPlan.takeProfit.toFixed(2)} tone={result.traderPlan.action === 'SELL' ? 'down' : 'up'} />
           </div>
+          {result.traderPlan.action === 'SELL' && (
+            <p className="text-xs text-muted-foreground">
+              Short sale: you sell at the entry and profit if price falls. Stop loss sits <span className="text-red-400">above</span> entry to cap a rising-price loss; take profit sits <span className="text-emerald-400">below</span> entry where you cover and lock in gains.
+            </p>
+          )}
           <p className="text-sm text-muted-foreground">{result.traderPlan.rationale}</p>
         </CardContent>
       </Card>
