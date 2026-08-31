@@ -7,9 +7,6 @@ const translations = {
   en: {
     // ---- App / Header ----
     appSubtitle: 'Advanced Technical Analysis',
-    marketOpen: 'Market Open',
-    tenYearData: '10Y Data',
-    fiveStrategies: '5 Strategies',
     lastUpdated: 'Last updated',
     screener: 'Screener',
     tacticalEngine: 'Tactical Engine',
@@ -348,9 +345,6 @@ const translations = {
   'zh-TW': {
     // ---- App / Header ----
     appSubtitle: '進階技術分析平台',
-    marketOpen: '市場開放中',
-    tenYearData: '10年數據',
-    fiveStrategies: '5種策略',
     lastUpdated: '最後更新',
     screener: '選股器',
     tacticalEngine: '戰術引擎',

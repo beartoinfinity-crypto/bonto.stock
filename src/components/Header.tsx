@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { TrendingUp, BarChart3, Activity, Zap, Search, Globe, Crosshair, Settings, User, Grid3X3, SearchCode } from 'lucide-react';
+import { TrendingUp, Search, Globe, Crosshair, Settings, User, Grid3X3, SearchCode } from 'lucide-react';
 import { AlertPanel } from './AlertPanel';
 import { Alert, AlertConfig } from '@/lib/alertTypes';
 import { Button } from '@/components/ui/button';
@@ -95,22 +95,6 @@ export function Header({
                 <Settings className="h-4 w-4" />
               </Button>
             </Link>
-
-
-            <div className="hidden lg:flex items-center gap-6 text-sm">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Activity className="h-4 w-4 text-success" />
-                <span>{t('marketOpen')}</span>
-              </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <BarChart3 className="h-4 w-4 text-primary" />
-                <span>{t('tenYearData')}</span>
-              </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Zap className="h-4 w-4 text-warning" />
-                <span>{t('fiveStrategies')}</span>
-              </div>
-            </div>
 
             {lastUpdated && (
               <div className="px-3 py-1.5 bg-secondary rounded-lg text-xs font-mono hidden md:block">
