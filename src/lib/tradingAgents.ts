@@ -99,7 +99,8 @@ export interface TradingAgentsResult {
     rating: FinalRating;
     action: TraderPlan['action'];
     confidence: number;                  // 0-100
-    positionWeight: number;
+    positionWeight: number;              // recommended % of capital (risk-capped)
+    conviction: number;                  // 0-100 strength of the rating, for the hero bar
   };
   marketCondition: MarketCondition | null;
   liquidity: LiquidityResult | null;
@@ -527,7 +528,15 @@ function finalDecision(analysts: AnalystReport[], research: ResearchPreview, deb
 
   const confidence = Math.round(clamp(40 + Math.min(traderPlan.confidence, 60) + Math.abs(judge.points - 50) * 0.3, 30, 95));
 
-  return { rating, action, confidence, positionWeight: portfolio.positionWeight };
+  // Conviction drives the hero scoring bar. It is decoupled from positionWeight
+  // (which is risk-capped and not a strength gauge): a strong directional call
+  // reads as a full bar regardless of the small risk-derived position size.
+  const TIER_BASE: Record<FinalRating, number> = { Buy: 78, Overweight: 62, Hold: 50, Underweight: 38, Sell: 22 };
+  const conviction = rating === 'Hold'
+    ? 50
+    : Math.round(clamp(TIER_BASE[rating] + (confidence - 50) * 0.4, 5, 100));
+
+  return { rating, action, confidence, positionWeight: portfolio.positionWeight, conviction };
 }
 
 // --- Public entry point ------------------------------------------------------

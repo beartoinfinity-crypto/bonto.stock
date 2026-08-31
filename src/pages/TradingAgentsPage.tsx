@@ -414,10 +414,14 @@ function FinalHero({ result, ratingStyle }: { result: TradingAgentsResult; ratin
           </div>
         </div>
 
+        <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+          <span>Rating strength</span>
+          <span className="font-mono">Conviction {final.conviction}%</span>
+        </div>
         <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
           <div
             className={`h-full ${ratingStyle.bar} transition-all`}
-            style={{ width: `${final.positionWeight}%` }}
+            style={{ width: `${final.conviction}%` }}
           />
         </div>
 
