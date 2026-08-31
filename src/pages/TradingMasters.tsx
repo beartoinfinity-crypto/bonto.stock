@@ -111,6 +111,7 @@ export default function TradingMasters() {
 
   const buyCount = analyses.filter(a => a.verdict === 'BUY').length;
   const holdCount = analyses.filter(a => a.verdict === 'HOLD').length;
+  const watchCount = analyses.filter(a => a.verdict === 'WATCH').length;
   const sellCount = analyses.filter(a => a.verdict === 'SELL' || a.verdict === 'AVOID').length;
 
   const handleSearch = (e: React.FormEvent) => {
@@ -168,7 +169,7 @@ export default function TradingMasters() {
 
         {/* Summary */}
         {analyses.length > 0 && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
             <Card className="bg-success/10 border-success/20">
               <CardContent className="p-4 text-center">
                 <div className="text-3xl font-bold text-success">{buyCount}</div>
@@ -179,6 +180,12 @@ export default function TradingMasters() {
               <CardContent className="p-4 text-center">
                 <div className="text-3xl font-bold text-warning">{holdCount}</div>
                 <div className="text-sm text-muted-foreground">HOLD signals</div>
+              </CardContent>
+            </Card>
+            <Card className="bg-muted/50 border-border">
+              <CardContent className="p-4 text-center">
+                <div className="text-3xl font-bold text-muted-foreground">{watchCount}</div>
+                <div className="text-sm text-muted-foreground">WATCH signals</div>
               </CardContent>
             </Card>
             <Card className="bg-destructive/10 border-destructive/20">
