@@ -6,13 +6,32 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { useStockData } from '@/hooks/useStockData';
 import { Header } from '@/components/Header';
-import { popularStocks } from '@/lib/stockData';
+import { popularStocks, Stock } from '@/lib/stockData';
+import { toast } from 'sonner';
 import { runTradingAgents, TradingAgentsResult, AnalystReport, DebateEntry, RiskVerdict } from '@/lib/tradingAgents';
 import {
   TrendingUp, TrendingDown, Minus, Search, SearchCode, Scale, Shield, Target,
   Briefcase, Brain, Users, Gavel, Crosshair, AlertTriangle, CheckCircle, XCircle,
   BarChart3, Waves, Wallet, Radio, Loader2,
 } from 'lucide-react';
+
+// Placeholder Stock for a user-typed symbol not in the curated universe
+// (e.g. BE, DRAM). useStockData's live fetch overwrites the real metadata.
+function makeCustomStock(symbol: string): Stock {
+  return {
+    symbol,
+    name: symbol.toUpperCase(),
+    sector: 'Custom',
+    price: 0,
+    change: 0,
+    changePercent: 0,
+    volume: 0,
+    marketCap: '',
+    pe: 0,
+    week52High: 0,
+    week52Low: 0,
+  };
+}
 
 const BIAS_ICON: Record<string, React.ReactNode> = {
   bullish: <TrendingUp className="h-4 w-4" />,
@@ -78,11 +97,13 @@ export default function TradingAgentsPage() {
     const s = search.trim().toUpperCase();
     if (!s) return;
     const found = popularStocks.find((p) => p.symbol === s);
-    if (found) {
-      setSelectedStock(found);
-      setSearch('');
-    } else {
-      setError(`Unknown symbol "${s}". Pick one from the universe.`);
+    // For symbols outside the curated universe (e.g. BE, DRAM) build a
+    // placeholder stock — useStockData then resolves the real quote/history.
+    const target = found ?? makeCustomStock(s);
+    setSelectedStock(target);
+    setSearch('');
+    if (!found) {
+      toast.info(`Added "${s}" — fetching live data…`, { duration: 4000 });
     }
   };
 
