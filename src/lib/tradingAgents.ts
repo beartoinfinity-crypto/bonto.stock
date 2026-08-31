@@ -233,7 +233,7 @@ function fundamentalsAnalyst(symbol: string, deps: EngineDeps, masters: MasterAn
         ? 'The valuation-focused masters flag the company as expensive or overextended.'
         : 'Valuation masters are split — no clear fundamental edge either way.',
     evidence: evidence.slice(0, 6),
-    keyMetric: `${fundamentalMasters.filter((m) => m.verdict === 'BUY').length}/${fundamentalMasters.length} value buys`,
+    keyMetric: `${fundamentalMasters.filter((m) => m.verdict === 'BUY').length}/${fundamentalMasters.length} bulls vs ${fundamentalMasters.filter((m) => m.verdict === 'SELL' || m.verdict === 'AVOID').length} bears`,
   };
 }
 
