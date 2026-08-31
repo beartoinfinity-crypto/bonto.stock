@@ -310,7 +310,13 @@ function researchManager(analysts: AnalystReport[]): ResearchPreview {
   const bearish = analysts.filter((a) => a.bias === 'bearish');
   const neutral = analysts.filter((a) => a.bias === 'neutral');
 
-  const weighted = analysts.reduce((acc, a) => acc + a.score * (a.confidence / 100), 0);
+  // Per-analyst AVERAGE of score, confidence-weighted, so it is genuinely on a
+  // -100..+100 scale (each score is bounded to that range). Summing without
+  // dividing by the count inflated the magnitude (range -400..+400) and made the
+  // tilt look far more bearish/bullish than the actual analyst split supports.
+  const weighted = analysts.length
+    ? analysts.reduce((acc, a) => acc + a.score * (a.confidence / 100), 0) / analysts.length
+    : 0;
   const overallBias: AgentBias = weighted > 25 ? 'bullish' : weighted < -25 ? 'bearish' : 'neutral';
   const confidences = analysts.length ? analysts.reduce((a, b) => a + b.confidence, 0) / analysts.length : 0;
 
