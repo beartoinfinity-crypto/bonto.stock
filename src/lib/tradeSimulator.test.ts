@@ -4,6 +4,7 @@ import {
   runDayForPerson,
   accountEquity,
   personaPnl,
+  buildDecisionLog,
   STARTING_CASH,
   POSITION_FRACTION,
   valueDecision,
@@ -164,5 +165,29 @@ describe('tradeSimulator — persona decisions', () => {
     expect(agentDecision({ symbol: 'AAPL', price: 200, rating: 'Buy', conviction: 80 }).action).toBe('BUY');
     expect(agentDecision({ symbol: 'AAPL', price: 200, rating: 'Hold', conviction: 50 }).action).toBe('HOLD');
     expect(agentDecision({ symbol: 'AAPL', price: 200, rating: 'Sell', conviction: 20 }).action).toBe('SELL');
+  });
+});
+
+describe('tradeSimulator — decision log', () => {
+  it('buildDecisionLog records every evaluated symbol incl. HOLDs', () => {
+    const d: PersonaDaySignals = {
+      date: '2025-01-02',
+      personaId: 'value',
+      buySignals: [{ symbol: 'AAPL', price: 200, changePercent: 1, action: 'BUY', strength: 70, reason: 'consensus' }],
+      watch: [
+        { symbol: 'AAPL', price: 200, changePercent: 1, action: 'BUY', strength: 70, reason: 'consensus' },
+        { symbol: 'MSFT', price: 300, changePercent: 0, action: 'HOLD', strength: 0, reason: 'No signal evaluated' },
+      ],
+    };
+    const log = buildDecisionLog(d);
+    expect(log.date).toBe('2025-01-02');
+    expect(log.personaId).toBe('value');
+    expect(log.decisions).toHaveLength(2);
+    // BUY signal is preferred over the bare HOLD placeholder for the same symbol.
+    const aapl = log.decisions.find(x => x.symbol === 'AAPL');
+    expect(aapl?.action).toBe('BUY');
+    expect(aapl?.price).toBe(200);
+    expect(aapl?.reason).toBe('consensus');
+    expect(log.decisions.find(x => x.symbol === 'MSFT')?.action).toBe('HOLD');
   });
 });

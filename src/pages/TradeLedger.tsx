@@ -8,10 +8,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Header } from '@/components/Header';
 import { useTradeLedger } from '@/hooks/useTradeLedger';
 import {
-  PERSONAS, STARTING_CASH, accountEquity, personaPnl, PersonaId, Trade, Position,
+  PERSONAS, STARTING_CASH, accountEquity, personaPnl, PersonaId, Trade, Position, DailyDecisionLog,
 } from '@/lib/tradeSimulator';
 import {
-  Wallet, RefreshCw, RotateCcw, TrendingUp, TrendingDown, Minus, Users, History, Briefcase,
+  Wallet, RefreshCw, RotateCcw, TrendingUp, TrendingDown, Minus, Users, History, Briefcase, ListChecks,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -29,6 +29,13 @@ function pct(v: number): string {
 
 function actionColor(a: string): string {
   return a === 'BUY' ? 'text-emerald-500' : a === 'SELL' ? 'text-red-500' : 'text-muted-foreground';
+}
+
+function personDecisions(logs: DailyDecisionLog[], personaId: PersonaId) {
+  return logs
+    .filter(l => l.personaId === personaId)
+    .flatMap(l => l.decisions.map(d => ({ ...d, date: l.date })))
+    .sort((a, b) => (b.date < a.date ? -1 : b.date > a.date ? 1 : b.strength - a.strength));
 }
 
 export default function TradeLedger() {
@@ -228,6 +235,51 @@ export default function TradeLedger() {
                   </CardContent>
                 </Card>
               </div>
+
+              {/* Decisions for this person (accumulated daily log incl. HOLDs) */}
+              <Card className="mt-6">
+                <CardHeader>
+                  <CardTitle className="text-base flex items-center gap-2"><ListChecks className="h-4 w-4" /> Decisions — {p.name}</CardTitle>
+                  <CardDescription>Every symbol evaluated each day, with action, price and reason. Accumulates across days.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {p.id === active && personDecisions(ledger?.decisions ?? [], active).length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-4">No decisions recorded yet — hit "Run today".</p>
+                  ) : null}
+                  {p.id === active ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Date</TableHead>
+                          <TableHead>Symbol</TableHead>
+                          <TableHead>Action</TableHead>
+                          <TableHead>Buy</TableHead>
+                          <TableHead>Sell</TableHead>
+                          <TableHead className="text-right">Strength</TableHead>
+                          <TableHead className="text-right">Stop</TableHead>
+                          <TableHead className="text-right">Target</TableHead>
+                          <TableHead>Reason</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {personDecisions(ledger?.decisions ?? [], active).slice(0, 200).map((d, idx) => (
+                          <TableRow key={idx}>
+                            <TableCell className="font-mono text-xs">{d.date}</TableCell>
+                            <TableCell className="font-mono">{d.symbol}</TableCell>
+                            <TableCell className={actionColor(d.action)}>{d.action}</TableCell>
+                            <TableCell className="text-right font-mono text-xs">{d.buyCount ?? '—'}</TableCell>
+                            <TableCell className="text-right font-mono text-xs">{d.sellCount ?? '—'}</TableCell>
+                            <TableCell className="text-right font-mono text-xs">{d.strength ? d.strength.toFixed(0) : '—'}</TableCell>
+                            <TableCell className="text-right font-mono text-xs">{d.stopLoss ? nl(d.stopLoss) : '—'}</TableCell>
+                            <TableCell className="text-right font-mono text-xs">{d.takeProfit ? nl(d.takeProfit) : '—'}</TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{d.reason}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  ) : null}
+                </CardContent>
+              </Card>
             </TabsContent>
           ))}
         </Tabs>

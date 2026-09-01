@@ -192,7 +192,8 @@ New `/ledger` page ("Simulated Traders"). A cast of six named personas, each bou
 
 - **Money model**: long-only, real-calendar, $100k cash each; 10% of equity per buy; fill at the day's quote; -8% stop / +30% target; no fees/margin.
 - **Signal sourcing**: the shared universe is the Master Matrix's persisted top-50 cache (`stockpulse_masters_top50`) — Masters-based personas and Momentum consume those rows directly (no recompute). **If that cache is empty** (Matrix page never visited), it falls back to computing rows on the fly from `popularStocks` (the curated SP500/NASDAQ-100 universe of ~69 names) so the ledger always has symbols to trade. Tactical and Agent run their heavier engines on a bounded subset (`HEAVY_TOPN = 8` + current holdings) to keep each day cheap. Thresholds are tuned so each persona fires on a normal day (e.g. Value buys with ≥2 BUY votes, Momentum on Matrix score ≥25 + price above 20-SMA, Contrarian on the hated names).
-- **Persistence**: `stockpulse_trade_ledger` (a `DOCUMENT_KEY`), shape `LedgerStore { accounts, trades, lastRunDate, prices }`.
+- **Persistence**: `stockpulse_trade_ledger` (a `DOCUMENT_KEY`), shape `LedgerStore { accounts, trades, decisions, lastRunDate, prices }`.
+- **Decision log**: every symbol each persona evaluates each day is persisted in `decisions` (a `DailyDecisionLog` per persona+date), including **HOLDs** — recording action, price, strength/confidence, buy/sell vote counts, stop/target and a human-readable reason. Logs accumulate across days (a re-run replaces the same persona+date's entry, keeping older days). Shown in the per-person "Decisions" tab.
 - **Trigger**: auto-runs on `/ledger` load when `lastRunDate !== today`, plus a manual "Run today" (and "Reset") button. Mark-to-market leaderboard uses the last simulated day's `prices` snapshot.
 - Pure account math (`runDayForPerson`) is unit-tested (`tradeSimulator.test.ts`); signal sourcing lives in the hook.
 

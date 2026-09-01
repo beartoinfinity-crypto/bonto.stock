@@ -26,6 +26,7 @@ import {
   createLedger,
   holdSignal,
   runDayForPerson,
+  buildDecisionLog,
   valueDecision,
   wealthDecision,
   contrarianDecision,
@@ -46,7 +47,11 @@ type MatrixRow = StockMasterResult;
 function loadLedger(): LedgerStore {
   try {
     const raw = storage.getJson<LedgerStore>(LEDGER_KEY);
-    if (raw && raw.accounts && raw.trades) return raw;
+    if (raw && raw.accounts && raw.trades) {
+      if (!raw.decisions) raw.decisions = [];
+      if (!raw.prices) raw.prices = {};
+      return raw;
+    }
   } catch {
     /* ignore */
   }
@@ -202,11 +207,20 @@ export async function simulateDay(ledger: LedgerStore, date = todayStr()): Promi
     days.push({ date, personaId: p, buySignals, watch: dayWatch });
   }
 
-  // Apply each persona's day, persisting trades + account state.
+  // Apply each persona's day, persisting trades + account state, and record the
+  // full decision log for that persona+date (accumulating across days, `decisions`
+  // is keyed/runs by (personaId, date); we replace any prior entry for the same
+  // day so a re-run doesn't duplicate, while older days are kept).
   for (const day of days) {
     const { account, trades } = runDayForPerson(next.accounts[day.personaId], day);
     next.accounts[day.personaId] = account;
     next.trades.push(...trades);
+
+    const logEntry = buildDecisionLog(day);
+    next.decisions = (next.decisions ?? []).filter(
+      d => !(d.personaId === day.personaId && d.date === day.date)
+    );
+    next.decisions.push(logEntry);
   }
   next.lastRunDate = date;
   next.prices = prices;
