@@ -131,20 +131,20 @@ describe('tradeSimulator — money model', () => {
 });
 
 describe('tradeSimulator — persona decisions', () => {
-  it('valueDecision buys on strong BUY consensus', () => {
-    const s = valueDecision({ symbol: 'AAPL', price: 200, changePercent: 1, score: 60, buyCount: 6, sellCount: 1 });
+  it('valueDecision buys on BUY-leaning consensus', () => {
+    const s = valueDecision({ symbol: 'AAPL', price: 200, changePercent: 1, score: 27.5, buyCount: 2, sellCount: 1 });
     expect(s.action).toBe('BUY');
   });
 
   it('valueDecision holds on weak consensus', () => {
-    const s = valueDecision({ symbol: 'AAPL', price: 200, changePercent: 1, score: 10, buyCount: 1, sellCount: 1 });
+    const s = valueDecision({ symbol: 'AAPL', price: 200, changePercent: 1, score: 0, buyCount: 0, sellCount: 1 });
     expect(s.action).toBe('HOLD');
   });
 
-  it('wealthDecision needs ~60% buy votes', () => {
-    const hold = wealthDecision({ symbol: 'AAPL', price: 200, changePercent: 1, score: 40, buyCount: 5, sellCount: 2 });
+  it('wealthDecision needs a clear majority of buy votes', () => {
+    const hold = wealthDecision({ symbol: 'AAPL', price: 200, changePercent: 1, score: 27.5, buyCount: 2, sellCount: 1 });
     expect(hold.action).toBe('HOLD');
-    const buy = wealthDecision({ symbol: 'AAPL', price: 200, changePercent: 1, score: 60, buyCount: 8, sellCount: 1 });
+    const buy = wealthDecision({ symbol: 'AAPL', price: 200, changePercent: 1, score: 60, buyCount: 5, sellCount: 1 });
     expect(buy.action).toBe('BUY');
   });
 
@@ -154,9 +154,9 @@ describe('tradeSimulator — persona decisions', () => {
   });
 
   it('momentumDecision buys strong score + uptrend only', () => {
-    const up = momentumDecision({ symbol: 'AAPL', price: 200, changePercent: 1, score: 45, buyCount: 6, sellCount: 1 }, true);
+    const up = momentumDecision({ symbol: 'AAPL', price: 200, changePercent: 1, score: 27.5, buyCount: 2, sellCount: 1 }, true);
     expect(up.action).toBe('BUY');
-    const down = momentumDecision({ symbol: 'AAPL', price: 200, changePercent: 1, score: 45, buyCount: 6, sellCount: 1 }, false);
+    const down = momentumDecision({ symbol: 'AAPL', price: 200, changePercent: 1, score: 27.5, buyCount: 2, sellCount: 1 }, false);
     expect(down.action).toBe('SELL');
   });
 

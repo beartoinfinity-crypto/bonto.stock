@@ -107,11 +107,46 @@ async function historyFor(stock: Stock): Promise<StockData[]> {
   return generateHistoricalData(stock.price || 100);
 }
 
+/**
+ * Build the shared daily universe of analyzed rows.
+ *
+ * Prefers the Master Matrix's persisted top-50 cache (`stockpulse_masters_top50`,
+ * which carries each symbol's 12-master verdicts/scores — no recompute). If that
+ * cache is empty (the Master Matrix page hasn't been run in this browser yet),
+ * fall back to computing rows directly from `popularStocks` (the curated SP500 /
+ * NASDAQ-100 universe) so the ledger always has symbols to trade, independent of
+ * whether the Matrix page was ever visited.
+ */
+async function buildUniverse(): Promise<MatrixRow[]> {
+  const cached = loadMatrixRows();
+  if (cached.length > 0) return cached;
+
+  const rows: MatrixRow[] = [];
+  const batchSize = 6;
+  for (let i = 0; i < popularStocks.length; i += batchSize) {
+    const batch = popularStocks.slice(i, i + batchSize);
+    const done = await Promise.all(batch.map(async stock => {
+      try {
+        const price = stock.price || 100;
+        const hist = await historyFor(stock);
+        const input = buildStockInput({ ...stock, price }, hist);
+        const masters = analyzeStock(stock.symbol, input);
+        return summarizeMasterResult(stock.symbol, stock, price, stock.changePercent ?? 0, masters, {
+          isSimulated: true,
+        });
+      } catch {
+        return null;
+      }
+    }));
+    for (const r of done) if (r) rows.push(r);
+  }
+  return rows;
+}
+
 /** Run a full simulation day across all personas. Returns the updated ledger. */
 export async function simulateDay(ledger: LedgerStore, date = todayStr()): Promise<LedgerStore> {
-  const rows = loadMatrixRows();
+  const rows = await buildUniverse();
   const next = JSON.parse(JSON.stringify(ledger)) as LedgerStore;
-  // clear lastRunDate on all accounts; we'll set per-person below
   const symbols = new Map<string, MatrixRow>();
   for (const r of rows) symbols.set(r.symbol.toUpperCase(), r);
 

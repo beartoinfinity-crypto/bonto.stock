@@ -263,12 +263,11 @@ export interface MatrixRowLike {
 }
 
 /**
- * Value — buys only when the 12 Masters show a strong BUY consensus.
+ * Value — buys only when the 12 Masters show a BUY-leaning consensus.
  */
 export function valueDecision(r: MatrixRowLike): SymbolSignal {
-  const VOTE_NEEDED = 4;
-  const CONF_NEEDED = 60;
-  const buy = r.buyCount >= VOTE_NEEDED && (r.buyCount / 12) * 100 >= 40;
+  const VOTE_NEEDED = 2;
+  const buy = r.buyCount >= VOTE_NEEDED;
   const strength = (r.buyCount / 12) * 100;
   const action: Action = buy ? 'BUY' : r.sellCount >= 4 ? 'SELL' : 'HOLD';
   return {
@@ -279,11 +278,11 @@ export function valueDecision(r: MatrixRowLike): SymbolSignal {
 }
 
 /**
- * Wealth — an even stricter value screen (needs ~60%+ BUY votes).
+ * Wealth — a stricter value screen (needs a clear majority of BUY votes).
  */
 export function wealthDecision(r: MatrixRowLike): SymbolSignal {
   const ratio = r.buyCount / 12;
-  const action: Action = ratio >= 0.6 ? 'BUY' : r.sellCount >= 5 ? 'SELL' : 'HOLD';
+  const action: Action = ratio >= 0.35 ? 'BUY' : r.sellCount >= 5 ? 'SELL' : 'HOLD';
   const strength = ratio * 100;
   return {
     symbol: r.symbol, price: r.price, changePercent: r.changePercent,
@@ -297,8 +296,8 @@ export function wealthDecision(r: MatrixRowLike): SymbolSignal {
  * they recover to a BUY-leaning consensus.
  */
 export function contrarianDecision(r: MatrixRowLike): SymbolSignal {
-  const hated = r.sellCount >= 5 && r.buyCount <= 2;
-  const action: Action = hated ? 'BUY' : r.buyCount >= 5 ? 'SELL' : 'HOLD';
+  const hated = r.sellCount >= 4 && r.buyCount <= 2;
+  const action: Action = hated ? 'BUY' : r.buyCount >= 3 ? 'SELL' : 'HOLD';
   const strength = Math.min(100, r.sellCount * 14);
   return {
     symbol: r.symbol, price: r.price, changePercent: r.changePercent,
@@ -312,7 +311,7 @@ export function contrarianDecision(r: MatrixRowLike): SymbolSignal {
  * carries score and trend info; `trendUp` is derived by the caller (price vs SMA).
  */
 export function momentumDecision(r: MatrixRowLike, trendUp: boolean): SymbolSignal {
-  const inTop = r.score >= 30; // strong consensus-weighted score
+  const inTop = r.score >= 25; // solid consensus-weighted score
   const action: Action = inTop && trendUp ? 'BUY' : !trendUp ? 'SELL' : 'HOLD';
   const strength = Math.min(100, r.score);
   return {
