@@ -137,6 +137,32 @@ app.get('/api/finnhub/sentiment', async (req, res) => {
   }
 });
 
+// --- Finnhub earnings surprises proxy --------------------------------
+// GET /api/finnhub/earnings-surprises?symbol=AAPL
+// Provides BEAT/MISS history for the /hedge-fund PEAD page as a backup
+// to Yahoo's 401-protected quoteSummary `earnings` module.
+app.get('/api/finnhub/earnings-surprises', async (req, res) => {
+  if (!FINNHUB_KEY) {
+    return res.status(503).json({ error: 'FINNHUB_API_KEY not configured' });
+  }
+  const symbol = (req.query.symbol || '').toUpperCase();
+  if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
+
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000);
+    const url = `https://finnhub.io/api/v1/stock/earnings-surprises?symbol=${symbol}&token=${FINNHUB_KEY}`;
+    const response = await fetch(url, { signal: ctrl.signal });
+    clearTimeout(timer);
+    const data = await response.json();
+    res.set('Access-Control-Allow-Origin', '*');
+    res.json(data);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(502).json({ error: 'Finnhub fetch failed', detail: msg });
+  }
+});
+
 // --- Google Trends proxy --------------------------------------------
 // GET /api/google-trends?keyword=AAPL
 // Calls Google Trends explore + widgetdata server-side to avoid CORS.

@@ -147,7 +147,7 @@ Rule-based TypeScript port of the ai-hedge-fund `pead.py` **Post-Earnings Announ
 | `surpriseToConviction(pct)` | Maps surprise magnitude to [-1, +1], saturating at ±25% |
 | `parseQuarterEnd(period)` | "1Q2024" → `2024-03-31` (approximate filing point for the window check) |
 
-The page fetches quarterly actuals/estimates via `fetchEarningsSurprises` (in `stockApi.ts`, Yahoo quoteSummary `earnings` module, surprise % derived from actual−estimate), then runs `computePEAD`. A fresh surprise (within the 45-day drift window) carries full conviction; a stale one still reports a residual lean; no surprise → abstain (0). The `hedge_fund/` port powers the `/hedge-fund` page.
+The page fetches quarterly actuals/estimates via `getEarningsSurprises` (in `stockApi.ts`), which hits the cached local sql.js metadata store first (24h TTL), then Yahoo quoteSummary `earnings` module (surprise % derived from actual−estimate), then **falls back to the Finnhub `/stock/earnings-surprises` endpoint** via the `/api/finnhub/earnings-surprises` server proxy (requires `FINNHUB_API_KEY`, same as the sentiment proxy). A fresh surprise (within the 45-day drift window) carries full conviction; a stale one still reports a residual lean; no surprise → abstain (0). The `hedge_fund/` port powers the `/hedge-fund` page.
 
 ### `src/lib/supabaseHistory.ts` — Stored OHLCV (158 lines)
 

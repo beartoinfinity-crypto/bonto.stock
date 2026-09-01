@@ -15,7 +15,7 @@ const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
 // Now import stockApi (after mocks are in place)
-const { fetchStockQuote, fetchEarningsSurprises, getEarningsSurprises, resetYahooCrumb } = await import('./stockApi');
+const { fetchStockQuote, fetchEarningsSurprises, fetchFinnhubEarningsSurprises, getEarningsSurprises, resetYahooCrumb } = await import('./stockApi');
 
 const { getMeta, putMeta } = await import('./localDb');
 
@@ -267,6 +267,46 @@ describe('fetchEarningsSurprises', () => {
 
     expect(rows).not.toBeNull();
     expect(rows).toHaveLength(1);
+    expect(putMeta).toHaveBeenCalledWith('pead::AAPL', rows);
+  });
+
+  it('fetchFinnhubEarningsSurprises maps Finnhub payload to surprise rows', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse([
+      { symbol: 'AAPL', quarter: 3, year: 2024, actual: 1.15, estimate: 1.13, surprise: 0.02, surprisePercent: 1.77 },
+      { symbol: 'AAPL', quarter: 4, year: 2024, actual: 2.0, estimate: 1.8, surprise: 0.2, surprisePercent: 11.11 },
+    ]));
+
+    const rows = await fetchFinnhubEarningsSurprises('aapl');
+
+    expect(rows).not.toBeNull();
+    expect(rows).toHaveLength(2);
+    expect(rows![0]).toMatchObject({
+      period: '3Q2024',
+      date: '2024-09-30',
+      actual: 1.15,
+      estimate: 1.13,
+      surprise: 0.02,
+      surprisePercent: 1.77,
+    });
+    expect(mockFetch).toHaveBeenCalledWith('/api/finnhub/earnings-surprises?symbol=AAPL');
+  });
+
+  it('getEarningsSurprises falls back to Finnhub when Yahoo returns no data and caches the result', async () => {
+    vi.mocked(getMeta).mockResolvedValueOnce(null);
+    setupMocks(
+      jsonResponse({ crumb: 'crumbE5' }),
+      jsonResponse({ quoteSummary: { result: [{}] } }), // Yahoo host1: no quarterly
+      jsonResponse({ quoteSummary: { result: [{}] } }), // Yahoo host2: no quarterly
+      jsonResponse([
+        { symbol: 'AAPL', quarter: 1, year: 2024, actual: 1.2, estimate: 1.0, surprise: 0.2, surprisePercent: 20 },
+      ]),
+    );
+
+    const rows = await getEarningsSurprises('AAPL');
+
+    expect(rows).not.toBeNull();
+    expect(rows).toHaveLength(1);
+    expect(rows![0].period).toBe('1Q2024');
     expect(putMeta).toHaveBeenCalledWith('pead::AAPL', rows);
   });
 });

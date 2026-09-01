@@ -479,16 +479,62 @@ export async function fetchEarningsSurprises(symbol: string): Promise<EarningsSu
 const EARNINGS_CACHE_KEY = (symbol: string) => `pead::${symbol.toUpperCase()}`;
 const EARNINGS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h — quarterly actuals are stable between reports
 
+interface FinnhubEarningsRow {
+  symbol: string;
+  quarter: number;
+  year: number;
+  actual: number;
+  estimate: number;
+  surprise: number;
+  surprisePercent: number;
+}
+
+/**
+ * Backup earnings-surprise source via the Finnhub server proxy (requires
+ * FINNHUB_API_KEY env var). Finnhub reports fields directly, unlike Yahoo's
+ * `{raw}` objects, so map them onto the shared EarningsSurpriseRow shape.
+ */
+export async function fetchFinnhubEarningsSurprises(symbol: string): Promise<EarningsSurpriseRow[] | null> {
+  const upper = symbol.toUpperCase();
+  const res = await fetch(`/api/finnhub/earnings-surprises?symbol=${encodeURIComponent(upper)}`);
+  if (!res.ok) return null;
+  const data: FinnhubEarningsRow[] | { error?: string } = await res.json().catch(() => null);
+  if (!Array.isArray(data) || data.length === 0) return null;
+
+  const rows: EarningsSurpriseRow[] = data
+    .map((r) => {
+      const period = `${r.quarter}Q${r.year}`;
+      const surprise = Number.isFinite(r.surprise) ? Math.round(r.surprise * 100) / 100 : null;
+      const surprisePercent = Number.isFinite(r.surprisePercent) ? Math.round(r.surprisePercent * 100) / 100 : null;
+      return {
+        period,
+        date: parseQuarterLabelToISO(period),
+        actual: Number.isFinite(r.actual) ? r.actual : null,
+        estimate: Number.isFinite(r.estimate) ? r.estimate : null,
+        surprise,
+        surprisePercent,
+      };
+    })
+    .filter((r) => r.actual !== null && r.estimate !== null)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  return rows.length > 0 ? rows : null;
+}
+
 /**
  * Cached earnings surprises for the PEAD page. Hits the local sql.js metadata
- * store first (24h TTL) and only queries Yahoo Finance when the cache is empty
- * or stale, so visiting /hedge-fund doesn't hammer Yahoo on every load.
+ * store first (24h TTL), then tries Yahoo Finance, then the Finnhub proxy as a
+ * backup, caching whatever succeeds so /hedge-fund doesn't hammer providers.
  */
 export async function getEarningsSurprises(symbol: string): Promise<EarningsSurpriseRow[] | null> {
   const cached = await getMeta(EARNINGS_CACHE_KEY(symbol), EARNINGS_CACHE_TTL_MS);
   if (Array.isArray(cached)) return cached as EarningsSurpriseRow[];
 
-  const rows = await fetchEarningsSurprises(symbol);
+  let rows = await fetchEarningsSurprises(symbol);
+  if (!rows || rows.length === 0) {
+    rows = await fetchFinnhubEarningsSurprises(symbol);
+  }
+
   if (rows && rows.length > 0) {
     await putMeta(EARNINGS_CACHE_KEY(symbol), rows);
   }
