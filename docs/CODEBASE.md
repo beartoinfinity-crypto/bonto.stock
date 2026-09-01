@@ -95,13 +95,15 @@ Fetch chain: `proxyFetch()` → server proxy first → direct → CORS proxies.
 
 | Function | Purpose |
 |----------|---------|
-| `fetchStockQuote(symbol)` | Yahoo v8 chart → Stooq CSV → mock |
+| `fetchStockQuote(symbol)` | cache → Finnhub quote → Yahoo v8 chart → Stooq CSV → mock |
 | `fetchHistoricalData(symbol)` | 10y daily OHLCV. Yahoo v8 → Stooq → synthetic |
 | `getYahooCrumb()` | `/api/yahoo/crumb`, cached 30 min |
 | `fetchQuoteSummary(symbol)` | Yahoo v10: P/E, market cap, sector |
 | `localFundamentals(symbol)` | Curated fallback (name, sector, marketCap, pe) from `popularStocks`. Used when live `quoteSummary` returns null. |
 
 **Fundamentals fallback chain:** `quoteFromYahoo`/`quoteFromStooq` try live `fetchQuoteSummary`, then fall back to `localFundamentals()`. The cached-quote return path in `fetchStockQuote` also self-heals stale/blank fundamentals by merging curated values. Custom symbols not in `popularStocks` will still show `Unknown/N/A/0` when the live endpoint is unreachable.
+
+**Fresh-quote speed (Master Matrix):** `fetchStockQuote` reads the local cache first, then (for uncached symbols) tries `quoteFromFinnhub` via the `/api/finnhub/quote` proxy — which rotates over the server `FINNHUB_API_KEY`/`FINNHUB_API_KEY_2` env keys plus any browser-saved `api_key`/`api_key_2` tokens — before falling back to Yahoo/Stooq. This makes fresh quote retrieval on the Master Matrix page much faster than Yahoo's slow/blocked endpoints. `useMasterMatrix.runAnalysis` also fetches in larger batches (6) with a shorter 120 ms delay between them.
 
 ### `src/lib/masterAnalysis.ts` — 12 Trading Masters (594 lines)
 

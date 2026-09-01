@@ -63,8 +63,40 @@ function setupMocks(...responses: unknown[]) {
 }
 
 describe('fetchStockQuote — quoteSummary integration', () => {
+  // A Finnhub proxy "miss" (`ok: false`) makes fetchStockQuote fall through to
+  // the Yahoo provider, preserving the behaviour the older tests exercise.
+  const finnhubMiss = { ok: false } as Response;
+
+  it('uses Finnhub first for a fresh quote and maps its fields', async () => {
+    setupMocks(
+      jsonResponse({ finnhubStatus: 200, body: JSON.stringify({ c: 195.89, pc: 190.0, d: 5.89, dp: 3.1 }) }),
+    );
+
+    const result = await fetchStockQuote('AAPL');
+    expect(result.data?.price).toBe(195.89);
+    expect(result.data?.change).toBe(5.89);
+    expect(result.data?.changePercent).toBe(3.1);
+    expect(result.data?.sector).toBe('Technology');
+  });
+
+  it('falls back to Yahoo when the Finnhub quote proxy fails', async () => {
+    setupMocks(
+      finnhubMiss,
+      jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 195.89, fiftyTwoWeekHigh: 199.62, fiftyTwoWeekLow: 164.08, longName: 'Apple Inc.' }, indicators: { quote: [{ close: [190, 192, 195.89], volume: [50e6, 55e6, 60e6] }] } }] } }),
+      jsonResponse({ crumb: 'abc123crumb' }),
+      jsonResponse({ quoteSummary: { result: [{ summaryDetail: { trailingPE: { raw: 32.1 }, marketCap: { raw: 3_000_000_000_000 } }, assetProfile: { sector: 'Technology' } }] } }),
+    );
+
+    const result = await fetchStockQuote('AAPL');
+    expect(result.data?.price).toBe(195.89);
+    expect(result.data?.name).toBe('Apple Inc.');
+    expect(result.data?.marketCap).toBe('3T');
+    expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/api/finnhub/quote'));
+  });
+
   it('populates pe, marketCap and sector from v10 with crumb', async () => {
     setupMocks(
+      finnhubMiss,
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 195.89, fiftyTwoWeekHigh: 199.62, fiftyTwoWeekLow: 164.08, longName: 'Apple Inc.' }, indicators: { quote: [{ close: [190, 192, 195.89], volume: [50e6, 55e6, 60e6] }] } }] } }),
       jsonResponse({ crumb: 'abc123crumb' }),  // server-side crumb
       jsonResponse({ quoteSummary: { result: [{ summaryDetail: { trailingPE: { raw: 32.1 }, marketCap: { raw: 3_000_000_000_000 } }, assetProfile: { sector: 'Technology' } }] } }),
@@ -80,6 +112,7 @@ describe('fetchStockQuote — quoteSummary integration', () => {
 
   it('formats marketCap as billions', async () => {
     setupMocks(
+      finnhubMiss,
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 45.20 }, indicators: { quote: [{ close: [44, 45], volume: [10e6, 12e6] }] } }] } }),
       jsonResponse({ crumb: 'crumbXYZ' }),
       jsonResponse({ quoteSummary: { result: [{ summaryDetail: { trailingPE: { raw: 12.5 }, marketCap: { raw: 180_000_000_000 } }, assetProfile: { sector: 'Technology' } }] } }),
@@ -94,6 +127,7 @@ describe('fetchStockQuote — quoteSummary integration', () => {
   it('falls back to defaults when crumb and summary both fail', async () => {
     // chart succeeds, crumb fails, then v10 fails for both hosts (4 proxy attempts each = 8 errors)
     setupMocks(
+      finnhubMiss,
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 100.0 }, indicators: { quote: [{ close: [99, 100], volume: [1e6, 2e6] }] } }] } }),
       'error', // crumb fails
       'error', 'error', 'error', 'error', // host 1: server + direct + 2 CORS proxies
@@ -108,6 +142,7 @@ describe('fetchStockQuote — quoteSummary integration', () => {
 
   it('falls back to curated local fundamentals when quoteSummary is unreachable for a tracked symbol', async () => {
     setupMocks(
+      finnhubMiss,
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 100.0 }, indicators: { quote: [{ close: [99, 100], volume: [1e6, 2e6] }] } }] } }),
       'error', // crumb fails
       'error', 'error', 'error', 'error', // host 1: server + direct + 2 CORS proxies
@@ -125,6 +160,7 @@ describe('fetchStockQuote — quoteSummary integration', () => {
 
   it('falls back when quoteSummary returns empty result', async () => {
     setupMocks(
+      finnhubMiss,
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 100.0 }, indicators: { quote: [{ close: [99, 100], volume: [1e6, 2e6] }] } }] } }),
       jsonResponse({ crumb: 'crumbOK' }),
       jsonResponse({ quoteSummary: { result: [{}] } }),
@@ -140,6 +176,7 @@ describe('fetchStockQuote — quoteSummary integration', () => {
 
   it('returns N/A marketCap when marketCap is missing', async () => {
     setupMocks(
+      finnhubMiss,
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 10.0 }, indicators: { quote: [{ close: [9, 10], volume: [1e6, 2e6] }] } }] } }),
       jsonResponse({ crumb: 'crumbOK' }),
       jsonResponse({ quoteSummary: { result: [{ summaryDetail: { trailingPE: { raw: 15.0 } }, assetProfile: { sector: 'Healthcare' } }] } }),
@@ -153,6 +190,7 @@ describe('fetchStockQuote — quoteSummary integration', () => {
 
   it('returns 0 pe when trailingPE is missing', async () => {
     setupMocks(
+      finnhubMiss,
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 50.0 }, indicators: { quote: [{ close: [49, 50], volume: [3e6, 4e6] }] } }] } }),
       jsonResponse({ crumb: 'crumbOK' }),
       jsonResponse({ quoteSummary: { result: [{ summaryDetail: { marketCap: { raw: 5_000_000_000 } }, assetProfile: { sector: 'Financial' } }] } }),

@@ -327,6 +327,43 @@ async function historyFromStooq(symbol: string): Promise<StockData[] | null> {
 
 // ─── Public API ────────────────────────────────────────────────────
 
+/**
+ * Finnhub quote provider for fresh (uncached) lookups. Uses the keys saved on
+ * the Settings page (both api_key and api_key_2) via the /api/finnhub/quote
+ * proxy, which rotates over the server env keys and any `tokens`. Fast for the
+ * Master Matrix page which re-quotes many symbols that have no local cache yet.
+ */
+async function quoteFromFinnhub(symbol: string): Promise<Stock | null> {
+  const keys = getConfiguredFinnhubKeys();
+  const tokens = keys.length ? `&tokens=${encodeURIComponent(keys.join(','))}` : '';
+  const res = await fetch(`/api/finnhub/quote?symbol=${encodeURIComponent(symbol)}${tokens}`);
+  if (!res.ok) return null;
+  const wrapped: { finnhubStatus?: number; body?: string } = await res.json().catch(() => ({}));
+  let data: { c?: number; d?: number; dp?: number; pc?: number } | null = null;
+  try {
+    data = wrapped.body ? JSON.parse(wrapped.body) : null;
+  } catch { /* not JSON */ }
+  const price = data && typeof data.c === 'number' ? data.c : null;
+  if (!price || price <= 0) return null;
+  const prevClose = typeof data.pc === 'number' && data.pc > 0 ? data.pc : price;
+  const local = localFundamentals(symbol);
+  const change = typeof data.d === 'number' ? data.d : price - prevClose;
+  const changePercent = typeof data.dp === 'number' ? data.dp : (prevClose ? ((price - prevClose) / prevClose) * 100 : 0);
+  return {
+    symbol,
+    name: local.name || symbol,
+    sector: local.sector,
+    price,
+    change,
+    changePercent,
+    volume: 0,
+    marketCap: local.marketCap,
+    pe: local.pe,
+    week52High: 0,
+    week52Low: 0,
+  };
+}
+
 export async function fetchStockQuote(symbol: string, forceRefresh = false): Promise<FetchResult<Stock>> {
   if (!forceRefresh) {
     const cached = await getQuote(symbol);
@@ -345,6 +382,7 @@ export async function fetchStockQuote(symbol: string, forceRefresh = false): Pro
   }
 
   const providers: Array<{ name: string; run: () => Promise<Stock | null> }> = [
+    { name: 'finnhub', run: () => quoteFromFinnhub(symbol) },
     { name: 'yahoo', run: () => quoteFromYahoo(symbol) },
     { name: 'stooq', run: () => quoteFromStooq(symbol) },
   ];

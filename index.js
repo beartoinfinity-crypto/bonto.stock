@@ -202,6 +202,70 @@ app.get('/api/finnhub/earnings-surprises', async (req, res) => {
   });
 });
 
+// GET /api/finnhub/quote?symbol=AAPL&tokens=k1,k2
+// Fast quote proxy for fresh (uncached) price lookups — e.g. the Master Matrix
+// page. Mirrors the earnings-surprises rotation: tries the server env keys
+// (FINNHUB_API_KEY, FINNHUB_API_KEY_2) plus any browser-supplied `tokens`,
+// skipping rate-limited / invalid keys, and returns the first valid quote.
+app.get('/api/finnhub/quote', async (req, res) => {
+  const symbol = (req.query.symbol || '').toUpperCase();
+  if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
+
+  const envKeys = [
+    process.env.FINNHUB_API_KEY,
+    process.env.FINNHUB_API_KEY_2,
+  ].filter(Boolean);
+  const tokens = String(req.query.tokens || '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+  const keys = [...new Set([...envKeys, ...tokens])];
+  if (keys.length === 0) {
+    return res.status(503).json({ error: 'No Finnhub API key configured' });
+  }
+
+  let lastDetail = 'no keys returned data';
+  for (const key of keys) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    try {
+      const url = `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${key}`;
+      const response = await fetch(url, { signal: ctrl.signal });
+      const raw = await response.text();
+      const isHtml = /^\s*(<!DOCTYPE|<html)/i.test(raw);
+      let json = null;
+      try {
+        json = JSON.parse(raw);
+      } catch { /* not JSON */ }
+      const blocked =
+        isHtml ||
+        response.status === 429 ||
+        (json && typeof json.error === 'string' && /access|plan|rate|subscri|unavailable/i.test(json.error));
+      if (blocked) {
+        lastDetail = json?.error || `HTTP ${response.status}`;
+        continue;
+      }
+      // A valid quote has current price `c`; empty object `{}` means unknown symbol.
+      if (!json || typeof json.c !== 'number') {
+        lastDetail = 'no quote';
+        continue;
+      }
+      res.set('Access-Control-Allow-Origin', '*');
+      return res.status(response.status).json({ finnhubStatus: response.status, body: raw });
+    } catch (err) {
+      lastDetail = err instanceof Error ? err.message : String(err);
+      continue;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  res.status(502).json({
+    error: 'All Finnhub keys failed or lack access',
+    detail: lastDetail,
+  });
+});
+
 // --- stockanalysis.com earnings proxy --------------------------------
 // GET /api/earnings/stockanalysis?symbol=AAPL
 // Keyless backup for the /hedge-fund PEAD page. stockanalysis.com exposes

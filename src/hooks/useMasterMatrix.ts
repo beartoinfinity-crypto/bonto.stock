@@ -338,7 +338,7 @@ export function useMasterMatrix(): UseMasterMatrixResult {
     setProgress(0);
 
     const analyzed: StockMasterResult[] = [];
-    const batchSize = 2;
+    const batchSize = 6;
     for (let i = 0; i < universe.length; i += batchSize) {
       const batch = universe.slice(i, i + batchSize);
       const batchDone = batch.map(stock => {
@@ -367,7 +367,7 @@ export function useMasterMatrix(): UseMasterMatrixResult {
       setResults([...analyzed].slice(0, MASTER_MATRIX_SIZE));
       setProgress(Math.min(i + batchSize, universe.length));
       if (i + batchSize < universe.length) {
-        await new Promise(resolve => setTimeout(resolve, 400));
+        await new Promise(resolve => setTimeout(resolve, 120));
       }
     }
 
