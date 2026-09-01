@@ -449,10 +449,13 @@ export interface EarningsSurpriseRow {
  * unreachable.
  */
 export async function fetchEarningsSurprises(symbol: string): Promise<EarningsSurpriseRow[] | null> {
+  const crumb = await getYahooCrumb();
   const hosts = ['https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com'];
   for (const host of hosts) {
     try {
-      const url = `${host}/v10/finance/quoteSummary/${encodeURIComponent(symbol.toUpperCase())}?modules=earnings&crumb=`;
+      // The quoteSummary `earnings` module is 401-protected and needs a crumb,
+      // exactly like `summaryDetail`/`assetProfile`. Build it the same way.
+      const url = `${host}/v10/finance/quoteSummary/${encodeURIComponent(symbol.toUpperCase())}?modules=earnings&crumb=${encodeURIComponent(crumb ?? '')}`;
       const data = await fetchJson(url, 8000, { 'User-Agent': 'Mozilla/5.0' });
       const quarterly = data?.quoteSummary?.result?.[0]?.earnings?.earningsChart?.quarterly;
       if (!Array.isArray(quarterly) || quarterly.length === 0) continue;

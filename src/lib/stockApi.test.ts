@@ -164,6 +164,7 @@ describe('fetchStockQuote — quoteSummary integration', () => {
 describe('fetchEarningsSurprises', () => {
   it('parses quarterly earnings into surprise rows', async () => {
     setupMocks(
+      jsonResponse({ crumb: 'crumbE1' }),
       jsonResponse({
         quoteSummary: {
           result: [{
@@ -196,6 +197,7 @@ describe('fetchEarningsSurprises', () => {
 
   it('derives a surprise percentage from actual/estimate when vectors are blank', async () => {
     setupMocks(
+      jsonResponse({ crumb: 'crumbE2' }),
       jsonResponse({
         quoteSummary: {
           result: [{
@@ -217,7 +219,10 @@ describe('fetchEarningsSurprises', () => {
   });
 
   it('returns null when no quarterly data is present', async () => {
-    setupMocks(jsonResponse({ quoteSummary: { result: [{}] } }));
+    setupMocks(
+      jsonResponse({ crumb: 'crumbE3' }),
+      jsonResponse({ quoteSummary: { result: [{}] } }),
+    );
     const rows = await fetchEarningsSurprises('XXX');
     expect(rows).toBeNull();
   });
