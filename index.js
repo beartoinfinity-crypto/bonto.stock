@@ -150,13 +150,19 @@ app.get('/api/finnhub/earnings-surprises', async (req, res) => {
 
   try {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 10000);
+    const timer = setTimeout(() => ctrl.abort(), 15000);
     const url = `https://finnhub.io/api/v1/stock/earnings-surprises?symbol=${symbol}&token=${FINNHUB_KEY}`;
     const response = await fetch(url, { signal: ctrl.signal });
     clearTimeout(timer);
-    const data = await response.json();
+    // Forward whatever Finnhub actually returned (status + raw text) so we can
+    // distinguish plan-restriction, rate-limit, or empty-data failures instead
+    // of collapsing them into an opaque 502.
+    const raw = await response.text();
     res.set('Access-Control-Allow-Origin', '*');
-    res.json(data);
+    res.status(response.status).json({
+      finnhubStatus: response.status,
+      body: raw,
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     res.status(502).json({ error: 'Finnhub fetch failed', detail: msg });
