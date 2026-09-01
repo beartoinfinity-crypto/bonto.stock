@@ -13,7 +13,7 @@ const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
 // Now import stockApi (after mocks are in place)
-const { fetchStockQuote, resetYahooCrumb } = await import('./stockApi');
+const { fetchStockQuote, fetchEarningsSurprises, resetYahooCrumb } = await import('./stockApi');
 
 function jsonResponse(data: unknown) {
   return {
@@ -158,5 +158,67 @@ describe('fetchStockQuote — quoteSummary integration', () => {
     expect(result.data?.pe).toBe(0);
     expect(result.data?.marketCap).toBe('5B');
     expect(result.data?.sector).toBe('Financial');
+  });
+});
+
+describe('fetchEarningsSurprises', () => {
+  it('parses quarterly earnings into surprise rows', async () => {
+    setupMocks(
+      jsonResponse({
+        quoteSummary: {
+          result: [{
+            earnings: {
+              earningsChart: {
+                quarterly: [
+                  { date: '1Q2024', actual: { raw: 1.2 }, estimate: { raw: 1.0 } },
+                  { date: '2Q2024', actual: { raw: 0.95 }, estimate: { raw: 1.0 } },
+                ],
+              },
+            },
+          }],
+        },
+      }),
+    );
+
+    const rows = await fetchEarningsSurprises('aapl');
+    expect(rows).not.toBeNull();
+    expect(rows).toHaveLength(2);
+    expect(rows![0]).toMatchObject({
+      period: '1Q2024',
+      date: '2024-03-31',
+      actual: 1.2,
+      estimate: 1.0,
+      surprise: 0.2,
+      surprisePercent: 20,
+    });
+    expect(rows![1].surprisePercent).toBeCloseTo(-5.0);
+  });
+
+  it('derives a surprise percentage from actual/estimate when vectors are blank', async () => {
+    setupMocks(
+      jsonResponse({
+        quoteSummary: {
+          result: [{
+            earnings: {
+              earningsChart: {
+                quarterly: [
+                  { date: '3Q2024', actual: 3.0, estimate: 2.5 },
+                ],
+              },
+            },
+          }],
+        },
+      }),
+    );
+
+    const rows = await fetchEarningsSurprises('MSFT');
+    expect(rows?.[0].surprise).toBe(0.5);
+    expect(rows?.[0].surprisePercent).toBe(20);
+  });
+
+  it('returns null when no quarterly data is present', async () => {
+    setupMocks(jsonResponse({ quoteSummary: { result: [{}] } }));
+    const rows = await fetchEarningsSurprises('XXX');
+    expect(rows).toBeNull();
   });
 });

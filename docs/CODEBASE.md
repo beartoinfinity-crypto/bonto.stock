@@ -89,7 +89,7 @@ Five jobs, run while a tab is open:
 
 Key: `proxyFetch()` chains server proxy → direct → CORS proxies (legacy).
 
-### `src/lib/stockApi.ts` — Yahoo Finance (364 lines)
+### `src/lib/stockApi.ts` — Yahoo Finance (484 lines)
 
 Fetch chain: `proxyFetch()` → server proxy first → direct → CORS proxies.
 
@@ -135,6 +135,19 @@ Key behavioral details of recent fixes (all rule-based):
 - **Researcher Debate points** (`researcherDebate`): bull/bear researcher points are **relative share** (`bullStrength/(bullStrength+bearStrength)×100`, likewise bear), so bull+bear ≈ 100 rather than saturating at an arbitrary ×3 cap. The judge's points are `clamp(|net|, 0, 100)`. The Trader agent's `bullPts/bearPts > 45` guard is now a majority-share gate, while the judge still needs absolute `|net| > 20` to set direction.
 - **Fundamentals analyst** (`fundamentalsAnalyst`): the headline reads `${bullCount}/${total} bulls vs ${bearCount} bears` and the summary is driven by the raw master **vote split** (`margin ≥ 2` bullish, `≤ −2` bearish, else lean/evenly-split), not solely by weighted bias. Masters run through the shared `masterAnalysis.ts` engine with `FUNDAMENTAL_MASTER_IDS` = `['buffett-graham','greenblatt','peter-lynch','munger','marks','templeton']`.
 - **Portfolio Manager** (`portfolioManager`): exposes `sizingPersona` (a `PERSONA_CAP` map) and the decision panel shows `{persona} cap {base}% · position {n}%`; liquidity evidence uses `toFixed(2)`.
+
+### `src/lib/peadAnalysis.ts` — PEAD Alpha Model (~90 lines)
+
+Rule-based TypeScript port of the ai-hedge-fund `pead.py` **Post-Earnings Announcement Drift** quant alpha model — **no AI/ML/LLM**. It scores a stock's drift signal from quarterly earnings surprises (BEAT / MISS).
+
+| Export | Purpose |
+|--------|---------|
+| `computePEAD(symbol, quarterly, asOf, opts)` → `PEADResult` | Core view: picks the most recent non-INLINE surprise (point-in-time ≤ asOf), checks the drift window, returns a `signal` in [-1, +1] with `reasoning` and a chronological `history[]` |
+| `classifySurprise(pct)` | ±N% band → `BEAT` / `MISS` / `INLINE` (default ±1%) |
+| `surpriseToConviction(pct)` | Maps surprise magnitude to [-1, +1], saturating at ±25% |
+| `parseQuarterEnd(period)` | "1Q2024" → `2024-03-31` (approximate filing point for the window check) |
+
+The page fetches quarterly actuals/estimates via `fetchEarningsSurprises` (in `stockApi.ts`, Yahoo quoteSummary `earnings` module, surprise % derived from actual−estimate), then runs `computePEAD`. A fresh surprise (within the 45-day drift window) carries full conviction; a stale one still reports a residual lean; no surprise → abstain (0). The `hedge_fund/` port powers the `/hedge-fund` page.
 
 ### `src/lib/supabaseHistory.ts` — Stored OHLCV (158 lines)
 
@@ -200,6 +213,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | `/` | Index — Dashboard (891 lines) | `useStockData` |
 | `/masters` | TradingMasters — 12-investor analyzer (281 lines) | `analyzeStock` + `summarizeMasterResult`; verdict summary boxes (BUY/HOLD/WATCH/SELL-AVOID), per-master cards |
 | `/trading-agents` | TradingAgentsPage — multi-agent report (391 lines) | `runTradingAgents`; analyst team, bull/bear debate, trader plan, risk committee, portfolio decision, final 5-tier rating |
+| `/hedge-fund` | HedgeFundPage — PEAD alpha model (291 lines) | `fetchEarningsSurprises` + `computePEAD`; quarterly EPS surprise → drift conviction |
 | `/masters-matrix` | MasterMatrix — Top-50 matrix (521 lines) | `useMasterMatrix`; universe/custom-stock picker, rank, rows link to history |
 | `/masters-matrix/:symbol` | StockHistory — Per-stock history (275 lines) | `useMasterMatrix`; 12-master verdicts per day, stats, "Backfill past year" |
 | `/tactical` | Tactical — Trade planner (662 lines) | `useTacticalHistory`, `tacticalEngine` |
@@ -227,7 +241,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | `PriceChart.tsx` | 259 | Candlestick + volume, canvas rendering. |
 | `ForecastSimulator.tsx` | 270 | Monte Carlo paths + percentile bands. |
 | `StockNews.tsx` | 276 | Aggregated news headlines. |
-| `Header.tsx` | 225 | Nav bar with links + search + dark mode. |
+| `Header.tsx` | 142 | Nav bar with links + search + dark mode (Market Open/10Y Data/5 Strategies labels removed). |
 
 ## Remaining Lib Files
 
@@ -235,6 +249,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 |------|-------|---------|
 | `tacticalEngine.ts` | 755 | Regime state machine, 3 entry weapons, position sizing, trailing exit, iceberg execution, `replayEngine()` backtest. |
 | `tradingAgents.ts` | 573 | Rule-based reimplementation of the TradingAgents multi-agent workflow → 5-tier final rating. No AI/ML. |
+| `peadAnalysis.ts` | 177 | PEAD (post-earnings drift) alpha model — surprise → drift conviction. Port of ai-hedge-fund `pead.py`. No AI/ML. |
 | `strategyRecommendation.ts` | 581 | Market condition analysis → strategy recommendation with confidence + suitability. |
 | `stockScreener.ts` | — | `screenerStocks` list, filter types. |
 | `useScreenerData.ts` | 361 | Fetches all screener stocks, runs recommendations, caches results. |

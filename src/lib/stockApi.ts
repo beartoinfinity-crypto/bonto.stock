@@ -399,3 +399,86 @@ export async function fetchHistoricalData(symbol: string, forceRefresh = false):
     fromCache: false,
   };
 }
+
+// ─── Earnings surprises (PEAD input) ──────────────────────────────────
+
+/**
+ * Compute an EPS surprise % from a quarterly actual-minus-estimate pair.
+ * Yahoo's quarterly `surprise`/`surprisePercent` fields are frequently blank,
+ * so the surprise is derived from actual and estimate, falling back to Yahoo's
+ * own numbers when present.
+ */
+interface YahooEarningsRow {
+  date?: unknown;
+  actual?: { raw?: number } | number;
+  estimate?: { raw?: number } | number;
+}
+
+function rowNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (value && typeof value === 'object' && typeof (value as { raw?: unknown }).raw === 'number') {
+    return (value as { raw: number }).raw;
+  }
+  return null;
+}
+
+function computeSurprisePair(q: YahooEarningsRow): { actual: number | null; estimate: number | null; surprise: number | null; surprisePercent: number | null } {
+  const actual = rowNumber(q.actual);
+  const estimate = rowNumber(q.estimate);
+  if (actual == null || estimate == null) {
+    return { actual, estimate, surprise: null, surprisePercent: null };
+  }
+  const surprise = Math.round((actual - estimate) * 100) / 100;
+  const surprisePercent = estimate !== 0 ? Math.round((surprise / Math.abs(estimate)) * 10_000) / 100 : null;
+  return { actual, estimate, surprise, surprisePercent };
+}
+
+export interface EarningsSurpriseRow {
+  period: string;
+  date: string;
+  actual: number | null;
+  estimate: number | null;
+  surprise: number | null;
+  surprisePercent: number | null;
+}
+
+/**
+ * Fetch recent quarterly earnings actuals vs estimates for a symbol via the
+ * Yahoo quoteSummary `earnings` module (allows `earningsHistory` for a deeper
+ * panel). Returns rows ordered by quarter ascending. Null if the provider is
+ * unreachable.
+ */
+export async function fetchEarningsSurprises(symbol: string): Promise<EarningsSurpriseRow[] | null> {
+  const hosts = ['https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com'];
+  for (const host of hosts) {
+    try {
+      const url = `${host}/v10/finance/quoteSummary/${encodeURIComponent(symbol.toUpperCase())}?modules=earnings&crumb=`;
+      const data = await fetchJson(url, 8000, { 'User-Agent': 'Mozilla/5.0' });
+      const quarterly = data?.quoteSummary?.result?.[0]?.earnings?.earningsChart?.quarterly;
+      if (!Array.isArray(quarterly) || quarterly.length === 0) continue;
+      const rows: EarningsSurpriseRow[] = quarterly.map((q: YahooEarningsRow) => {
+        const pair = computeSurprisePair(q);
+        return {
+          period: typeof q?.date === 'string' ? q.date : '',
+          date: typeof q?.date === 'string' ? parseQuarterLabelToISO(q.date) : '',
+          actual: pair.actual,
+          estimate: pair.estimate,
+          surprise: pair.surprise,
+          surprisePercent: pair.surprisePercent,
+        };
+      });
+      return rows;
+    } catch { continue; }
+  }
+  return null;
+}
+
+/** Convert a Yahoo quarter label like "1Q2024" into an ISO end-of-quarter date string. */
+function parseQuarterLabelToISO(period: string): string {
+  const qEnd: Record<number, string> = { 1: '-03-31', 2: '-06-30', 3: '-09-30', 4: '-12-31' };
+  const m = /(?:(\d)[Qq]|Q[Qq]?(\d))\s*[-/]?\s*(20\d\d)/.exec(period.trim());
+  const qNum = m ? Number(m[1] ?? m[2]) : NaN;
+  const year = m ? Number(m[3]) : NaN;
+  if (!Number.isFinite(qNum) || qNum < 1 || qNum > 4 || !Number.isFinite(year) || !qEnd[qNum]) return '';
+  return `${year}${qEnd[qNum]}`;
+}
