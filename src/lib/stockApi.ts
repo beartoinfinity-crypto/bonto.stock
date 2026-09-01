@@ -549,8 +549,9 @@ export async function fetchFinnhubEarningsSurprises(symbol: string): Promise<Ear
 
 /**
  * Cached earnings surprises for the PEAD page. Hits the local sql.js metadata
- * store first (24h TTL), then tries Yahoo Finance, then the Finnhub proxy as a
- * backup, caching whatever succeeds so /hedge-fund doesn't hammer providers.
+ * store first (24h TTL), then tries Yahoo, Finnhub, and the keyless
+ * stockanalysis.com source in order, caching whatever succeeds so /hedge-fund
+ * doesn't hammer providers.
  */
 export async function getEarningsSurprises(symbol: string): Promise<EarningsSurpriseRow[] | null> {
   const cached = await getMeta(EARNINGS_CACHE_KEY(symbol), EARNINGS_CACHE_TTL_MS);
@@ -560,11 +561,77 @@ export async function getEarningsSurprises(symbol: string): Promise<EarningsSurp
   if (!rows || rows.length === 0) {
     rows = await fetchFinnhubEarningsSurprises(symbol);
   }
+  if (!rows || rows.length === 0) {
+    rows = await fetchStockAnalysisEarnings(symbol);
+  }
 
   if (rows && rows.length > 0) {
     await putMeta(EARNINGS_CACHE_KEY(symbol), rows);
   }
   return rows;
+}
+
+interface StockAnalysisEarningsEntry {
+  date: string;
+  year?: number;
+  period?: string;
+  eps_est: number | null;
+  eps_actual: number | null;
+  eps_surprise: number | null;
+  eps_surprise_percent: number | null;
+  confirmed?: boolean;
+}
+
+function monthToQuarter(dateIso: string): number | null {
+  const d = new Date(dateIso);
+  const m = d.getUTCMonth() + 1;
+  if (Number.isNaN(m)) return null;
+  return Math.ceil(m / 3);
+}
+
+/**
+ * Keyless earnings-surprise fallback via stockanalysis.com (proxied server-side
+ * as /api/earnings/stockanalysis). Works without any API key, so the PEAD page
+ * still gets BEAT/MISS history even when Yahoo's crumb and Finnhub keys are
+ * blocked or rate-limited.
+ */
+export async function fetchStockAnalysisEarnings(symbol: string): Promise<EarningsSurpriseRow[] | null> {
+  const upper = symbol.toUpperCase().replace(/[^A-Z0-9.-]/g, '');
+  const res = await fetch(`/api/earnings/stockanalysis?symbol=${encodeURIComponent(upper)}`);
+  if (!res.ok) return null;
+  const wrapped: { status?: number; body?: string } = await res.json().catch(() => ({}));
+  let payload: unknown;
+  try {
+    payload = wrapped.body ? JSON.parse(wrapped.body) : null;
+  } catch {
+    return null;
+  }
+  const arr = payload && typeof payload === 'object' && Array.isArray((payload as { data?: unknown }).data)
+    ? ((payload as { data: StockAnalysisEarningsEntry[] }).data)
+    : null;
+  if (!arr || arr.length === 0) return null;
+
+  const rows: EarningsSurpriseRow[] = [];
+  for (const e of arr) {
+    if (!e || e.confirmed !== true || e.eps_actual == null || e.eps_est == null) continue;
+    const q = monthToQuarter(e.date);
+    if (!q) continue;
+    const year = new Date(e.date).getUTCFullYear();
+    if (!Number.isFinite(year)) continue;
+    const period = `${q}Q${year}`;
+    const surprise = Number.isFinite(e.eps_surprise as number) ? Math.round((e.eps_surprise as number) * 100) / 100 : null;
+    const surprisePercent = Number.isFinite(e.eps_surprise_percent as number) ? Math.round((e.eps_surprise_percent as number) * 10000) / 100 : null;
+    rows.push({
+      period,
+      date: parseQuarterLabelToISO(period),
+      actual: e.eps_actual,
+      estimate: e.eps_est,
+      surprise,
+      surprisePercent,
+    });
+  }
+  rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  return rows.length > 0 ? rows : null;
 }
 
 /** Convert a Yahoo quarter label like "1Q2024" into an ISO end-of-quarter date string. */

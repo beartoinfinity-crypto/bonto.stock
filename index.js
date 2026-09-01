@@ -202,6 +202,33 @@ app.get('/api/finnhub/earnings-surprises', async (req, res) => {
   });
 });
 
+// --- stockanalysis.com earnings proxy --------------------------------
+// GET /api/earnings/stockanalysis?symbol=AAPL
+// Keyless backup for the /hedge-fund PEAD page. stockanalysis.com exposes
+// per-quarter EPS actual/estimate/surprise as JSON (no API key needed), which
+// works even when Yahoo's crumb and Finnhub keys are blocked or rate-limited.
+app.get('/api/earnings/stockanalysis', async (req, res) => {
+  const symbol = String(req.query.symbol || '').toUpperCase().replace(/[^A-Z0-9.-]/g, '');
+  if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
+
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    const url = `https://stockanalysis.com/api/symbol/s/${encodeURIComponent(symbol)}/earnings/`;
+    const response = await fetch(url, {
+      signal: ctrl.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+    });
+    clearTimeout(timer);
+    const raw = await response.text();
+    res.set('Access-Control-Allow-Origin', '*');
+    res.status(response.status).json({ status: response.status, body: raw });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(502).json({ error: 'stockanalysis fetch failed', detail: msg });
+  }
+});
+
 // --- Google Trends proxy --------------------------------------------
 // GET /api/google-trends?keyword=AAPL
 // Calls Google Trends explore + widgetdata server-side to avoid CORS.
