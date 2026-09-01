@@ -1,5 +1,5 @@
 import { Stock, StockData, popularStocks, generateHistoricalData } from './stockData';
-import { getQuote, putQuote, getHistorical, putHistorical, type CachedQuote } from './localDb';
+import { getQuote, putQuote, getHistorical, putHistorical, getMeta, putMeta, type CachedQuote } from './localDb';
 
 export interface FetchResult<T> {
   data: T | null;
@@ -474,6 +474,25 @@ export async function fetchEarningsSurprises(symbol: string): Promise<EarningsSu
     } catch { continue; }
   }
   return null;
+}
+
+const EARNINGS_CACHE_KEY = (symbol: string) => `pead::${symbol.toUpperCase()}`;
+const EARNINGS_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h — quarterly actuals are stable between reports
+
+/**
+ * Cached earnings surprises for the PEAD page. Hits the local sql.js metadata
+ * store first (24h TTL) and only queries Yahoo Finance when the cache is empty
+ * or stale, so visiting /hedge-fund doesn't hammer Yahoo on every load.
+ */
+export async function getEarningsSurprises(symbol: string): Promise<EarningsSurpriseRow[] | null> {
+  const cached = await getMeta(EARNINGS_CACHE_KEY(symbol), EARNINGS_CACHE_TTL_MS);
+  if (Array.isArray(cached)) return cached as EarningsSurpriseRow[];
+
+  const rows = await fetchEarningsSurprises(symbol);
+  if (rows && rows.length > 0) {
+    await putMeta(EARNINGS_CACHE_KEY(symbol), rows);
+  }
+  return rows;
 }
 
 /** Convert a Yahoo quarter label like "1Q2024" into an ISO end-of-quarter date string. */

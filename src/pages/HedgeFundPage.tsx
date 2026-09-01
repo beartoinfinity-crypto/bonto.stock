@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/table';
 import { useStockData } from '@/hooks/useStockData';
 import { Header } from '@/components/Header';
-import { fetchEarningsSurprises, EarningsSurpriseRow } from '@/lib/stockApi';
+import { getEarningsSurprises, EarningsSurpriseRow } from '@/lib/stockApi';
 import {
   computePEAD, PEADResult, PEADEvent, EarningsSurpriseDirection, QuarterlyEarnings,
 } from '@/lib/peadAnalysis';
@@ -58,7 +58,7 @@ export default function HedgeFundPage() {
     setResult(null);
     setWithEarnings(null);
     try {
-      const rows = await fetchEarningsSurprises(sym);
+      const rows = await getEarningsSurprises(sym);
       if (rows && rows.length > 0) {
         const res = computePEAD(sym, toQuarterly(rows), new Date().toISOString());
         setWithEarnings(true);

@@ -6,6 +6,8 @@ vi.mock('./localDb', () => ({
   putQuote: vi.fn().mockResolvedValue(undefined),
   getHistorical: vi.fn().mockResolvedValue(null),
   putHistorical: vi.fn().mockResolvedValue(undefined),
+  getMeta: vi.fn().mockResolvedValue(null),
+  putMeta: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Mock fetch globally BEFORE importing stockApi
@@ -13,7 +15,9 @@ const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
 // Now import stockApi (after mocks are in place)
-const { fetchStockQuote, fetchEarningsSurprises, resetYahooCrumb } = await import('./stockApi');
+const { fetchStockQuote, fetchEarningsSurprises, getEarningsSurprises, resetYahooCrumb } = await import('./stockApi');
+
+const { getMeta, putMeta } = await import('./localDb');
 
 function jsonResponse(data: unknown) {
   return {
@@ -225,5 +229,44 @@ describe('fetchEarningsSurprises', () => {
     );
     const rows = await fetchEarningsSurprises('XXX');
     expect(rows).toBeNull();
+  });
+
+  it('getEarningsSurprises returns cached rows without calling Yahoo', async () => {
+    const cached = [
+      { period: '4Q2024', date: '2024-12-31', actual: 2.0, estimate: 1.8, surprise: 0.2, surprisePercent: 11.11 },
+    ];
+    vi.mocked(getMeta).mockResolvedValueOnce(cached);
+
+    const rows = await getEarningsSurprises('AAPL');
+
+    expect(rows).toEqual(cached);
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(putMeta).not.toHaveBeenCalled();
+  });
+
+  it('getEarningsSurprises fetches and stores on cache miss', async () => {
+    vi.mocked(getMeta).mockResolvedValueOnce(null);
+    setupMocks(
+      jsonResponse({ crumb: 'crumbE4' }),
+      jsonResponse({
+        quoteSummary: {
+          result: [{
+            earnings: {
+              earningsChart: {
+                quarterly: [
+                  { date: '1Q2024', actual: { raw: 1.2 }, estimate: { raw: 1.0 } },
+                ],
+              },
+            },
+          }],
+        },
+      }),
+    );
+
+    const rows = await getEarningsSurprises('AAPL');
+
+    expect(rows).not.toBeNull();
+    expect(rows).toHaveLength(1);
+    expect(putMeta).toHaveBeenCalledWith('pead::AAPL', rows);
   });
 });
