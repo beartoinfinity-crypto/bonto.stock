@@ -177,9 +177,28 @@ Central state for the Master Matrix and history pages.
 | History storage | localStorage key `stockpulse_master_matrix` (single source of truth for past snapshots) |
 | Backfill | `loadMatrix` exported; standalone `backfillStockHistory(symbol, maxDays=365)` computes per-day analyses from stored bars and merges snapshots (replaces that date range, keeps others). Hook's `backfillHistory` is a thin wrapper |
 
-### `src/lib/syncKeys.ts` — Synced Keys (31 lines)
+### `src/hooks/useTradeLedger.ts` + `src/lib/tradeSimulator.ts` — Simulated Traders Ledger
+
+New `/ledger` page ("Simulated Traders"). A cast of six named personas, each bound to a distinct engine, buy/sell across a shared universe daily and record every transaction in a persisted ledger.
+
+| Persona | Engine | Rule |
+|---------|--------|------|
+| Warren (value) | 12 Masters | BUY on strong consensus (≥4 buy votes & high strength), SELL on flip |
+| Eleanor (wealth) | 12 Masters | Stricter — needs ~60% buy vote |
+| Temple (contrarian) | 12 Masters (inverted) | Buys hated names (high SELL/AVOID), sells on recovery |
+| Nancy (momentum) | Matrix rank | Buys strong score + price above 20-SMA, sells when it falls below |
+| Jerry (tactical) | `runEngine` | BUY on `entrySignal`, honors engine stops/targets + position size |
+| Ada (agent) | `runTradingAgents` | BUY on Buy/Overweight + conviction |
+
+- **Money model**: long-only, real-calendar, $100k cash each; 10% of equity per buy; fill at the day's quote; -8% stop / +30% target; no fees/margin.
+- **Signal sourcing**: reuses the Master Matrix's persisted top-50 cache (`stockpulse_masters_top50`) for the shared universe — Masters-based personas and Momentum consume those rows directly (no recompute). Tactical and Agent run their heavier engines on a bounded subset (`HEAVY_TOPN = 8` + current holdings) to keep each day cheap.
+- **Persistence**: `stockpulse_trade_ledger` (a `DOCUMENT_KEY`), shape `LedgerStore { accounts, trades, lastRunDate, prices }`.
+- **Trigger**: auto-runs on `/ledger` load when `lastRunDate !== today`, plus a manual "Run today" (and "Reset") button. Mark-to-market leaderboard uses the last simulated day's `prices` snapshot.
+- Pure account math (`runDayForPerson`) is unit-tested (`tradeSimulator.test.ts`); signal sourcing lives in the hook.
 
 ### `src/lib/stockData.ts` — Analytics Engine (866 lines)
+
+### `src/lib/syncKeys.ts` — Synced Keys (31 lines)
 
 **No AI/ML.** Rule-based signals, template narratives.
 
@@ -204,7 +223,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 ### `src/lib/syncKeys.ts` — Synced Keys (31 lines)
 
 `CONFIG_KEYS`: watchlist, users, auth, admin auth, API config, lang, recent stocks.
-`DOCUMENT_KEYS`: screener results, AVS results, politician trades, featured trades, cron history, alerts, market snapshot.
+`DOCUMENT_KEYS`: screener results, AVS results, politician trades, featured trades, cron history, alerts, market snapshot, trade ledger.
 
 ---
 
@@ -218,6 +237,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | `/hedge-fund` | HedgeFundPage — PEAD alpha model (291 lines) | `fetchEarningsSurprises` + `computePEAD`; quarterly EPS surprise → drift conviction |
 | `/masters-matrix` | MasterMatrix — Top-50 matrix (521 lines) | `useMasterMatrix`; universe/custom-stock picker, rank, rows link to history |
 | `/masters-matrix/:symbol` | StockHistory — Per-stock history (275 lines) | `useMasterMatrix`; 12-master verdicts per day, stats, "Backfill past year" |
+| `/ledger` | TradeLedger — Simulated traders (new) | `useTradeLedger` + `tradeSimulator`; persona leaderboard, positions, per-person trades, merged all-transactions ledger; auto-runs daily |
 | `/tactical` | Tactical — Trade planner (662 lines) | `useTacticalHistory`, `tacticalEngine` |
 | `/screener` | Screener — Batch screen (604 lines) | `useScreenerData` |
 | `/settings` | Settings — Config (767 lines) | Auth, watchlist, Supabase, DB ops |

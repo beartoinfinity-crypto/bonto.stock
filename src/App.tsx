@@ -10,6 +10,7 @@ import TradingMasters from "./pages/TradingMasters";
 import TradingAgentsPage from "./pages/TradingAgentsPage";
 import MasterMatrix from "./pages/MasterMatrix";
 import StockHistory from "./pages/StockHistory";
+import TradeLedger from "./pages/TradeLedger";
 import NotFound from "./pages/NotFound";
 import Settings from "./pages/Settings";
 import ApiSettings from "./pages/ApiSettings";
@@ -59,6 +60,7 @@ const App = () => (
             <Route path="/trading-agents" element={<TradingAgentsPage />} />
             <Route path="/masters-matrix" element={<MasterMatrix />} />
             <Route path="/masters-matrix/:symbol" element={<StockHistory />} />
+            <Route path="/ledger" element={<TradeLedger />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/api-settings" element={<ApiSettings />} />
             <Route path="/admin" element={<Admin />} />

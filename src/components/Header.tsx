@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { TrendingUp, Search, Globe, Crosshair, Settings, User, Grid3X3, SearchCode } from 'lucide-react';
+import { TrendingUp, Search, Globe, Crosshair, Settings, User, Grid3X3, SearchCode, Wallet } from 'lucide-react';
 import { AlertPanel } from './AlertPanel';
 import { Alert, AlertConfig } from '@/lib/alertTypes';
 import { Button } from '@/components/ui/button';
@@ -86,6 +86,14 @@ export function Header({
               <Button variant="outline" size="sm" className="gap-2">
                 <Grid3X3 className="h-4 w-4" />
                 <span className="hidden sm:inline">Matrix</span>
+              </Button>
+            </Link>
+
+            {/* Simulated Traders Ledger Link */}
+            <Link to="/ledger">
+              <Button variant="outline" size="sm" className="gap-2">
+                <Wallet className="h-4 w-4" />
+                <span className="hidden sm:inline">Ledger</span>
               </Button>
             </Link>
 
