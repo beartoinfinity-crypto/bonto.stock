@@ -120,16 +120,40 @@ export default function ApiSettings() {
     setTesting(providerId);
     try {
       if (providerId === 'finnhub') {
-        const key = config.finnhub?.api_key;
-        if (!key) throw new Error('API key required');
-        const res = await fetch(`https://finnhub.io/api/v1/quote?symbol=AAPL&token=${key}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        if (data.c) {
-          toast.success(`Finnhub OK — AAPL $${data.c}`);
-        } else {
-          toast.warning('Connected but no data');
+        const keys = [
+          { label: 'Key #1', value: config.finnhub?.api_key },
+          { label: 'Key #2', value: config.finnhub?.api_key_2 },
+        ].filter(k => k.value && k.value.trim());
+        if (keys.length === 0) throw new Error('At least one API key required');
+
+        const results: string[] = [];
+        for (const k of keys) {
+          const token = k.value.trim();
+          try {
+            const q = await fetch(`https://finnhub.io/api/v1/quote?symbol=AAPL&token=${token}`).then(r => r.json()).catch(() => null);
+            const price = q && q.c ? `$${q.c}` : 'no quote';
+            let earn = 'n/a';
+            try {
+              const eRes = await fetch(`https://finnhub.io/api/v1/stock/earnings-surprises?symbol=AAPL&token=${token}`);
+              const eText = await eRes.text();
+              const isHtml = /^\s*(<!DOCTYPE|<html)/i.test(eText);
+              if (eRes.ok && !isHtml) {
+                const arr = JSON.parse(eText);
+                earn = Array.isArray(arr) && arr.length ? `earn ${arr.length}q` : 'earn 0q';
+              } else if (eRes.status === 429) {
+                earn = 'earn rate-limited';
+              } else {
+                earn = 'earn blocked';
+              }
+            } catch {
+              earn = 'earn failed';
+            }
+            results.push(`${k.label}: ${price}, ${earn}`);
+          } catch (e) {
+            results.push(`${k.label}: ${e instanceof Error ? e.message : 'failed'}`);
+          }
         }
+        toast.success(`Finnhub — ${results.join('  |  ')}`);
       } else if (providerId === 'twelvedata') {
         const key = config.twelvedata?.api_key;
         if (!key) throw new Error('API key required');
