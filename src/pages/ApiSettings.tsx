@@ -45,6 +45,7 @@ const PROVIDERS: ProviderConfig[] = [
     description: 'Stock quotes, company profiles, metrics, and news. Free tier: 60 calls/min.',
     fields: [
       { key: 'api_key', label: 'API key', type: 'key', placeholder: 'cn(...)', required: true },
+      { key: 'api_key_2', label: 'API key #2 (optional, for rotation)', type: 'key', placeholder: 'cn(...)' },
     ],
   },
   {

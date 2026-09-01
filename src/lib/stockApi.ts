@@ -490,18 +490,44 @@ interface FinnhubEarningsRow {
 }
 
 /**
- * Backup earnings-surprise source via the Finnhub server proxy (requires
- * FINNHUB_API_KEY env var). Finnhub reports fields directly, unlike Yahoo's
- * `{raw}` objects, so map them onto the shared EarningsSurpriseRow shape.
+ * Reads the Finnhub API key(s) the user saved on the Settings page
+ * (`stockpulse_api_config` in localStorage). The proxy tries these client keys
+ * in addition to the server env keys, and rotates on rate-limit/access errors.
+ */
+function getConfiguredFinnhubKeys(): string[] {
+  try {
+    const cfg = JSON.parse(localStorage.getItem('stockpulse_api_config') || '{}');
+    const f = (cfg && cfg.finnhub) || {};
+    return [f.api_key, f.api_key_2].filter(
+      (k): k is string => typeof k === 'string' && k.trim().length > 0,
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Backup earnings-surprise source via the Finnhub server proxy. Sends any
+ * user-configured keys as `tokens` so the proxy can rotate between them; parses
+ * the proxy's wrapped `{finnhubStatus, body}` payload and maps the rows onto
+ * the shared EarningsSurpriseRow shape.
  */
 export async function fetchFinnhubEarningsSurprises(symbol: string): Promise<EarningsSurpriseRow[] | null> {
   const upper = symbol.toUpperCase();
-  const res = await fetch(`/api/finnhub/earnings-surprises?symbol=${encodeURIComponent(upper)}`);
+  const keys = getConfiguredFinnhubKeys();
+  const tokens = keys.length ? `&tokens=${encodeURIComponent(keys.join(','))}` : '';
+  const res = await fetch(`/api/finnhub/earnings-surprises?symbol=${encodeURIComponent(upper)}${tokens}`);
   if (!res.ok) return null;
-  const data: FinnhubEarningsRow[] | { error?: string } = await res.json().catch(() => null);
+  const wrapped: { finnhubStatus?: number; body?: string } = await res.json().catch(() => ({}));
+  let data: unknown;
+  try {
+    data = wrapped.body ? JSON.parse(wrapped.body) : null;
+  } catch {
+    return null;
+  }
   if (!Array.isArray(data) || data.length === 0) return null;
 
-  const rows: EarningsSurpriseRow[] = data
+  const rows: EarningsSurpriseRow[] = (data as FinnhubEarningsRow[])
     .map((r) => {
       const period = `${r.quarter}Q${r.year}`;
       const surprise = Number.isFinite(r.surprise) ? Math.round(r.surprise * 100) / 100 : null;

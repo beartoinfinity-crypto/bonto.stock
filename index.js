@@ -138,35 +138,68 @@ app.get('/api/finnhub/sentiment', async (req, res) => {
 });
 
 // --- Finnhub earnings surprises proxy --------------------------------
-// GET /api/finnhub/earnings-surprises?symbol=AAPL
+// GET /api/finnhub/earnings-surprises?symbol=AAPL&tokens=k1,k2
 // Provides BEAT/MISS history for the /hedge-fund PEAD page as a backup
 // to Yahoo's 401-protected quoteSummary `earnings` module.
+//
+// Multiple API keys are supported: the server env keys (FINNHUB_API_KEY,
+// FINNHUB_API_KEY_2) plus any browser-supplied `tokens` the client sends from
+// the Settings page. Keys are tried in order, skipping any that are
+// rate-limited or that lack access (Finnhub serves an HTML paywall for paid
+// endpoints like earnings-surprises).
 app.get('/api/finnhub/earnings-surprises', async (req, res) => {
-  if (!FINNHUB_KEY) {
-    return res.status(503).json({ error: 'FINNHUB_API_KEY not configured' });
-  }
   const symbol = (req.query.symbol || '').toUpperCase();
   if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
 
-  try {
+  const envKeys = [
+    process.env.FINNHUB_API_KEY,
+    process.env.FINNHUB_API_KEY_2,
+  ].filter(Boolean);
+  const tokens = String(req.query.tokens || '')
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+  const keys = [...new Set([...envKeys, ...tokens])];
+  if (keys.length === 0) {
+    return res.status(503).json({ error: 'No Finnhub API key configured' });
+  }
+
+  let lastDetail = 'no keys returned data';
+  for (const key of keys) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 15000);
-    const url = `https://finnhub.io/api/v1/stock/earnings-surprises?symbol=${symbol}&token=${FINNHUB_KEY}`;
-    const response = await fetch(url, { signal: ctrl.signal });
-    clearTimeout(timer);
-    // Forward whatever Finnhub actually returned (status + raw text) so we can
-    // distinguish plan-restriction, rate-limit, or empty-data failures instead
-    // of collapsing them into an opaque 502.
-    const raw = await response.text();
-    res.set('Access-Control-Allow-Origin', '*');
-    res.status(response.status).json({
-      finnhubStatus: response.status,
-      body: raw,
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    res.status(502).json({ error: 'Finnhub fetch failed', detail: msg });
+    try {
+      const url = `https://finnhub.io/api/v1/stock/earnings-surprises?symbol=${symbol}&token=${key}`;
+      const response = await fetch(url, { signal: ctrl.signal });
+      const raw = await response.text();
+      const isHtml = /^\s*(<!DOCTYPE|<html)/i.test(raw);
+      let json = null;
+      try {
+        json = JSON.parse(raw);
+      } catch { /* not JSON */ }
+      // Treat rate-limits, HTML paywalls, and access errors as "try next key".
+      const blocked =
+        isHtml ||
+        response.status === 429 ||
+        (json && typeof json.error === 'string' && /access|plan|rate|subscri|unavailable/i.test(json.error));
+      if (blocked) {
+        lastDetail = json?.error || `HTTP ${response.status}`;
+        continue;
+      }
+      res.set('Access-Control-Allow-Origin', '*');
+      return res.status(response.status).json({ finnhubStatus: response.status, body: raw });
+    } catch (err) {
+      lastDetail = err instanceof Error ? err.message : String(err);
+      continue;
+    } finally {
+      clearTimeout(timer);
+    }
   }
+
+  res.status(502).json({
+    error: 'All Finnhub keys failed or lack access',
+    detail: lastDetail,
+  });
 });
 
 // --- Google Trends proxy --------------------------------------------

@@ -271,10 +271,13 @@ describe('fetchEarningsSurprises', () => {
   });
 
   it('fetchFinnhubEarningsSurprises maps Finnhub payload to surprise rows', async () => {
-    mockFetch.mockResolvedValueOnce(jsonResponse([
-      { symbol: 'AAPL', quarter: 3, year: 2024, actual: 1.15, estimate: 1.13, surprise: 0.02, surprisePercent: 1.77 },
-      { symbol: 'AAPL', quarter: 4, year: 2024, actual: 2.0, estimate: 1.8, surprise: 0.2, surprisePercent: 11.11 },
-    ]));
+    mockFetch.mockResolvedValueOnce(jsonResponse({
+      finnhubStatus: 200,
+      body: JSON.stringify([
+        { symbol: 'AAPL', quarter: 3, year: 2024, actual: 1.15, estimate: 1.13, surprise: 0.02, surprisePercent: 1.77 },
+        { symbol: 'AAPL', quarter: 4, year: 2024, actual: 2.0, estimate: 1.8, surprise: 0.2, surprisePercent: 11.11 },
+      ]),
+    }));
 
     const rows = await fetchFinnhubEarningsSurprises('aapl');
 
@@ -297,9 +300,12 @@ describe('fetchEarningsSurprises', () => {
       jsonResponse({ crumb: 'crumbE5' }),
       jsonResponse({ quoteSummary: { result: [{}] } }), // Yahoo host1: no quarterly
       jsonResponse({ quoteSummary: { result: [{}] } }), // Yahoo host2: no quarterly
-      jsonResponse([
-        { symbol: 'AAPL', quarter: 1, year: 2024, actual: 1.2, estimate: 1.0, surprise: 0.2, surprisePercent: 20 },
-      ]),
+      jsonResponse({
+        finnhubStatus: 200,
+        body: JSON.stringify([
+          { symbol: 'AAPL', quarter: 1, year: 2024, actual: 1.2, estimate: 1.0, surprise: 0.2, surprisePercent: 20 },
+        ]),
+      }),
     );
 
     const rows = await getEarningsSurprises('AAPL');
