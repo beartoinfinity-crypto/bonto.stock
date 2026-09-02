@@ -17,7 +17,7 @@ import ApiSettings from "./pages/ApiSettings";
 import Admin from "./pages/Admin";
 import { purgeExpired } from "@/lib/localDb";
 import { startScheduler } from "@/lib/localCron";
-import { getClient, pullAll } from "@/lib/supabaseDb";
+import { fetchRemoteSyncConfig, getClient, pullAll } from "@/lib/supabaseDb";
 import { LanguageProvider } from "@/lib/i18n";
 
 // Purge expired SQLite entries on startup
@@ -27,8 +27,11 @@ purgeExpired().then(n => { if (n > 0) console.log(`[LocalDB] Purged ${n} expired
 startScheduler();
 
 // Cloud-first hydration: Supabase is the primary store — refresh the local
-// mirror (localStorage + SQLite) from the cloud shortly after boot.
-setTimeout(() => {
+// mirror (localStorage + SQLite) from the cloud shortly after boot. Await the
+// server-managed sync config first, so even a browser that never had per-browser
+// Settings input still hydrates once SUPABASE_URL/ANON_KEY are set on Render.
+setTimeout(async () => {
+  await fetchRemoteSyncConfig();
   if (!getClient()) return;
   pullAll()
     .then(n => {

@@ -72,6 +72,36 @@ export function resetClient(): void {
   client = null;
 }
 
+// ─── Server-managed config (configure once on Render) ──────────────
+
+let remoteConfigPromise: Promise<SupabaseConfig | null> | null = null;
+
+/**
+ * Fetch the sync config from the server (`/api/sync-config`, backed by the
+ * Render env vars SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SYNC_ENABLED).
+ * This is the "configure once, every browser obeys" path — when it returns a
+ * config it is authoritative and overrides any per-browser Settings values.
+ * Resolves null on 404/network failure so the app falls back to local config.
+ */
+export function fetchRemoteSyncConfig(): Promise<SupabaseConfig | null> {
+  if (!remoteConfigPromise) {
+    remoteConfigPromise = (async () => {
+      try {
+        const res = await fetch('/api/sync-config');
+        if (!res.ok) return null;
+        const cfg = (await res.json()) as { url?: string; anonKey?: string; enabled?: boolean };
+        if (!cfg.url || !cfg.anonKey) return null;
+        const remote: SupabaseConfig = { url: cfg.url, anonKey: cfg.anonKey, enabled: cfg.enabled !== false };
+        saveSupabaseConfig(remote);
+        return remote;
+      } catch {
+        return null;
+      }
+    })();
+  }
+  return remoteConfigPromise;
+}
+
 export function isConfigured(): boolean {
   const cfg = getSupabaseConfig();
   return !!(cfg.url && cfg.anonKey);
@@ -164,6 +194,7 @@ function mergeLedgerValue(localValue: string, remoteValue: string | null): strin
 
 /** Push all tracked keys (or a specific subset) to Supabase. Returns count. */
 export async function pushKeys(keys?: string[]): Promise<number> {
+  await fetchRemoteSyncConfig();
   const c = getClient();
   if (!c) throw new Error('Supabase not configured or disabled');
   const targets = (keys && keys.length ? keys : SYNC_KEYS).filter(
@@ -178,6 +209,7 @@ export async function pushKeys(keys?: string[]): Promise<number> {
 
 /** Pull all remote rows into localStorage + SQLite. Returns count applied. */
 export async function pullAll(): Promise<number> {
+  await fetchRemoteSyncConfig();
   const c = getClient();
   if (!c) throw new Error('Supabase not configured or disabled');
   pulling = true;
@@ -223,6 +255,7 @@ let flushTimer: ReturnType<typeof setTimeout> | null = null;
  * falls back to the local copy).
  */
 export async function pullLedger(): Promise<LedgerStore | null> {
+  await fetchRemoteSyncConfig();
   const c = getClient();
   if (!c) return null;
   try {
@@ -238,9 +271,10 @@ export async function pullLedger(): Promise<LedgerStore | null> {
 }
 
 export function maybeSyncToSupabase(key: string): void {
-  const cfg = getSupabaseConfig();
-  if (!cfg.enabled || pulling) return;
+  if (pulling) return;
   if (!(SYNC_KEYS as string[]).includes(key)) return;
+  // The actual enable/disable decision happens at flush time so a browser that
+  // has NO local config still starts syncing once the server config arrives.
   pending.add(key);
   if (!flushTimer) flushTimer = setTimeout(flushPending, 3000);
 }
@@ -250,6 +284,7 @@ async function flushPending(): Promise<void> {
   const keys = [...pending];
   pending.clear();
   if (!keys.length) return;
+  await fetchRemoteSyncConfig();
   const c = getClient();
   if (!c) return;
   const rows = keys.filter(k => localStorage.getItem(k) !== null).map(rowFor);

@@ -32,6 +32,9 @@ npm start                  # Express on http://localhost:10000
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `10000` | Server port (Render sets this automatically) |
+| `SUPABASE_URL` | *(none)* | **Server-managed Cloud Sync** — when set, every browser/machine picks this up automatically (no per-browser input); served via `GET /api/sync-config` |
+| `SUPABASE_ANON_KEY` | *(none)* | Anon key for the Supabase project above |
+| `SUPABASE_SYNC_ENABLED` | `true` | Set to `false` to disable server-managed sync even when the URL/key are set |
 
 ## Supabase Setup
 
@@ -40,8 +43,8 @@ npm start                  # Express on http://localhost:10000
 1. Create a Supabase project
 2. Go to SQL Editor
 3. Run the setup SQL from Settings page (or from `supabaseDb.ts` `SETUP_SQL` constant)
-4. In Settings, enter your Supabase URL and anon key
-5. Enable Cloud Sync
+4. **Either** set `SUPABASE_URL` + `SUPABASE_ANON_KEY` on Render (server-managed — recommended, configure once for all browsers)
+5. **Or** (single-machine / dev only) enter the URL and anon key per browser in Settings and enable Cloud Sync
 
 ### Featured Trades Table
 

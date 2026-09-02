@@ -17,7 +17,7 @@ import { popularStocks } from '@/lib/stockData';
 import * as storage from '@/lib/storage';
 import { exportDb, importDb, importCsv, getStats, isFsAccessSupported, pickDbFile, resetDbFile, getDbFileName, clearSymbol } from '@/lib/localDb';
 import {
-  getSupabaseConfig, saveSupabaseConfig, testConnection, pushKeys, pullAll, pushStockData, pullStockData, SETUP_SQL, TABLE,
+  getSupabaseConfig, saveSupabaseConfig, testConnection, pushKeys, pullAll, pushStockData, pullStockData, fetchRemoteSyncConfig, SETUP_SQL, TABLE,
 } from '@/lib/supabaseDb';
 
 const WATCHLIST_KEY = 'stockpulse_watchlist';
@@ -104,6 +104,19 @@ export default function Settings() {
   const [sbLoading, setSbLoading] = useState(false);
   const [sbStatus, setSbStatus] = useState<'unknown' | 'ok' | 'error'>('unknown');
   const [showSql, setShowSql] = useState(false);
+  // Server-managed sync (Render env vars) — overrides per-browser inputs.
+  const [serverManaged, setServerManaged] = useState(false);
+
+  useEffect(() => {
+    fetchRemoteSyncConfig().then(cfg => {
+      if (cfg) {
+        setServerManaged(true);
+        setSbUrl(cfg.url);
+        setSbKey(cfg.anonKey);
+        setSbEnabled(cfg.enabled);
+      }
+    });
+  }, []);
 
   // Admin gate for restricted sections (same password as /admin)
   const [adminUnlocked, setAdminUnlocked] = useState(false);
@@ -583,6 +596,13 @@ export default function Settings() {
               auto-mirror with a 3-second debounce. Cached quotes and historical price bars
               sync via the Push now / Pull now buttons. Requires three tables — run the setup SQL below once.
             </p>
+
+            {serverManaged && (
+              <p className="text-xs text-muted-foreground rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
+                Managed by the server (SUPABASE_URL / SUPABASE_ANON_KEY Render env vars) —
+                every browser uses this automatically. Per-browser changes are overridden on the next page load.
+              </p>
+            )}
 
             <div className="space-y-3">
               <div className="space-y-1">

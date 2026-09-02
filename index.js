@@ -584,6 +584,24 @@ app.get('/api/diag/opencabinet', async (req, res) => {
 
 app.use(express.static(path.join(__dirname, 'dist')));
 
+// --- Server-managed Supabase cloud-sync config ----------------------
+// Set SUPABASE_URL + SUPABASE_ANON_KEY on Render to configure Cloud Sync ONCE
+// for every browser/machine — no per-browser input needed. When unset the API
+// 404s and the app falls back to per-browser Settings.
+const SUPABASE_URL_ENV = process.env.SUPABASE_URL || '';
+const SUPABASE_ANON_KEY_ENV = process.env.SUPABASE_ANON_KEY || '';
+app.get('/api/sync-config', (req, res) => {
+  if (!SUPABASE_URL_ENV || !SUPABASE_ANON_KEY_ENV) {
+    res.status(404).json({ enabled: false });
+    return;
+  }
+  res.json({
+    url: SUPABASE_URL_ENV,
+    anonKey: SUPABASE_ANON_KEY_ENV,
+    enabled: process.env.SUPABASE_SYNC_ENABLED ? process.env.SUPABASE_SYNC_ENABLED !== 'false' : true,
+  });
+});
+
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
