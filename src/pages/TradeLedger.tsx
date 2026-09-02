@@ -251,7 +251,7 @@ export default function TradeLedger() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Simulated Traders</h1>
             <p className="text-muted-foreground text-sm">
-              {PERSONAS.length} personas trade the shared universe daily; every transaction is recorded.
+              {PERSONAS.length} personas trade the shared S&amp;P 500 / NASDAQ-100 universe daily; every transaction is recorded.
               {ranToday && lastRunDate && <span> Last run: {lastRunDate}.</span>}
             </p>
           </div>
@@ -415,7 +415,7 @@ export default function TradeLedger() {
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2"><ListChecks className="h-4 w-4" /> Decisions</CardTitle>
             <CardDescription>
-              {decisionRows.length.toLocaleString()} signals logged across {decisionDates.length} day(s) and {PERSONAS.length} personas — every symbol each day, including HOLDs. Filter by person, action, symbol, date or reason to verify any day.
+              {decisionRows.length.toLocaleString()} signals logged across {decisionDates.length} day(s) and {PERSONAS.length} personas, all within the S&amp;P 500 / NASDAQ-100 universe — every symbol each day, including HOLDs. Filter by person, action, symbol, date or reason to verify any day.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">

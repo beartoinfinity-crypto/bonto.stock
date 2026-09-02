@@ -619,6 +619,21 @@ export function filterToNASDAQ100<T extends { symbol: string }>(stocks: T[]): T[
   return stocks.filter(s => NASDAQ100_TICKERS.has(s.symbol));
 }
 
+// ─── Combined index universe (S&P 500 ∪ NASDAQ-100) ────────────────
+// The simulated-traders ledger restricts its shared universe to symbols that
+// belong to one of the two major US index universes tracked by the app. A
+// symbol may be a constituent of both (e.g. AAPL) — membership is still single.
+
+export const INDEX_UNIVERSE_TICKERS: ReadonlySet<string> = new Set<string>([
+  ...SP500_TICKERS,
+  ...NASDAQ100_TICKERS,
+]);
+
+/** True when the symbol is a constituent of S&P 500, NASDAQ-100, or both. */
+export function isIndexTrackedSymbol(symbol: string): boolean {
+  return INDEX_UNIVERSE_TICKERS.has(symbol.toUpperCase());
+}
+
 // ─── Universe selection (used by the Master Matrix page) ───────────
 
 export type UniverseId = 'sp500' | 'nasdaq100' | 'all';

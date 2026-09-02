@@ -78,6 +78,7 @@ vi.mock('@/lib/supabaseHistory', () => ({
 }));
 
 import { simulateDay } from '@/hooks/useTradeLedger';
+import { INDEX_UNIVERSE_TICKERS } from '@/lib/masterAnalysis';
 
 describe('simulateDay integration (offline first-run)', () => {
   beforeEach(() => mem.clear());
@@ -109,6 +110,13 @@ describe('simulateDay integration (offline first-run)', () => {
       expect(Array.isArray(acct.positions)).toBe(true);
       expect(acct.cash).toBeGreaterThan(0);
     }
+  });
+
+  it('keeps every trade and decision inside the S&P 500 / NASDAQ-100 universe', async () => {
+    const next = await simulateDay(createLedger(), '2026-01-02');
+    const rows = next.decisions.flatMap(l => l.decisions.map(d => d.symbol));
+    const offIndex = [...new Set(rows.filter(s => !INDEX_UNIVERSE_TICKERS.has(s.toUpperCase())))];
+    expect(offIndex).toEqual([]);
   });
 
   it('falls back to stored Supabase history when the network is down', async () => {

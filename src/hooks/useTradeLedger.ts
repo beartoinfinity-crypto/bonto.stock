@@ -16,7 +16,7 @@ import { calculateSMA, generateHistoricalData, popularStocks, Stock, StockData }
 import { fetchStockQuote, fetchHistoricalData } from '@/lib/stockApi';
 import { runEngine, DEFAULT_PARAMS } from '@/lib/tacticalEngine';
 import { runTradingAgents } from '@/lib/tradingAgents';
-import { analyzeStock, buildStockInput, StockMasterResult, summarizeMasterResult } from '@/lib/masterAnalysis';
+import { analyzeStock, buildStockInput, StockMasterResult, summarizeMasterResult, isIndexTrackedSymbol } from '@/lib/masterAnalysis';
 import { fetchStoredHistoryForSymbol } from '@/lib/supabaseHistory';
 import {
   LEDGER_KEY,
@@ -140,21 +140,25 @@ async function historyFor(stock: Stock): Promise<StockData[]> {
 /**
  * Build the shared daily universe of analyzed rows.
  *
- * Prefers the Master Matrix's persisted top-50 cache (`stockpulse_masters_top50`,
- * which carries each symbol's 12-master verdicts/scores — no recompute). If that
- * cache is empty (the Master Matrix page hasn't been run in this browser yet),
- * fall back to computing rows directly from `popularStocks` (the curated SP500 /
- * NASDAQ-100 universe) so the ledger always has symbols to trade, independent of
- * whether the Matrix page was ever visited.
+ * The shared universe is restricted to the two tracked index universes —
+ * S&P 500 ∪ NASDAQ-100 (`isIndexTrackedSymbol`). Prefers the Master Matrix's
+ * persisted top-50 cache (`stockpulse_masters_top50`, which carries each
+ * symbol's 12-master verdicts/scores — no recompute); cached rows outside the
+ * index universe are dropped. If that cache is empty (the Master Matrix page
+ * hasn't been run in this browser yet), fall back to computing rows directly
+ * from `popularStocks` (also filtered to the index universe) so the ledger
+ * always has symbols to trade, independent of whether the Matrix page was ever
+ * visited.
  */
 async function buildUniverse(): Promise<MatrixRow[]> {
   const cached = loadMatrixRows();
-  if (cached.length > 0) return cached;
+  if (cached.length > 0) return cached.filter(r => isIndexTrackedSymbol(r.symbol));
 
   const rows: MatrixRow[] = [];
   const batchSize = 6;
-  for (let i = 0; i < popularStocks.length; i += batchSize) {
-    const batch = popularStocks.slice(i, i + batchSize);
+  const universe = popularStocks.filter(s => isIndexTrackedSymbol(s.symbol));
+  for (let i = 0; i < universe.length; i += batchSize) {
+    const batch = universe.slice(i, i + batchSize);
     const done = await Promise.all(batch.map(async stock => {
       try {
         const price = stock.price || 100;
