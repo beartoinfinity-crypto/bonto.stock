@@ -10,7 +10,7 @@
  * top-Matrix symbols plus anything they already hold — to keep the pass cheap.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as storage from '@/lib/storage';
 import { calculateSMA, generateHistoricalData, popularStocks, Stock, StockData } from '@/lib/stockData';
 import { fetchStockQuote, fetchHistoricalData } from '@/lib/stockApi';
@@ -35,6 +35,7 @@ import {
   tacticalDecision,
   agentDecision,
 } from '@/lib/tradeSimulator';
+import { pullLedger } from '@/lib/supabaseDb';
 
 /** Symbols the heavy engines (Tactical/Agent) are allowed to evaluate per day. */
 const HEAVY_TOPN = 8;
@@ -307,6 +308,7 @@ const PERSONA_IDS: PersonaId[] = ['value', 'wealth', 'contrarian', 'momentum', '
 export function useTradeLedger() {
   const [ledger, setLedger] = useState<LedgerStore>(() => loadLedger());
   const [running, setRunning] = useState(false);
+  const inFlightRef = useRef(false);
 
   const lastRunDate = ledger?.lastRunDate ?? null;
   const ranToday = lastRunDate === todayStr();
@@ -331,6 +333,30 @@ export function useTradeLedger() {
     }
   }, []);
 
+  // Auto-run path: pull the cloud ledger FIRST (lossless merge) and only then
+  // decide whether today has been simulated — so a second machine never
+  // re-simulates a day another machine already pushed (re-running with different
+  // live prices is what diverged records across browsers). Falls back to the
+  // local copy when cloud sync is off/unreachable. Returns true if it ran.
+  const runOnceToday = useCallback(async (): Promise<boolean> => {
+    if (inFlightRef.current) return false;
+    inFlightRef.current = true;
+    setRunning(true);
+    try {
+      const fresh = (await pullLedger()) ?? loadLedger();
+      setLedger(fresh);
+      if (fresh.lastRunDate === todayStr()) return false;
+      const next = await simulateDay(fresh, todayStr());
+      setLedger(next);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      inFlightRef.current = false;
+      setRunning(false);
+    }
+  }, []);
+
   const reset = useCallback(() => {
     const fresh = createLedger();
     storage.setJson(LEDGER_KEY, fresh);
@@ -338,7 +364,7 @@ export function useTradeLedger() {
   }, []);
 
   return useMemo(
-    () => ({ ledger, running, ranToday, lastRunDate, load, run, reset }),
-    [ledger, running, ranToday, lastRunDate, load, run, reset]
+    () => ({ ledger, running, ranToday, lastRunDate, load, run, runOnceToday, reset }),
+    [ledger, running, ranToday, lastRunDate, load, run, runOnceToday, reset]
   );
 }

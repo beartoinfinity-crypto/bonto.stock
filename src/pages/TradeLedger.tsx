@@ -169,23 +169,21 @@ function Pager({ page, total, pageSize, onPage }: {
 }
 
 export default function TradeLedger() {
-  const { ledger, running, ranToday, lastRunDate, run, reset, load } = useTradeLedger();
+  const { ledger, running, ranToday, lastRunDate, run, runOnceToday, reset, load } = useTradeLedger();
   const [active, setActive] = useState<PersonaId>('value');
 
-  // Auto-run once per page visit IF the day isn't already simulated — but wait
-  // for the cloud boot hydration (~4s) first, so a second machine does NOT
-  // re-simulate a day the cloud already has (re-running with different live
-  // prices is what diverged the record across machines). Falls back after 8s
-  // so a machine without cloud sync still runs. Refs (not state deps) let the
-  // single mount-time listener read the post-hydration values.
-  const ranTodayRef = useRef(ranToday);
-  ranTodayRef.current = ranToday;
+  // Auto-run once per page visit IF the day isn't already simulated — but the
+  // decision is made against the CLOUD ledger: runOnceToday pulls the cloud
+  // copy (lossless merge) first, so a second machine does NOT re-simulate a day
+  // another machine already pushed (re-running with different live prices is
+  // what diverged the record across browsers). Fires on the boot-hydration
+  // event, with an 8s fallback so pages without a wake-up event still run.
   const runningRef = useRef(running);
   runningRef.current = running;
   useEffect(() => {
     const maybeRun = () => {
       if (runningRef.current) return; // a manual run is in flight — don't double-run
-      if (!ranTodayRef.current) run();
+      void runOnceToday();
     };
     const onSync = () => maybeRun();
     window.addEventListener('stockpulse-sync', onSync);

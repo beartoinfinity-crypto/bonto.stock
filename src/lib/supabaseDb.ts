@@ -215,6 +215,28 @@ export async function pullAll(): Promise<number> {
 const pending = new Set<string>();
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
+/**
+ * Focused pre-decision pull: merge ONLY the cloud ledger into the local mirror
+ * and return the fresh copy. Lets /ledger decide "has today's day run?" against
+ * the *cloud* state right before auto-running, instead of its own stale local
+ * snapshot. Returns null when cloud sync is off or unreachable (caller then
+ * falls back to the local copy).
+ */
+export async function pullLedger(): Promise<LedgerStore | null> {
+  const c = getClient();
+  if (!c) return null;
+  try {
+    const local = localStorage.getItem(LEDGER_KEY) ?? '';
+    const remote = await fetchRow(c, LEDGER_KEY);
+    const merged = mergeLedgerValue(local, remote?.value ?? null);
+    if (merged !== local) writeLocal(LEDGER_KEY, merged);
+    return safeParse<LedgerStore>(merged);
+  } catch (e) {
+    console.warn('[SupabaseSync] pre-run ledger pull failed:', e);
+    return null;
+  }
+}
+
 export function maybeSyncToSupabase(key: string): void {
   const cfg = getSupabaseConfig();
   if (!cfg.enabled || pulling) return;
