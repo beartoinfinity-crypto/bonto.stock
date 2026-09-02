@@ -77,6 +77,13 @@ vi.mock('@/lib/supabaseHistory', () => ({
   fetchStoredHistoryForSymbol: storedSpy,
 }));
 
+// RunOnceToday isn't exercised here (run() is), but importing the hook pulls in
+// supabaseDb -> localDb -> sql.js, whose WASM load aborts in jsdom. Stub it so
+// this test file never triggers the sql.js wasm initialization.
+vi.mock('@/lib/supabaseDb', () => ({
+  pullLedger: vi.fn(async () => null),
+}));
+
 import { simulateDay } from '@/hooks/useTradeLedger';
 import { INDEX_UNIVERSE_TICKERS } from '@/lib/masterAnalysis';
 

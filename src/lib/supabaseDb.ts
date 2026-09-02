@@ -292,6 +292,7 @@ async function flushPending(): Promise<void> {
   try {
     await mergeLedgerRowInto(c, rows);
     await upsertRows(c, rows);
+    console.log('[SupabaseSync] auto-pushed', rows.length, 'key(s):', rows.map(r => r.key).join(', '));
   } catch (e) {
     console.warn('[SupabaseSync] auto-push failed:', e);
   }
