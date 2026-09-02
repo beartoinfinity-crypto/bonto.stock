@@ -163,12 +163,17 @@ function nextTradeId(): string {
 
 /** Current mark-to-market equity of an account. */
 export function accountEquity(acct: PersonAccount, prices: Record<string, number>): number {
-  let equity = acct.cash;
+  return acct.cash + positionValue(acct, prices);
+}
+
+/** Current mark-to-market value of all open positions (no cash). */
+export function positionValue(acct: PersonAccount, prices: Record<string, number>): number {
+  let pxTotal = 0;
   for (const pos of acct.positions) {
     const px = prices[pos.symbol] ?? pos.avgCost;
-    equity += pos.qty * px;
+    pxTotal += pos.qty * px;
   }
-  return equity;
+  return pxTotal;
 }
 
 /** Total P/L (started at STARTING_CASH) for a person. */

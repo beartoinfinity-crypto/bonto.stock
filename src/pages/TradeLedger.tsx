@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Header } from '@/components/Header';
 import { useTradeLedger } from '@/hooks/useTradeLedger';
 import {
-  PERSONAS, STARTING_CASH, accountEquity, personaPnl, PersonaId, Trade, Position, DailyDecisionLog,
+  PERSONAS, STARTING_CASH, accountEquity, positionValue, personaPnl, PersonaId, Trade, Position, DailyDecisionLog,
 } from '@/lib/tradeSimulator';
 import {
   Wallet, RefreshCw, RotateCcw, TrendingUp, TrendingDown, Minus, Users, History, Briefcase, ListChecks,
@@ -70,9 +70,11 @@ export default function TradeLedger() {
   const prices = ledger?.prices ?? {};
   const leaderboard = PERSONAS.map(p => {
     const acct = ledger?.accounts[p.id];
+    const cash = acct?.cash ?? 0;
+    const marketValue = acct ? positionValue(acct, prices) : 0;
     const equity = acct ? accountEquity(acct, prices) : STARTING_CASH;
     const pnl = acct ? personaPnl(acct, prices) : 0;
-    return { ...p, equity, pnl, positions: acct?.positions.length ?? 0 };
+    return { ...p, cash, marketValue, equity, pnl, positions: acct?.positions.length ?? 0 };
   }).sort((a, b) => b.pnl - a.pnl);
 
   const maxPnl = Math.max(...leaderboard.map(l => l.pnl), 1);
@@ -132,7 +134,11 @@ export default function TradeLedger() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>{l.positions} open</span>
+                    <span>Cash {nl(l.cash)}</span>
+                    <span className="text-border">·</span>
+                    <span>Positions {nl(l.marketValue)}</span>
+                    <span className="text-border hidden sm:inline">·</span>
+                    <span className="hidden sm:inline">{l.positions} open</span>
                     <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden ml-2">
                       <div
                         className={`h-full rounded-full ${l.pnl >= 0 ? 'bg-emerald-500' : 'bg-red-500'}`}
