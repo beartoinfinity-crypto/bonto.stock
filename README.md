@@ -38,6 +38,7 @@ npm start          # serve dist/ via Express
 | `/masters` | Trading Masters | 12 legendary investors analyze any stock |
 | `/masters-matrix` | Master Matrix | Rank S&P 500 / NASDAQ-100 / custom stocks into a top-50 matrix by 12-master verdicts |
 | `/masters-matrix/:symbol` | Stock History | Per-stock daily 12-master history, with past-year backfill |
+| `/ledger` | Simulated Traders | Six personas trade the shared S&P 500 / NASDAQ-100 universe daily; accumulated Decisions + All Transactions with filter bar, live stats, pagination |
 | `/settings` | Settings | Auth, watchlist, DB export/import, cloud sync |
 | `/admin` | Admin | Cron job management (password-protected) |
 
