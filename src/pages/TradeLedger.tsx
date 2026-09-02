@@ -171,14 +171,29 @@ function Pager({ page, total, pageSize, onPage }: {
 export default function TradeLedger() {
   const { ledger, running, ranToday, lastRunDate, run, reset, load } = useTradeLedger();
   const [active, setActive] = useState<PersonaId>('value');
-  const [autoRunDone, setAutoRunDone] = useState(false);
 
-  // Auto-run once per page visit if the ledger hasn't run today yet.
+  // Auto-run once per page visit IF the day isn't already simulated — but wait
+  // for the cloud boot hydration (~4s) first, so a second machine does NOT
+  // re-simulate a day the cloud already has (re-running with different live
+  // prices is what diverged the record across machines). Falls back after 8s
+  // so a machine without cloud sync still runs. Refs (not state deps) let the
+  // single mount-time listener read the post-hydration values.
+  const ranTodayRef = useRef(ranToday);
+  ranTodayRef.current = ranToday;
+  const runningRef = useRef(running);
+  runningRef.current = running;
   useEffect(() => {
-    if (autoRunDone) return;
-    if (ranToday) { setAutoRunDone(true); return; }
-    setAutoRunDone(true);
-    run();
+    const maybeRun = () => {
+      if (runningRef.current) return; // a manual run is in flight — don't double-run
+      if (!ranTodayRef.current) run();
+    };
+    const onSync = () => maybeRun();
+    window.addEventListener('stockpulse-sync', onSync);
+    const timer: ReturnType<typeof setTimeout> | undefined = setTimeout(maybeRun, 8000);
+    return () => {
+      window.removeEventListener('stockpulse-sync', onSync);
+      clearTimeout(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

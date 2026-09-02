@@ -6,7 +6,9 @@
  * accumulated days. `mergeLedgers` reconciles two `LedgerStore` snapshots so
  * no recorded history is lost:
  *
- *  - trades:   union by trade id (keep every fill from both sides)
+ *  - trades:   union by trade id (keep every fill from both sides), THEN
+ *              collapse same-day (persona, symbol, side) duplicates produced
+ *              by parallel machines so merged accounts never double-count
  *  - decisions: per (personaId, date) — keep the fuller log (same-day re-runs
  *    replace, so a larger decision set on the same day wins)
  *  - accounts: rebuilt by REPLAYING the merged trades from initial cash, so
@@ -65,7 +67,20 @@ export function mergeLedgers(a: LedgerStore, b: LedgerStore): LedgerStore {
   const bTrades = b.trades ?? [];
   const trades = new Map<string, Trade>();
   for (const t of [...aTrades, ...bTrades]) if (t.id) trades.set(t.id, t);
-  const mergedTrades = [...trades.values()].sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
+  const union = [...trades.values()];
+
+  // Same (persona, date, symbol, side) from different machines is the *same
+  // logical fill* produced by parallel same-day runs (with machine-specific
+  // ids — e.g. t<ts>_1 vs t<later-ts>_1). Keep one canonical fill so merged
+  // accounts never double-buy the same day; a single machine can't produce two
+  // of these (buys skip symbols already held, sells remove the position).
+  const canonical = new Map<string, Trade>();
+  for (const t of union) {
+    const key = `${t.personaId}|${t.date}|${t.symbol.toUpperCase()}|${t.action}`;
+    const prev = canonical.get(key);
+    if (!prev || t.value > prev.value || (t.value === prev.value && t.qty > prev.qty)) canonical.set(key, t);
+  }
+  const mergedTrades = [...canonical.values()].sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
 
   const decisions = new Map<string, (typeof a.decisions)[number]>();
   for (const d of [...(a.decisions ?? []), ...(b.decisions ?? [])]) {

@@ -105,6 +105,25 @@ describe('mergeLedgers', () => {
     expect(m.decisions[0].decisions).toHaveLength(3);
   });
 
+  it('collapses the same (persona, day, symbol, side) fill from two machines into one', () => {
+    const a = makeLedger({
+      trades: [makeTrade('mA1', '2026-01-03', 'value', 'AAPL', 'BUY', 10, 100)],
+      accounts: personaAccounts(),
+    });
+    const b = makeLedger({
+      trades: [makeTrade('mB1', '2026-01-03', 'value', 'AAPL', 'BUY', 11, 95)],
+      accounts: personaAccounts(),
+    });
+
+    const m = mergeLedgers(a, b);
+    // One canonical fill (the larger value: 11 × 95 = 1045 > 10 × 100 = 1000)
+    expect(m.trades).toHaveLength(1);
+    expect(m.trades[0].id).toBe('mB1');
+    // Replayed once — no double-spend
+    expect(m.accounts.value.cash).toBe(STARTING_CASH - 11 * 95);
+    expect(m.accounts.value.positions).toHaveLength(1);
+  });
+
   it('is idempotent', () => {
     const a = makeLedger({
       trades: [makeTrade('t1', '2026-01-02', 'tactical', 'NVDA', 'BUY', 3, 300)],
