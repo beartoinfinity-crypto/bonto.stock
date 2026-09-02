@@ -88,7 +88,7 @@ describe('useTradeLedger.runOnceToday — cloud-aware auto-run', () => {
     const stored = JSON.parse(mem.get('stockpulse_trade_ledger')!);
     expect(stored.lastRunDate).toBe(todayStr());
     expect(Array.isArray(stored.trades)).toBe(true);
-  });
+  }, 30000); // full simulateDay pass is heavy
 
   it('falls back to the local ledger (and its ran-today flag) when sync is off', async () => {
     pullLedgerMock.mockResolvedValue(null); // getClient() === null → no cloud
@@ -105,7 +105,7 @@ describe('useTradeLedger.runOnceToday — cloud-aware auto-run', () => {
     const ran = await act(async () => result.current.runOnceToday());
     expect(ran).toBe(true);
     expect(JSON.parse(mem.get('stockpulse_trade_ledger')!).lastRunDate).toBe(todayStr());
-  });
+  }, 30000); // full simulateDay pass
 
   it('ignores a second auto-run call while one is in flight', async () => {
     pullLedgerMock.mockResolvedValue(ledgerLastRun('2026-01-05'));
@@ -114,5 +114,5 @@ describe('useTradeLedger.runOnceToday — cloud-aware auto-run', () => {
     const second = await result.current.runOnceToday(); // synchronous in-flight guard
     expect(second).toBe(false);
     expect(await first).toBe(true);
-  });
+  }, 30000); // full simulateDay pass
 });

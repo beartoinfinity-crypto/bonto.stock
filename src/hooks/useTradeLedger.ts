@@ -24,6 +24,7 @@ import {
   PersonaDaySignals,
   PersonaId,
   SymbolSignal,
+  STARTING_CASH,
   createLedger,
   holdSignal,
   runDayForPerson,
@@ -35,7 +36,8 @@ import {
   tacticalDecision,
   agentDecision,
 } from '@/lib/tradeSimulator';
-import { pullLedger } from '@/lib/supabaseDb';
+import { overwriteLedger, pullLedger } from '@/lib/supabaseDb';
+import { replayAccounts } from '@/lib/ledgerMerge';
 
 /** Symbols the heavy engines (Tactical/Agent) are allowed to evaluate per day. */
 const HEAVY_TOPN = 8;
@@ -178,8 +180,16 @@ async function buildUniverse(): Promise<MatrixRow[]> {
   return rows;
 }
 
-/** Run a full simulation day across all personas. Returns the updated ledger. */
+/**
+ * Run a full simulation day across all personas. Returns the updated ledger.
+ *
+ * WRITE-PROTECTED: a day simulates at most once. If `date` is already the
+ * ledger's `lastRunDate` the call is a no-op that returns the ledger unchanged
+ * — re-running the same day with different (live) prices is what corrupted the
+ * records. To re-run a day, clear it first with the hook's `reset` (Reset today).
+ */
 export async function simulateDay(ledger: LedgerStore, date = todayStr()): Promise<LedgerStore> {
+  if (ledger.lastRunDate === date) return ledger;
   const rows = await buildUniverse();
   const next = JSON.parse(JSON.stringify(ledger)) as LedgerStore;
   const symbols = new Map<string, MatrixRow>();
@@ -323,21 +333,11 @@ export function useTradeLedger() {
     return () => window.removeEventListener('stockpulse-sync', onSync);
   }, [load]);
 
-  const run = useCallback(async () => {
-    setRunning(true);
-    try {
-      const next = await simulateDay(loadLedger(), todayStr());
-      setLedger(next);
-    } finally {
-      setRunning(false);
-    }
-  }, []);
-
-  // Auto-run path: pull the cloud ledger FIRST (lossless merge) and only then
-  // decide whether today has been simulated — so a second machine never
-  // re-simulates a day another machine already pushed (re-running with different
-  // live prices is what diverged records across browsers). Falls back to the
-  // local copy when cloud sync is off/unreachable. Returns true if it ran.
+  // Run path shared by the manual button and the /ledger auto-run. Pulls the
+  // CLOUD ledger first (lossless merge) so the day-once decision is made
+  // against every machine's state, then simulates only if today has not run
+  // anywhere yet (simulateDay itself is that write-protect). Returns true when
+  // a fresh day was simulated, false when it was already run / skipped.
   const runOnceToday = useCallback(async (): Promise<boolean> => {
     if (inFlightRef.current) return false;
     inFlightRef.current = true;
@@ -357,14 +357,30 @@ export function useTradeLedger() {
     }
   }, []);
 
-  const reset = useCallback(() => {
-    const fresh = createLedger();
-    storage.setJson(LEDGER_KEY, fresh);
-    setLedger(fresh);
+  // Clear today's simulation so the day may run again (once). Keeps all earlier
+  // history; accounts are rebuilt by replaying the remaining fills; the cloud
+  // row is overwritten (not union-merged) so the cleared state wins there too.
+  const reset = useCallback((): void => {
+    const today = todayStr();
+    const current = loadLedger();
+    const trades = (current.trades ?? []).filter(t => t.date !== today);
+    const decisions = (current.decisions ?? []).filter(d => d.date !== today);
+    const accounts = replayAccounts(trades, current.initialCash ?? STARTING_CASH);
+    const dates = trades.map(t => t.date).sort();
+    const next: LedgerStore = {
+      ...current,
+      trades,
+      decisions,
+      accounts,
+      lastRunDate: dates.length ? dates[dates.length - 1] : null,
+    };
+    storage.setJson(LEDGER_KEY, next);
+    setLedger(next);
+    void overwriteLedger(next);
   }, []);
 
   return useMemo(
-    () => ({ ledger, running, ranToday, lastRunDate, load, run, runOnceToday, reset }),
-    [ledger, running, ranToday, lastRunDate, load, run, runOnceToday, reset]
+    () => ({ ledger, running, ranToday, lastRunDate, load, run: runOnceToday, runOnceToday, reset }),
+    [ledger, running, ranToday, lastRunDate, load, runOnceToday, reset]
   );
 }

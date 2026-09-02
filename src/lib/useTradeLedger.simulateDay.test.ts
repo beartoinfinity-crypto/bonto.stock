@@ -178,7 +178,8 @@ describe('simulateDay integration (offline first-run)', () => {
     const afterDay1 = await simulateDay(createLedger(), '2026-01-02');
     const day1Log = afterDay1.decisions.length;
     expect(day1Log).toBe(6);
-    // Same-day re-run replaces (no dupes); a different day appends.
+    // Same-day re-run is a write-protected no-op (a day runs once); a different
+    // day appends.
     const rerunSame = await simulateDay(afterDay1, '2026-01-02');
     expect(rerunSame.decisions.length).toBe(6);
     const newDay = await simulateDay(rerunSame, '2026-01-05');
@@ -186,6 +187,21 @@ describe('simulateDay integration (offline first-run)', () => {
     // Expose what's stored for a future audit.
     const audit = newDay.decisions.map(l => `${l.personaId}:${l.date}:${l.decisions.length}`);
     console.log('AUDIT_DAYS', JSON.stringify(audit));
+  });
+
+  it('never re-runs a day that already ran (write-protected)', async () => {
+    mem.clear();
+    const day1 = await simulateDay(createLedger(), '2026-01-02');
+    const firstTrades = day1.trades.length;
+    expect(firstTrades).toBeGreaterThan(0);
+    // Re-simulating the SAME date must be a strict no-op — no new fills, no
+    // decision re-writes, identical object. Re-runs with different live prices
+    // is exactly what corrupted the records before.
+    const again = await simulateDay(day1, '2026-01-02');
+    expect(again).toBe(day1);
+    expect(again.trades).toEqual(day1.trades);
+    expect(again.decisions).toEqual(day1.decisions);
+    expect(again.lastRunDate).toBe('2026-01-02');
   });
 
   it('carries positions and cash forward across simulated days', async () => {

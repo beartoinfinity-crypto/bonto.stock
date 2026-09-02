@@ -196,18 +196,18 @@ export default function TradeLedger() {
   }, []);
 
   const handleRun = async () => {
-    try {
-      await run();
+    const didRun = await run();
+    if (didRun) {
       toast.success(`Simulation updated for ${lastRunDate ?? 'today'}`);
       load();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Simulation failed');
+    } else {
+      toast.info('Today is already simulated — a day runs only once. Use Reset today to clear it.');
     }
   };
 
-  const handleReset = async () => {
+  const handleReset = () => {
     reset();
-    toast.success('Ledger reset');
+    toast.success("Today's record cleared — the day can run again");
   };
 
   const prices = ledger?.prices ?? {};
@@ -270,11 +270,11 @@ export default function TradeLedger() {
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={handleReset} disabled={running}>
-              <RotateCcw className="h-4 w-4 mr-2" /> Reset
+              <RotateCcw className="h-4 w-4 mr-2" /> Reset today
             </Button>
             <Button size="sm" onClick={handleRun} disabled={running}>
               {running ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Wallet className="h-4 w-4 mr-2" />}
-              {running ? 'Simulating…' : ranToday ? 'Run today (re-run)' : 'Run today'}
+              {running ? 'Simulating…' : 'Run today'}
             </Button>
           </div>
         </div>

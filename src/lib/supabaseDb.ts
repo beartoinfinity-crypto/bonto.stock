@@ -207,6 +207,28 @@ export async function pushKeys(keys?: string[]): Promise<number> {
   return targets.length;
 }
 
+/**
+ * Replace the cloud ledger row with `next` verbatim (no union merge). Used by
+ * "Reset today" so the cleared state actually lands in the cloud — otherwise
+ * the next auto-push would re-merge the removed fills back in. No-op (false)
+ * when cloud sync is off.
+ */
+export async function overwriteLedger(next: LedgerStore): Promise<boolean> {
+  await fetchRemoteSyncConfig();
+  const c = getClient();
+  if (!c) return false;
+  try {
+    await c.from(TABLE).upsert(
+      { key: LEDGER_KEY, value: JSON.stringify(next), updated_at: new Date().toISOString() },
+      { onConflict: 'key' }
+    );
+    return true;
+  } catch (e) {
+    console.warn('[SupabaseSync] ledger overwrite failed:', e);
+    return false;
+  }
+}
+
 /** Pull all remote rows into localStorage + SQLite. Returns count applied. */
 export async function pullAll(): Promise<number> {
   await fetchRemoteSyncConfig();
