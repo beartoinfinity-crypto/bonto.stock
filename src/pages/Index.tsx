@@ -5,6 +5,7 @@ import { Header } from '@/components/Header';
 import { StockSearch } from '@/components/StockSearch';
 import { StockMetrics } from '@/components/StockMetrics';
 import { PriceChart } from '@/components/PriceChart';
+import { MarketStructure } from '@/components/MarketStructure';
 import { ChartAnalyst } from '@/components/ChartAnalyst';
 import { TechnicalIndicators } from '@/components/TechnicalIndicators';
 import { MultiTimeframeRSI } from '@/components/MultiTimeframeRSI';
@@ -179,6 +180,11 @@ const Index = () => {
               {/* Price Chart */}
               <div className="animate-fade-in" style={{ animationDelay: '0.1s' }}>
                 <PriceChart data={historicalData} symbol={selectedStock.symbol} lastUpdated={lastUpdated} onRefresh={refetch} />
+              </div>
+
+              {/* Market Structure */}
+              <div className="animate-fade-in" style={{ animationDelay: '0.12s' }}>
+                <MarketStructure data={historicalData} symbol={selectedStock.symbol} />
               </div>
 
               {/* Analyst Commentary */}
