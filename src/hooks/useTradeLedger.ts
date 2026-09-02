@@ -17,6 +17,7 @@ import { fetchStockQuote, fetchHistoricalData } from '@/lib/stockApi';
 import { runEngine, DEFAULT_PARAMS } from '@/lib/tacticalEngine';
 import { runTradingAgents } from '@/lib/tradingAgents';
 import { analyzeStock, buildStockInput, StockMasterResult, summarizeMasterResult } from '@/lib/masterAnalysis';
+import { fetchStoredHistoryForSymbol } from '@/lib/supabaseHistory';
 import {
   LEDGER_KEY,
   LedgerStore,
@@ -37,6 +38,8 @@ import {
 
 /** Symbols the heavy engines (Tactical/Agent) are allowed to evaluate per day. */
 const HEAVY_TOPN = 8;
+/** Minimum bar count the tactical engine can meaningfully run on. */
+const MIN_BARS = 30;
 
 export function todayStr(d = new Date()): string {
   return d.toISOString().slice(0, 10);
@@ -70,12 +73,30 @@ function loadMatrixRows(): MatrixRow[] {
   return [];
 }
 
+/** Real OHLCV bars stored in Supabase (`stock_price_history`, publicly readable).
+ *  Used as the authoritative history when the live quote/history APIs are down —
+ *  synthetic `generateHistoricalData` bars never carry tactical entry signals. */
+async function storedHistoryFor(symbol: string): Promise<StockData[] | null> {
+  try {
+    const bars = await fetchStoredHistoryForSymbol(symbol);
+    if (Array.isArray(bars) && bars.length >= MIN_BARS) return bars;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 async function priceFor(symbol: string): Promise<number> {
   try {
     const q = await fetchStockQuote(symbol);
     if (q?.data?.price && q.data.price > 0) return q.data.price;
   } catch {
     /* ignore */
+  }
+  const stored = await storedHistoryFor(symbol);
+  if (stored && stored.length) {
+    const last = stored[stored.length - 1].close;
+    if (last > 0) return last;
   }
   return 0;
 }
@@ -85,7 +106,7 @@ async function trendUpFor(symbol: string): Promise<boolean> {
     const h = await fetchHistoricalData(symbol);
     const bars: StockData[] = Array.isArray(h?.data) && h.data.length > 0
       ? h.data
-      : generateHistoricalData(100);
+      : (await storedHistoryFor(symbol)) ?? generateHistoricalData(100);
     const sma20 = calculateSMA(bars, 20);
     const last = sma20[sma20.length - 1];
     const price = bars[bars.length - 1]?.close;
@@ -102,6 +123,8 @@ async function stockFor(symbol: string, price: number): Promise<Stock> {
   return { symbol, name: symbol, sector: 'Custom', price: price || 0, change: 0, changePercent: 0, volume: 0, marketCap: '', pe: 0, week52High: 0, week52Low: 0 };
 }
 
+/** Resolve a symbol's daily bar series: live/cached API → stored Supabase
+ *  history → synthetic. The tactical engine needs ≥ MIN_BARS real bars. */
 async function historyFor(stock: Stock): Promise<StockData[]> {
   try {
     const h = await fetchHistoricalData(stock.symbol);
@@ -109,6 +132,8 @@ async function historyFor(stock: Stock): Promise<StockData[]> {
   } catch {
     /* ignore */
   }
+  const stored = await storedHistoryFor(stock.symbol);
+  if (stored) return stored;
   return generateHistoricalData(stock.price || 100);
 }
 
