@@ -1,6 +1,6 @@
 # Dan's StockPulse
 
-Stock analysis dashboard with cloud-first storage. Runs in the browser; deploys to Render.com.
+Stock analysis dashboard with cloud-first storage. Runs in the browser; deploys to Render.com. (Testing)
 
 > **Education only. Not financial advice.**
 
