@@ -53,9 +53,13 @@ export default function TradeLedger() {
   }, []);
 
   const handleRun = async () => {
-    await run();
-    toast.success(`Simulation updated for ${lastRunDate ?? 'today'}`);
-    load();
+    try {
+      await run();
+      toast.success(`Simulation updated for ${lastRunDate ?? 'today'}`);
+      load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Simulation failed');
+    }
   };
 
   const handleReset = async () => {

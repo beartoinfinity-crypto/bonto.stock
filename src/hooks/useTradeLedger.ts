@@ -183,7 +183,9 @@ export async function simulateDay(ledger: LedgerStore, date = todayStr()): Promi
     const acct = next.accounts[p];
     const held = new Set(acct.positions.map(x => x.symbol.toUpperCase()));
     const universe = new Set<string>(allSymbols);
-    universe.add(...held);
+    // NOTE: `universe.add(undefined)` when held is empty would corrupt the set —
+    // spreading into `.add()` with zero args adds `undefined`. Always guard.
+    for (const s of held) universe.add(s);
     const symbolsHere = [...universe];
 
     const buySignals: SymbolSignal[] = [];
