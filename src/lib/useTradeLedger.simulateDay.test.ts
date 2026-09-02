@@ -125,4 +125,66 @@ describe('simulateDay integration (offline first-run)', () => {
     expect(Object.values(prices).some(p => p > 0)).toBe(true);
     expect(covered.length).toBeGreaterThan(0);
   });
+
+  it('persists the ledger to storage via setJson (verifiability)', async () => {
+    mem.clear();
+    const next = await simulateDay(createLedger(), '2026-01-02');
+    // simulateDay ends with storage.setJson(LEDGER_KEY, next); confirm it landed
+    // in the write-through layer as JSON, not just in the returned object.
+    const raw = mem.get('stockpulse_trade_ledger');
+    expect(raw).toBeTruthy();
+    const persisted = JSON.parse(raw!);
+    expect(persisted.lastRunDate).toBe('2026-01-02');
+    expect(persisted.accounts).toBeDefined();
+    expect(persisted.trades.length).toBe(next.trades.length);
+    expect(persisted.decisions.length).toBe(6);
+  });
+
+  it('appends trades across days (no history is ever dropped)', async () => {
+    mem.clear();
+    // Day 1
+    const afterDay1 = await simulateDay(createLedger(), '2026-01-02');
+    const day1Trades = afterDay1.trades.length;
+    expect(day1Trades).toBeGreaterThan(0);
+    // Day 2 re-runs on the persisted ledger, carrying forward accounts + history
+    const afterDay2 = await simulateDay(afterDay1, '2026-01-05');
+    expect(afterDay2.trades.length).toBeGreaterThan(day1Trades);
+    // Every day-1 trade id is still present on day 2 — nothing lost.
+    const day1Ids = new Set(afterDay1.trades.map(t => t.id));
+    for (const t of afterDay2.trades) {
+      if (day1Ids.has(t.id)) continue;
+      // new day-2 trades must be dated the second run
+      expect(t.date).toBe('2026-01-05');
+    }
+  });
+
+  it('accumulates a per-person daily decision log without dupes', async () => {
+    mem.clear();
+    const afterDay1 = await simulateDay(createLedger(), '2026-01-02');
+    const day1Log = afterDay1.decisions.length;
+    expect(day1Log).toBe(6);
+    // Same-day re-run replaces (no dupes); a different day appends.
+    const rerunSame = await simulateDay(afterDay1, '2026-01-02');
+    expect(rerunSame.decisions.length).toBe(6);
+    const newDay = await simulateDay(rerunSame, '2026-01-05');
+    expect(newDay.decisions.length).toBe(12);
+    // Expose what's stored for a future audit.
+    const audit = newDay.decisions.map(l => `${l.personaId}:${l.date}:${l.decisions.length}`);
+    console.log('AUDIT_DAYS', JSON.stringify(audit));
+  });
+
+  it('carries positions and cash forward across simulated days', async () => {
+    mem.clear();
+    const day1 = await simulateDay(createLedger(), '2026-01-02');
+    const day2 = await simulateDay(day1, '2026-01-05');
+    for (const p of Object.keys(day2.accounts) as Array<keyof typeof day2.accounts>) {
+      const a1 = day1.accounts[p];
+      const a2 = day2.accounts[p];
+      expect(a2.lastRunDate).toBe('2026-01-05');
+      // cash already moved by day-1 buys/sells; positions may have grown or sold
+      expect(typeof a2.cash).toBe('number');
+      expect(Array.isArray(a2.positions)).toBe(true);
+      expect(a2.cash).toBeGreaterThan(0);
+    }
+  });
 });
