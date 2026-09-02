@@ -21,6 +21,9 @@ import {
   getAllCachedQuotes, getAllHistoricalRows,
   bulkPutQuotes, bulkPutHistoricalRows,
 } from './localDb';
+import { LEDGER_KEY } from './tradeSimulator';
+import type { LedgerStore } from './tradeSimulator';
+import { mergeLedgers } from './ledgerMerge';
 
 export const SUPABASE_CONFIG_KEY = 'stockpulse_supabase_config';
 export const TABLE = 'stockpulse_kv';
@@ -124,6 +127,39 @@ function writeLocal(key: string, value: string): void {
   }
 }
 
+function safeParse<T = unknown>(value: string | null): T | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
+/** Fetch a single remote KV row (null when absent). */
+async function fetchRow(c: SupabaseClient, key: string): Promise<KVRow | null> {
+  const { data, error } = await c.from(TABLE).select('key,value').eq('key', key).limit(1);
+  if (error) throw new Error(error.message);
+  return data && data.length ? ({ key: data[0].key, value: data[0].value as string } as KVRow) : null;
+}
+
+/**
+ * Merge two ledger JSON values with the lossless `mergeLedgers` union so
+ * concurrent machines never overwrite each other's simulated days. Falls back
+ * to the local value when either side isn't a (parseable) ledger.
+ */
+function mergeLedgerValue(localValue: string, remoteValue: string | null): string {
+  const local = safeParse<LedgerStore>(localValue);
+  if (!local || !Array.isArray(local.trades)) return localValue;
+  const remote = safeParse<LedgerStore>(remoteValue ?? '');
+  if (!remote || !Array.isArray(remote.trades)) return localValue;
+  try {
+    return JSON.stringify(mergeLedgers(local, remote));
+  } catch {
+    return localValue;
+  }
+}
+
 // ─── Push / Pull ───────────────────────────────────────────────────
 
 /** Push all tracked keys (or a specific subset) to Supabase. Returns count. */
@@ -134,7 +170,9 @@ export async function pushKeys(keys?: string[]): Promise<number> {
     k => localStorage.getItem(k) !== null
   );
   if (!targets.length) return 0;
-  await upsertRows(c, targets.map(rowFor));
+  const rows = targets.map(rowFor);
+  await mergeLedgerRowInto(c, rows);
+  await upsertRows(c, rows);
   return targets.length;
 }
 
@@ -154,7 +192,13 @@ export async function pullAll(): Promise<number> {
       for (const row of data as { key: string; value: string | null }[]) {
         if (!row.key || row.value == null) continue;
         if (!(SYNC_KEYS as string[]).includes(row.key)) continue;
-        writeLocal(row.key, row.value);
+        if (row.key === LEDGER_KEY) {
+          // True-merge the ledger: union this machine's days with the cloud's
+          // (no last-writer-wins snapshots that drop another machine's history).
+          writeLocal(LEDGER_KEY, mergeLedgerValue(localStorage.getItem(LEDGER_KEY) ?? '', row.value));
+        } else {
+          writeLocal(row.key, row.value);
+        }
         applied++;
       }
       if (data.length < PAGE) break;
@@ -189,10 +233,25 @@ async function flushPending(): Promise<void> {
   const rows = keys.filter(k => localStorage.getItem(k) !== null).map(rowFor);
   if (!rows.length) return;
   try {
+    await mergeLedgerRowInto(c, rows);
     await upsertRows(c, rows);
   } catch (e) {
     console.warn('[SupabaseSync] auto-push failed:', e);
   }
+}
+
+/**
+ * If the outgoing rows contain the trade ledger, merge it against the current
+ * cloud copy first (union, no history loss) and absorb the merged value back
+ * into the local mirror so this machine sees the other machines' days too.
+ */
+async function mergeLedgerRowInto(c: SupabaseClient, rows: KVRow[]): Promise<void> {
+  const ledgerRow = rows.find(r => r.key === LEDGER_KEY);
+  if (!ledgerRow) return;
+  const remote = await fetchRow(c, LEDGER_KEY);
+  const merged = mergeLedgerValue(ledgerRow.value, remote?.value ?? null);
+  ledgerRow.value = merged;
+  if (remote) writeLocal(LEDGER_KEY, merged);
 }
 
 // ─── SQL setup snippet shown in Settings ───────────────────────────

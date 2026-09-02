@@ -10,7 +10,7 @@
  * top-Matrix symbols plus anything they already hold — to keep the pass cheap.
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import * as storage from '@/lib/storage';
 import { calculateSMA, generateHistoricalData, popularStocks, Stock, StockData } from '@/lib/stockData';
 import { fetchStockQuote, fetchHistoricalData } from '@/lib/stockApi';
@@ -312,6 +312,14 @@ export function useTradeLedger() {
   const ranToday = lastRunDate === todayStr();
 
   const load = useCallback(() => setLedger(loadLedger()), []);
+
+  // Reload after a cloud boot hydration (`pullAll`) merges other machines'
+  // ledger days into localStorage — keeps multi-machine time line fresh.
+  useEffect(() => {
+    const onSync = () => load();
+    window.addEventListener('stockpulse-sync', onSync);
+    return () => window.removeEventListener('stockpulse-sync', onSync);
+  }, [load]);
 
   const run = useCallback(async () => {
     setRunning(true);
