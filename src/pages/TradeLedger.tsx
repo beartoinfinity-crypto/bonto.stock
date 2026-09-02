@@ -23,7 +23,7 @@ import {
   sortTrades,
 } from '@/lib/ledgerView';
 import {
-  RotateCcw, TrendingUp, TrendingDown, Minus, Users, History, Briefcase, ListChecks,
+  RotateCcw, TrendingUp, TrendingDown, Minus, Users, History, Briefcase, ListChecks, CloudDownload,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -169,12 +169,19 @@ function Pager({ page, total, pageSize, onPage }: {
 }
 
 export default function TradeLedger() {
-  const { ledger, reset } = useTradeLedger();
+  const { ledger, reset, syncFromCloud } = useTradeLedger();
   const [active, setActive] = useState<PersonaId>('value');
 
   const handleReset = () => {
     reset();
     toast.success("Today's record cleared — the day can run again");
+  };
+
+  const handleSyncFromCloud = async () => {
+    const ok = await syncFromCloud();
+    toast[ok ? 'success' : 'error'](
+      ok ? 'Ledger synced from Supabase' : 'Cloud sync failed — is Supabase configured?'
+    );
   };
 
   const prices = ledger?.prices ?? {};
@@ -238,6 +245,9 @@ export default function TradeLedger() {
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={handleReset}>
               <RotateCcw className="h-4 w-4 mr-2" /> Reset today
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleSyncFromCloud}>
+              <CloudDownload className="h-4 w-4 mr-2" /> Sync from Supabase
             </Button>
           </div>
         </div>

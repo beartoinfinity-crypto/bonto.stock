@@ -387,8 +387,25 @@ export function useTradeLedger() {
     void overwriteLedger(next);
   }, []);
 
+  // Replace local ledger entirely with the Supabase copy — use after reset
+  // when the user wants to discard local state and re-sync from the cloud.
+  const syncFromCloud = useCallback(async (): Promise<boolean> => {
+    setRunning(true);
+    try {
+      const cloud = await pullLedger();
+      if (!cloud) return false;
+      storage.setJson(LEDGER_KEY, cloud);
+      setLedger(cloud);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setRunning(false);
+    }
+  }, []);
+
   return useMemo(
-    () => ({ ledger, running, ranToday, lastRunDate, load, run: runOnceToday, runOnceToday, reset }),
-    [ledger, running, ranToday, lastRunDate, load, runOnceToday, reset]
+    () => ({ ledger, running, ranToday, lastRunDate, load, run: runOnceToday, runOnceToday, reset, syncFromCloud }),
+    [ledger, running, ranToday, lastRunDate, load, runOnceToday, reset, syncFromCloud]
   );
 }
