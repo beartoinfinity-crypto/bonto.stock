@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,7 +23,7 @@ import {
   sortTrades,
 } from '@/lib/ledgerView';
 import {
-  Wallet, RefreshCw, RotateCcw, TrendingUp, TrendingDown, Minus, Users, History, Briefcase, ListChecks,
+  RotateCcw, TrendingUp, TrendingDown, Minus, Users, History, Briefcase, ListChecks,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -169,41 +169,8 @@ function Pager({ page, total, pageSize, onPage }: {
 }
 
 export default function TradeLedger() {
-  const { ledger, running, ranToday, lastRunDate, run, runOnceToday, reset, load } = useTradeLedger();
+  const { ledger, reset } = useTradeLedger();
   const [active, setActive] = useState<PersonaId>('value');
-
-  // Auto-run once per page visit IF the day isn't already simulated — but the
-  // decision is made against the CLOUD ledger: runOnceToday pulls the cloud
-  // copy (lossless merge) first, so a second machine does NOT re-simulate a day
-  // another machine already pushed (re-running with different live prices is
-  // what diverged the record across browsers). Fires on the boot-hydration
-  // event, with an 8s fallback so pages without a wake-up event still run.
-  const runningRef = useRef(running);
-  runningRef.current = running;
-  useEffect(() => {
-    const maybeRun = () => {
-      if (runningRef.current) return; // a manual run is in flight — don't double-run
-      void runOnceToday();
-    };
-    const onSync = () => maybeRun();
-    window.addEventListener('stockpulse-sync', onSync);
-    const timer: ReturnType<typeof setTimeout> | undefined = setTimeout(maybeRun, 8000);
-    return () => {
-      window.removeEventListener('stockpulse-sync', onSync);
-      clearTimeout(timer);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleRun = async () => {
-    const didRun = await run();
-    if (didRun) {
-      toast.success(`Simulation updated for ${lastRunDate ?? 'today'}`);
-      load();
-    } else {
-      toast.info('Today is already simulated — a day runs only once. Use Reset today to clear it.');
-    }
-  };
 
   const handleReset = () => {
     reset();
@@ -265,16 +232,12 @@ export default function TradeLedger() {
             <h1 className="text-2xl font-bold tracking-tight">Simulated Traders</h1>
             <p className="text-muted-foreground text-sm">
               {PERSONAS.length} personas trade the shared S&amp;P 500 / NASDAQ-100 universe daily; every transaction is recorded.
-              {ranToday && lastRunDate && <span> Last run: {lastRunDate}.</span>}
+              <span> Daily simulation runs on a schedule — configure it in Settings.</span>
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleReset} disabled={running}>
+            <Button variant="outline" size="sm" onClick={handleReset}>
               <RotateCcw className="h-4 w-4 mr-2" /> Reset today
-            </Button>
-            <Button size="sm" onClick={handleRun} disabled={running}>
-              {running ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" /> : <Wallet className="h-4 w-4 mr-2" />}
-              {running ? 'Simulating…' : 'Run today'}
             </Button>
           </div>
         </div>
@@ -447,7 +410,7 @@ export default function TradeLedger() {
               <Stat label="HOLD" value={String(decHolds)} className="text-muted-foreground" />
             </div>
             {filteredDecisions.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4">No decisions match the filters — hit "Run today" or clear filters.</p>
+              <p className="text-sm text-muted-foreground py-4">No decisions match the filters — clear filters or wait for the next scheduled run.</p>
             ) : (
               <>
                 <Table>
@@ -516,7 +479,7 @@ export default function TradeLedger() {
               <Stat label="Realized P/L" value={nl(realizedPnl)} className={realizedPnl >= 0 ? 'text-emerald-500' : 'text-red-500'} />
             </div>
             {filteredTrades.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4">No trades match the filters — hit "Run today" or clear filters.</p>
+              <p className="text-sm text-muted-foreground py-4">No trades match the filters — clear filters or wait for the next scheduled run.</p>
             ) : (
               <>
                 <Table>

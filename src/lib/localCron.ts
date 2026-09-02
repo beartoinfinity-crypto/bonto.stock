@@ -285,10 +285,45 @@ async function runSyncStockData(): Promise<{ ok: boolean; message: string }> {
   return { ok: quotesSynced > 0, message: `Synced ${quotesSynced} quotes, ${historySynced} histories${cloudNote}` };
 }
 
+// ─── Simulated-traders ledger job ───────────────────────────────────
+// Runs today's simulation once from whichever browser has this job enabled and
+// is open at the scheduled time, then pushes the ledger to Supabase so every
+// other browser/machine sees the same day (the day-once write-protect inside
+// simulateDay makes a duplicate run by another machine a no-op).
+
+async function runSimulateLedger(): Promise<{ ok: boolean; message: string }> {
+  const { pullLedger, overwriteLedger } = await import('@/lib/supabaseDb');
+  const { simulateDay, todayStr, loadLedgerLocal } = await import('@/hooks/useTradeLedger');
+
+  // Pull the cloud ledger first (lossless merge) so the day-once decision is
+  // made against every machine's state — fall back to the local copy when sync
+  // is off. Then simulate today once.
+  const fresh = (await pullLedger()) ?? loadLedgerLocal();
+  const today = todayStr();
+  let didRun = false;
+  let ledger = fresh;
+  if (fresh.lastRunDate !== today) {
+    ledger = await simulateDay(fresh, today);
+    didRun = true;
+  }
+
+  // Push the resulting ledger to the cloud so all machines converge. A skipped
+  // day (already run elsewhere) still re-pushes the merged copy harmlessly.
+  let cloudNote = '';
+  try {
+    const pushed = await overwriteLedger(ledger);
+    cloudNote = pushed ? ' | pushed to Supabase' : ' | cloud sync off';
+  } catch (e) {
+    console.warn('[LocalCron] ledger push failed:', e);
+    cloudNote = ' | push FAILED';
+  }
+
+  return { ok: didRun, message: didRun ? `Simulated ${today}${cloudNote}` : `Already simulated ${today}${cloudNote}` };
+}
+
 // ─── Local archive job (SQLite backup) ──────────────────────────────
 
-async function runSqliteArchive(): Promise<{ ok: boolean; message: string }> {
-  // Flush any debounced writes so the .db file / IndexedDB snapshot is current
+async function runSqliteArchive(): Promise<{ ok: boolean; message: string }> {  // Flush any debounced writes so the .db file / IndexedDB snapshot is current
   const { persistNow, getStats } = await import('@/lib/localDb');
   await persistNow();
   const s = await getStats();
@@ -495,6 +530,14 @@ function persistEnabledState() {
 }
 
 export const CRON_JOBS: CronJob[] = [
+  {
+    id: 'simulate-ledger',
+    label: 'Simulate traders (ledger)',
+    schedule: '0 5 * * 1-5',
+    description: 'Run today\'s simulated-trader day ONCE (on weekdays) and push the ledger to Supabase so every browser/machine shows the same result. The ledger page no longer auto-runs.',
+    enabled: loadEnabledState()['simulate-ledger'] ?? false,
+    run: runSimulateLedger,
+  },
   {
     id: 'sync-stock-data',
     label: 'Stock quotes → Supabase',
