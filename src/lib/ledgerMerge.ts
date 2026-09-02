@@ -61,6 +61,51 @@ export function replayAccounts(trades: Trade[], initialCash = STARTING_CASH): Re
   return accounts;
 }
 
+/**
+ * Heal legacy same-day BUY+SELL conflicts left by pre-write-protection re-runs.
+ *
+ * A single correct simulation day can NEVER produce both a BUY and a SELL for
+ * the same (persona, symbol) — `runDayForPerson` evaluates exits (sells) before
+ * buys and never buys a symbol it already holds. So when a merged ledger holds
+ * a BUY and a SELL for the same persona+symbol on the same date, they came from
+ * TWO runs of that day with different live quotes (e.g. AAPL bought @316.85 in
+ * one run, sold @178.72 in another) — the exact corruption that caused wildly
+ * wrong fill prices.
+ *
+ * Heal rule: when a same-day, same-persona, same-symbol BUY+SELL pair exists
+ * and their prices disagree materially (legit round-trips must share a price),
+ * drop the SELL and keep the BUY so the position entry survives and replaying
+ * the fills no longer produces an impossible immediate loss. Pairs whose prices
+ * agree are left untouched.
+ */
+export function healSameDayConflicts(trades: Trade[]): Trade[] {
+  const byKey = new Map<string, Trade[]>();
+  for (const t of trades) {
+    const key = `${t.personaId}|${t.date}|${t.symbol.toUpperCase()}`;
+    const list = byKey.get(key);
+    if (list) list.push(t);
+    else byKey.set(key, [t]);
+  }
+
+  const drop = new Set<string>();
+  for (const group of byKey.values()) {
+    const buys = group.filter(t => t.action === 'BUY');
+    const sells = group.filter(t => t.action === 'SELL');
+    if (buys.length === 0 || sells.length === 0) continue;
+
+    // Materially different prices ⇒ two runs of the same day; drop every SELL
+    // in the group so the (correct) entries are preserved.
+    const buyPrice = buys[0].price;
+    const diverged = sells.some(s => Math.abs(s.price - buyPrice) > 0.5);
+    if (diverged) {
+      for (const s of sells) drop.add(s.id);
+    }
+  }
+
+  if (drop.size === 0) return trades;
+  return trades.filter(t => !drop.has(t.id));
+}
+
 /** Merge two `LedgerStore` snapshots into one lossless ledger. */
 export function mergeLedgers(a: LedgerStore, b: LedgerStore): LedgerStore {
   const aTrades = a.trades ?? [];
@@ -80,7 +125,9 @@ export function mergeLedgers(a: LedgerStore, b: LedgerStore): LedgerStore {
     const prev = canonical.get(key);
     if (!prev || t.value > prev.value || (t.value === prev.value && t.qty > prev.qty)) canonical.set(key, t);
   }
-  const mergedTrades = [...canonical.values()].sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0));
+  const mergedTrades = healSameDayConflicts(
+    [...canonical.values()].sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0))
+  );
 
   const decisions = new Map<string, (typeof a.decisions)[number]>();
   for (const d of [...(a.decisions ?? []), ...(b.decisions ?? [])]) {

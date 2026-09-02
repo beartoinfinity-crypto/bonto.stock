@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mergeLedgers } from './ledgerMerge';
+import { healSameDayConflicts, mergeLedgers } from './ledgerMerge';
 import { LedgerStore, PersonaId, STARTING_CASH } from './tradeSimulator';
 
 function makeTrade(id: string, date: string, personaId: PersonaId, symbol: string, action: 'BUY' | 'SELL', qty: number, price: number): LedgerStore['trades'][number] {
@@ -144,5 +144,47 @@ describe('mergeLedgers', () => {
 
     const m = mergeLedgers(a, b);
     expect(m.prices).toEqual({ AAPL: 101, TSLA: 250 });
+  });
+
+  it('heals a same-day buy+sell with conflicting prices (keeps the buy)', () => {
+    // Corruption from two same-day runs: bought AAPL @316.85, "sold" @178.72.
+    const a = makeLedger({
+      trades: [makeTrade('buy1', '2026-09-02', 'value', 'AAPL', 'BUY', 30, 316.85)],
+      accounts: personaAccounts(),
+    });
+    const b = makeLedger({
+      trades: [makeTrade('sell1', '2026-09-02', 'value', 'AAPL', 'SELL', 30, 178.72)],
+      accounts: personaAccounts(),
+    });
+
+    const m = mergeLedgers(a, b);
+    // The rogue same-day sell is dropped; the correct buy survives.
+    expect(m.trades).toHaveLength(1);
+    expect(m.trades[0]).toMatchObject({ action: 'BUY', id: 'buy1', price: 316.85 });
+    // Replaying keeps the position instead of selling it at the bogus price.
+    expect(m.accounts.value.positions).toHaveLength(1);
+    expect(m.accounts.value.positions[0].avgCost).toBe(316.85);
+  });
+
+  it('keeps a same-day buy+sell pair whose prices agree', () => {
+    const a = makeLedger({
+      trades: [
+        makeTrade('b1', '2026-09-02', 'agent', 'AAPL', 'BUY', 10, 100),
+        makeTrade('s1', '2026-09-02', 'agent', 'AAPL', 'SELL', 10, 100),
+      ],
+      accounts: personaAccounts(),
+    });
+
+    // Merge with an empty side so the pair survives union untouched.
+    const m = mergeLedgers(a, makeLedger({ accounts: personaAccounts() }));
+    expect(m.trades).toHaveLength(2);
+  });
+
+  it('healSameDayConflicts is a pure no-op when prices agree', () => {
+    const trades = [
+      makeTrade('b1', '2026-09-02', 'agent', 'AAPL', 'BUY', 10, 100),
+      makeTrade('s1', '2026-09-02', 'agent', 'AAPL', 'SELL', 10, 100),
+    ];
+    expect(healSameDayConflicts(trades)).toEqual(trades);
   });
 });
