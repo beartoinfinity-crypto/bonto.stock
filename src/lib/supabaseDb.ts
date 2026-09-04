@@ -88,13 +88,20 @@ export function fetchRemoteSyncConfig(): Promise<SupabaseConfig | null> {
     remoteConfigPromise = (async () => {
       try {
         const res = await fetch('/api/sync-config');
-        if (!res.ok) return null;
+        if (!res.ok) {
+          remoteConfigPromise = null; // don't cache failures — next call retries
+          return null;
+        }
         const cfg = (await res.json()) as { url?: string; anonKey?: string; enabled?: boolean };
-        if (!cfg.url || !cfg.anonKey) return null;
+        if (!cfg.url || !cfg.anonKey) {
+          remoteConfigPromise = null;
+          return null;
+        }
         const remote: SupabaseConfig = { url: cfg.url, anonKey: cfg.anonKey, enabled: cfg.enabled !== false };
         saveSupabaseConfig(remote);
         return remote;
       } catch {
+        remoteConfigPromise = null; // transient failure (e.g. Render cold start) — retry next call
         return null;
       }
     })();

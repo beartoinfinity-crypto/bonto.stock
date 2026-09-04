@@ -23,7 +23,7 @@ import {
   sortTrades,
 } from '@/lib/ledgerView';
 import {
-  RotateCcw, TrendingUp, TrendingDown, Minus, Users, History, Briefcase, ListChecks, CloudDownload,
+  RotateCcw, RefreshCw, TrendingUp, TrendingDown, Minus, Users, History, Briefcase, ListChecks, CloudDownload,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -169,7 +169,7 @@ function Pager({ page, total, pageSize, onPage }: {
 }
 
 export default function TradeLedger() {
-  const { ledger, reset, syncFromCloud } = useTradeLedger();
+  const { ledger, reset, syncFromCloud, running } = useTradeLedger();
   const [active, setActive] = useState<PersonaId>('value');
 
   const handleReset = () => {
@@ -180,7 +180,7 @@ export default function TradeLedger() {
   const handleSyncFromCloud = async () => {
     const ok = await syncFromCloud();
     toast[ok ? 'success' : 'error'](
-      ok ? 'Ledger synced from Supabase' : 'Cloud sync failed — is Supabase configured?'
+      ok ? 'Ledger synced from Supabase' : 'Cloud sync failed — no Supabase copy reachable (server may be waking; try again shortly)'
     );
   };
 
@@ -246,8 +246,11 @@ export default function TradeLedger() {
             <Button variant="outline" size="sm" onClick={handleReset}>
               <RotateCcw className="h-4 w-4 mr-2" /> Reset today
             </Button>
-            <Button variant="outline" size="sm" onClick={handleSyncFromCloud}>
-              <CloudDownload className="h-4 w-4 mr-2" /> Sync from Supabase
+            <Button variant="outline" size="sm" onClick={handleSyncFromCloud} disabled={running}>
+              {running
+                ? <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                : <CloudDownload className="h-4 w-4 mr-2" />}
+              {running ? 'Syncing…' : 'Sync from Supabase'}
             </Button>
           </div>
         </div>
