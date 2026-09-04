@@ -62,48 +62,6 @@ function cronMatches(expr: string, date: Date): boolean {
     dows.includes(date.getUTCDay());
 }
 
-// ─── CORS proxy helper ─────────────────────────────────────────────
-
-const SERVER_PROXY = (url: string) => `/api/proxy?url=${encodeURIComponent(url)}`;
-
-const CORS_PROXIES = [
-  (url: string) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-  (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-];
-
-async function proxyFetch(url: string, timeoutMs = 15000): Promise<Response> {
-  // 1. Server-side proxy (primary — no CORS restrictions)
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    const res = await fetch(SERVER_PROXY(url), { signal: ctrl.signal });
-    clearTimeout(timer);
-    if (res.ok) return res;
-  } catch { /* server proxy unavailable — try fallbacks */ }
-
-  // 2. Direct (works for same-origin or non-CORS URLs)
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    const res = await fetch(url, { signal: ctrl.signal });
-    clearTimeout(timer);
-    if (res.ok) return res;
-  } catch { /* CORS blocked */ }
-
-  // 3. Third-party CORS proxies (legacy fallback)
-  for (const proxy of CORS_PROXIES) {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-      const res = await fetch(proxy(url), { signal: ctrl.signal });
-      clearTimeout(timer);
-      if (res.ok) return res;
-    } catch { continue; }
-  }
-
-  throw new Error('All fetch methods failed');
-}
-
 // ─── Local job implementations ─────────────────────────────────────
 
 function parseAmountRange(s: string): { from: number | null; to: number | null } {
@@ -114,176 +72,9 @@ function parseAmountRange(s: string): { from: number | null; to: number | null }
   return { from: clean(s), to: null };
 }
 
-function mapCapitolExposed(r: any) {
-  const tt = String(r.transaction_type ?? '').toLowerCase();
-  let side = 'OTHER';
-  if (tt === 'purchase' || tt === 'buy') side = 'BUY';
-  else if (tt === 'sale' || tt === 'sale_full' || tt === 'sell') side = 'SELL';
-  else if (tt === 'exchange' || tt === 'exchange_received' || tt === 'exchange_sold') side = 'EXCHANGE';
-  return {
-    id: String(r.id ?? ''),
-    symbol: String(r.ticker ?? ''),
-    politician: String(r.member_name ?? ''),
-    transaction_date: String(r.transaction_date ?? '').slice(0, 10),
-    filing_date: r.disclosure_date ? String(r.disclosure_date).slice(0, 10) : null,
-    transaction_type: side,
-    amount_from: r.amount_min ? Number(String(r.amount_min).replace(/[^0-9.]/g, '')) || null : null,
-    amount_to: r.amount_max ? Number(String(r.amount_max).replace(/[^0-9.]/g, '')) || null : null,
-    asset_name: r.asset_description ? String(r.asset_description) : null,
-    position_held: r.owner ? String(r.owner) : null,
-  };
-}
-
-function mapCongressInvests(r: any) {
-  const tt = String(r.trade_type ?? '').toLowerCase();
-  let side = 'OTHER';
-  if (tt === 'buy' || tt === 'purchase') side = 'BUY';
-  else if (tt === 'sell' || tt === 'sale') side = 'SELL';
-  const { from, to } = parseAmountRange(String(r.amount ?? ''));
-  return {
-    id: `ci-${r.link ?? ''}`,
-    symbol: String(r.ticker ?? ''),
-    politician: String(r.member ?? ''),
-    transaction_date: String(r.tx_date ?? '').slice(0, 10),
-    filing_date: r.disclosed ? String(r.disclosed).slice(0, 10) : null,
-    transaction_type: side,
-    amount_from: from,
-    amount_to: to,
-    asset_name: r.asset ? String(r.asset) : null,
-    position_held: r.chamber ? String(r.chamber) : null,
-  };
-}
-
-async function runPoliticianTrades(): Promise<{ ok: boolean; message: string }> {
-  const start = Date.now();
-
-  // Source 1: CapitolExposed API (recent ~30 days)
-  const capitolTrades: unknown[] = [];
-  for (let page = 1; page <= 10; page++) {
-    try {
-      const res = await proxyFetch(`https://www.capitolexposed.com/api/v1/trades?page=${page}&per_page=100`);
-      const json = await res.json();
-      const data = json?.data ?? (Array.isArray(json) ? json : []);
-      if (!Array.isArray(data) || data.length === 0) break;
-      capitolTrades.push(...data);
-      const hasMore = json?.meta?.has_more ?? data.length >= 100;
-      if (!hasMore) break;
-    } catch { break; }
-  }
-
-  // Source 2: CongressInvests API (full history back to 2015, House + Senate)
-  const congressTrades: unknown[] = [];
-  const PAGE_SIZE = 500;
-  const maxOffset = 6000;
-  for (let offset = 0; offset < maxOffset; offset += PAGE_SIZE) {
-    try {
-      const res = await proxyFetch(`https://congressinvests.com/trades?limit=${PAGE_SIZE}&offset=${offset}`);
-      const json = await res.json();
-      const trades = json?.trades ?? [];
-      if (!Array.isArray(trades) || trades.length === 0) break;
-      congressTrades.push(...trades);
-      if (!json?.has_more) break;
-    } catch { break; }
-  }
-
-  if (capitolTrades.length === 0 && congressTrades.length === 0) {
-    return { ok: false, message: 'No trades fetched from either API' };
-  }
-
-  // Map both sources to TradeRow format
-  const mappedCapitol = capitolTrades.map(mapCapitolExposed);
-  const mappedCongress = congressTrades.map(mapCongressInvests);
-
-  // Merge: CongressInvests has broader history, CapitolExposed has latest — combine and dedup
-  // Use a composite key (symbol+politician+date+type) to dedup across sources
-  const seen = new Set<string>();
-  const deduped: any[] = [];
-  for (const t of [...mappedCongress, ...mappedCapitol]) {
-    const key = `${t.symbol}|${t.politician}|${t.transaction_date}|${t.transaction_type}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(t);
-  }
-
-  // Merge with existing data — keep imported trades that aren't in the fetched set
-  const existingRaw = storage.getItem('stockpulse_politician_trades');
-  let existing: { data?: unknown[]; fetchedAt?: number } = {};
-  try { existing = JSON.parse(existingRaw || '{}'); } catch { /* ignore */ }
-  const existingData: unknown[] = existing?.data ?? (Array.isArray(existing) ? existing : []);
-
-  // Build a set of fetched trade IDs (also use composite keys for dedup with existing)
-  const fetchedKeys = new Set(deduped.map((t: any) => `${t.symbol}|${t.politician}|${t.transaction_date}|${t.transaction_type}`));
-  // Keep existing trades whose composite key is NOT in the fetched set
-  const preserved = existingData.filter((t: any) => {
-    const key = `${t.symbol}|${t.politician}|${t.transaction_date}|${t.transaction_type}`;
-    return !fetchedKeys.has(key);
-  });
-
-  const merged = [...deduped, ...preserved];
-  // Sort by disclosed date newest first, fall back to transaction date
-  merged.sort((a: any, b: any) => {
-    const da = a.filing_date || a.transaction_date;
-    const db = b.filing_date || b.transaction_date;
-    return db.localeCompare(da);
-  });
-  storage.setItem('stockpulse_politician_trades', JSON.stringify({ data: merged, fetchedAt: Date.now() }));
-  window.dispatchEvent(new Event('stockpulse-politician-sync'));
-
-  // PRIMARY TARGET: push merged trades to Supabase when cloud sync is on
-  let cloudNote = '';
-  try {
-    const { getClient, pushKeys } = await import('@/lib/supabaseDb');
-    if (getClient()) {
-      const n = await pushKeys(['stockpulse_politician_trades']);
-      cloudNote = n > 0 ? ` | Supabase: pushed` : ' | Supabase: nothing to push';
-    }
-  } catch (e) {
-    console.warn('[LocalCron] Supabase push failed:', e);
-    cloudNote = ' | Supabase push FAILED';
-  }
-
-  return {
-    ok: true,
-    message: `Fetched ${capitolTrades.length} from CapitolExposed + ${congressTrades.length} from CongressInvests (${deduped.length} unique), kept ${preserved.length} imported records (${((Date.now() - start) / 1000).toFixed(1)}s)${cloudNote}`,
-  };
-}
-
-async function runSyncStockData(): Promise<{ ok: boolean; message: string }> {
-  const { popularStocks } = await import('@/lib/stockData');
-  const { fetchStockQuote, fetchHistoricalData } = await import('@/lib/stockApi');
-  const symbols = popularStocks.slice(0, 20).map(s => s.symbol);
-  let quotesSynced = 0;
-  let historySynced = 0;
-  for (const sym of symbols) {
-    try {
-      const q = await fetchStockQuote(sym, true);
-      if (q.isRealData) quotesSynced++;
-    } catch { /* skip */ }
-    try {
-      const h = await fetchHistoricalData(sym, true);
-      if (h.isRealData) historySynced++;
-    } catch { /* skip */ }
-  }
-  // Notify UI to refetch stale queries
-  window.dispatchEvent(new Event('stockpulse-sync'));
-
-  // PRIMARY TARGET: push fetched stock data to Supabase when cloud sync is on
-  let cloudNote = '';
-  try {
-    const { getClient, pushStockData } = await import('@/lib/supabaseDb');
-    if (getClient()) {
-      const r = await pushStockData();
-      cloudNote = r.quotes + r.bars > 0
-        ? ` | Supabase: ${r.quotes} quotes + ${r.bars} bars pushed`
-        : ' | Supabase: nothing to push';
-    }
-  } catch (e) {
-    console.warn('[LocalCron] Supabase push failed:', e);
-    cloudNote = ' | Supabase push FAILED';
-  }
-
-  return { ok: quotesSynced > 0, message: `Synced ${quotesSynced} quotes, ${historySynced} histories${cloudNote}` };
-}
+// NOTE: sync-stock-data and sync-politician-trades previously lived here.
+// They now run as Supabase scheduled Edge Functions (pg_cron) — see
+// supabase/functions/. The browser no longer runs them.
 
 // ─── Simulated-traders ledger job ───────────────────────────────────
 // Runs today's simulation once from whichever browser has this job enabled and
@@ -538,22 +329,8 @@ export const CRON_JOBS: CronJob[] = [
     enabled: loadEnabledState()['simulate-ledger'] ?? false,
     run: runSimulateLedger,
   },
-  {
-    id: 'sync-stock-data',
-    label: 'Stock quotes → Supabase',
-    schedule: '0 6 * * 1-5',
-    description: 'Fetch quotes + history for top 20 stocks, store to Supabase (primary). SQLite copy happens automatically on write.',
-    enabled: loadEnabledState()['sync-stock-data'] ?? false,
-    run: runSyncStockData,
-  },
-  {
-    id: 'sync-politician-trades',
-    label: 'Politician trades → Supabase',
-    schedule: '0 7 * * 1-5',
-    description: 'Fetch congressional trading disclosures (CapitolExposed + CongressInvests), store to Supabase (primary).',
-    enabled: loadEnabledState()['sync-politician-trades'] ?? false,
-    run: runPoliticianTrades,
-  },
+  // sync-stock-data and sync-politician-trades moved to Supabase scheduled
+  // Edge Functions (pg_cron) — removed here to prevent duplicate runs.
   {
     id: 'archive-sqlite',
     label: 'Local SQLite archive',
