@@ -18,3 +18,12 @@ verify_jwt = false
 [functions.asymmetric-value-screener]
 verify_jwt = false
 
+
+[functions.sync-politician-trades]
+verify_jwt = false
+
+[functions.sync-featured-trades]
+verify_jwt = false
+
+[functions.simulate-ledger]
+verify_jwt = false

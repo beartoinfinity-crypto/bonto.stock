@@ -75,17 +75,27 @@ Serves `dist/` SPA and provides server-side API endpoints.
 | `GET /api/politician-trades/opencabinet?politician=X` | OpenCabinet CSV parse (PapaParse), name + ticker filter. |
 | `GET /api/diag/opencabinet` | Diagnostic: Trump trade counts. |
 
-### `src/lib/localCron.ts` — Browser Cron (681 lines)
+### Cron architecture — server-side (primary) + browser (local only)
 
-Five jobs, run while a tab is open:
+**Server-side (Supabase Edge Functions + pg_cron)** — data-production jobs run 24/7 in the cloud, no browser needed. Definitions in `supabase/functions/`, schedules in `supabase/schedules.sql` (pg_cron + pg_net):
+
+| Function | Schedule | Action |
+|----------|----------|--------|
+| `sync-stock-data` | Weekdays 06:00 UTC | Yahoo quotes + 10y bars → `stock_quotes` / `stock_historical` |
+| `sync-politician-trades` | Weekdays 07:00 UTC | CapitolExposed + CongressInvests → `stockpulse_kv` |
+| `sync-featured-trades` | Daily 07:30 UTC | Trump (OpenCabinet + UW) + Pelosi (StockSpill + UW) → `politician_featured_trades` |
+| `simulate-ledger` | Weekdays 12:00 UTC | Simulated-traders day ONCE from cloud data (master matrix snapshot + cloud quotes) → `stockpulse_kv` ledger row. Write-protected per day; heals legacy conflicts. |
+
+`simulate-ledger` mirrors the browser's `tradeSimulator` semantics (persona thresholds, 10% equity buys, -8%/+30% stops) with a Deno port of the tactical engine (`compute-tactical-history/engine.ts`); the agent persona uses the bounded matrix-rating path (the browser's non-holding path). Universe input is the cloud `stockpulse_master_matrix` snapshot — which browser sessions still produce and push; if a browser hasn't pushed a fresh matrix, the sim uses the latest snapshot present.
+
+**Browser cron (`src/lib/localCron.ts`)** — local-machine maintenance only:
 
 | Job | Schedule | Action |
 |-----|----------|--------|
-| `sync-stock-data` | Weekdays 6 AM UTC | Yahoo/Stooq quotes → Supabase |
-| `sync-politician-trades` | Weekdays 7 AM UTC | CapitolExposed + CongressInvests → Supabase |
-| `sync-featured-trades` | Daily 8 AM UTC | Trump (OpenCabinet + UW) + Pelosi (StockSpill + UW) → Supabase |
 | `archive-sqlite` | Daily 8:30 AM UTC | Flush pending SQLite writes |
-| `pull-stock-data` | Weekdays 9 AM UTC | Supabase → local SQLite |
+| `pull-stock-data` | Weekdays 9 AM UTC | Supabase → local SQLite mirror |
+
+Browsers read server-written rows via the existing boot hydration (`pullAll`) and sync events; no page reads changed.
 
 Key: `proxyFetch()` chains server proxy → direct → CORS proxies (legacy).
 

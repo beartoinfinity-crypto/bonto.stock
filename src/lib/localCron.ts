@@ -64,53 +64,11 @@ function cronMatches(expr: string, date: Date): boolean {
 
 // ─── Local job implementations ─────────────────────────────────────
 
-function parseAmountRange(s: string): { from: number | null; to: number | null } {
-  const clean = (v: string) => Number(v.replace(/[^0-9.]/g, '')) || null;
-  if (!s) return { from: null, to: null };
-  const parts = s.split(/\s*[-–]\s*/);
-  if (parts.length === 2) return { from: clean(parts[0]), to: clean(parts[1]) };
-  return { from: clean(s), to: null };
-}
-
-// NOTE: sync-stock-data and sync-politician-trades previously lived here.
-// They now run as Supabase scheduled Edge Functions (pg_cron) — see
-// supabase/functions/. The browser no longer runs them.
-
-// ─── Simulated-traders ledger job ───────────────────────────────────
-// Runs today's simulation once from whichever browser has this job enabled and
-// is open at the scheduled time, then pushes the ledger to Supabase so every
-// other browser/machine sees the same day (the day-once write-protect inside
-// simulateDay makes a duplicate run by another machine a no-op).
-
-async function runSimulateLedger(): Promise<{ ok: boolean; message: string }> {
-  const { pullLedger, overwriteLedger } = await import('@/lib/supabaseDb');
-  const { simulateDay, todayStr, loadLedgerLocal } = await import('@/hooks/useTradeLedger');
-
-  // Pull the cloud ledger first (lossless merge) so the day-once decision is
-  // made against every machine's state — fall back to the local copy when sync
-  // is off. Then simulate today once.
-  const fresh = (await pullLedger()) ?? loadLedgerLocal();
-  const today = todayStr();
-  let didRun = false;
-  let ledger = fresh;
-  if (fresh.lastRunDate !== today) {
-    ledger = await simulateDay(fresh, today);
-    didRun = true;
-  }
-
-  // Push the resulting ledger to the cloud so all machines converge. A skipped
-  // day (already run elsewhere) still re-pushes the merged copy harmlessly.
-  let cloudNote = '';
-  try {
-    const pushed = await overwriteLedger(ledger);
-    cloudNote = pushed ? ' | pushed to Supabase' : ' | cloud sync off';
-  } catch (e) {
-    console.warn('[LocalCron] ledger push failed:', e);
-    cloudNote = ' | push FAILED';
-  }
-
-  return { ok: didRun, message: didRun ? `Simulated ${today}${cloudNote}` : `Already simulated ${today}${cloudNote}` };
-}
+// NOTE: sync-stock-data, sync-politician-trades, simulate-ledger and
+// sync-featured-trades previously lived here. They now run as Supabase
+// scheduled Edge Functions (pg_cron) — see supabase/functions/ and
+// supabase/schedules.sql. The browser no longer runs them, to prevent
+// duplicate runs against the same cloud rows.
 
 // ─── Local archive job (SQLite backup) ──────────────────────────────
 
@@ -141,171 +99,6 @@ async function runPullFromSupabase(): Promise<{ ok: boolean; message: string }> 
   };
 }
 
-// ─── Featured politician trades job (Trump + Pelosi → Supabase) ─
-
-interface FeaturedTradeInput {
-  id: string;
-  politician: string;
-  symbol: string;
-  transaction_type: string;
-  transaction_date: string;
-  filing_date: string | null;
-  amount_from: number | null;
-  amount_to: number | null;
-  asset_name: string | null;
-  source_name: string;
-  source_url: string | null;
-  metadata: Record<string, unknown> | null;
-}
-
-async function fetchUnusualWhalesTrades(politicianName: string): Promise<FeaturedTradeInput[]> {
-  const res = await fetch(`/api/politician-trades/unusualwhales?politician=${encodeURIComponent(politicianName)}`);
-  if (!res.ok) return [];
-  const json = await res.json();
-  const trades: any[] = json?.trades ?? [];
-  return trades
-    .filter((r: any) => r.ticker || r.symbol)
-    .map((r: any) => {
-      const tt = String(r.txn_type ?? '').toLowerCase();
-      let side = 'OTHER';
-      if (tt === 'buy' || tt === 'purchase') side = 'BUY';
-      else if (tt === 'sell' || tt === 'sale') side = 'SELL';
-      const { from, to } = parseAmountRange(r.amounts ?? null);
-      return {
-        id: `uw-${r.file_record_id ?? Math.random().toString(36).slice(2)}`,
-        politician: String(r.name ?? politicianName),
-        symbol: String(r.ticker ?? r.symbol ?? ''),
-        transaction_type: side,
-        transaction_date: String(r.transaction_date ?? '').slice(0, 10),
-        filing_date: r.filed_at_date ? String(r.filed_at_date).slice(0, 10) : null,
-        amount_from: from,
-        amount_to: to,
-        asset_name: r.issuer ? String(r.issuer) : null,
-        source_name: 'unusualwhales',
-        source_url: r.link_url ? String(r.link_url) : null,
-        metadata: { affiliation: r.affiliation, member_type: r.member_type },
-      };
-    });
-}
-
-async function fetchStockSpillTrades(memberName: string): Promise<FeaturedTradeInput[]> {
-  // StockSpill uses our own Supabase — query via REST
-  const url = `https://artscweyrracfffoqvur.supabase.co/rest/v1/congress_trades?member_name=like.*${encodeURIComponent(memberName)}*&order=transaction_date.desc&limit=500`;
-  const key = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFydHNjd2V5cnJhY2ZmZm9xdnVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYwMTM2MTgsImV4cCI6MjA4MTU4OTYxOH0.P9zsEmmEJvYDDFqMuMa_v4m-Ywa2zF90Lk6zDBmqwOU';
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 15000);
-  try {
-    const res = await fetch(url, {
-      signal: ctrl.signal,
-      headers: { apikey: key, Authorization: `Bearer ${key}` },
-    });
-    clearTimeout(timer);
-    if (!res.ok) return [];
-    const rows: any[] = await res.json();
-    return rows.map((r: any) => {
-      const tt = String(r.transaction_type ?? '').toLowerCase();
-      let side = 'OTHER';
-      if (tt === 'purchase' || tt === 'buy') side = 'BUY';
-      else if (tt === 'sale' || tt === 'sell') side = 'SELL';
-      const { from, to } = parseAmountRange(r.amount_range ?? '');
-      return {
-        id: `ss-${r.id ?? ''}`,
-        politician: String(r.member_name ?? memberName),
-        symbol: String(r.ticker ?? ''),
-        transaction_type: side,
-        transaction_date: String(r.transaction_date ?? '').slice(0, 10),
-        filing_date: r.disclosure_date ? String(r.disclosure_date).slice(0, 10) : null,
-        amount_from: from,
-        amount_to: to,
-        asset_name: r.asset_name ? String(r.asset_name) : null,
-        source_name: 'stockspill',
-        source_url: null,
-        metadata: { chamber: r.chamber, party: r.party, state: r.state },
-      };
-    });
-  } catch {
-    clearTimeout(timer);
-    return [];
-  }
-}
-
-async function fetchOpenCabinetTrades(politician: string): Promise<FeaturedTradeInput[]> {
-  const res = await fetch(`/api/politician-trades/opencabinet?politician=${encodeURIComponent(politician)}`);
-  if (!res.ok) return [];
-  const json = await res.json();
-  const trades: any[] = json?.trades ?? [];
-  return trades.map((r: any) => ({
-    id: r.id || `oc-${Math.random().toString(36).slice(2)}`,
-    politician: r.politician || politician,
-    symbol: r.symbol || '',
-    transaction_type: r.transaction_type || 'OTHER',
-    transaction_date: r.transaction_date || '',
-    filing_date: r.filing_date || null,
-    amount_from: r.amount_from ?? 0,
-    amount_to: r.amount_to ?? 0,
-    asset_name: r.asset_name || null,
-    source_name: 'opencabinet',
-    source_url: r.source_url || null,
-    metadata: r.metadata || {},
-  }));
-}
-
-const FEATURED_POLITICIANS_CRON = [
-  { name: 'Donald J Trump', uwSlug: 'Donald J Trump', sources: ['opencabinet' as const, 'unusualwhales' as const] },
-  { name: 'Nancy Pelosi', uwSlug: 'Nancy Pelosi', sources: ['stockspill' as const, 'unusualwhales' as const] },
-];
-
-async function runSyncFeaturedTrades(): Promise<{ ok: boolean; message: string }> {
-  const start = Date.now();
-  const allTrades: FeaturedTradeInput[] = [];
-
-  for (const pol of FEATURED_POLITICIANS_CRON) {
-    for (const src of pol.sources) {
-      try {
-        if (src === 'unusualwhales') {
-          const trades = await fetchUnusualWhalesTrades(pol.uwSlug);
-          allTrades.push(...trades);
-        } else if (src === 'stockspill') {
-          const trades = await fetchStockSpillTrades(pol.name);
-          allTrades.push(...trades);
-        } else if (src === 'opencabinet') {
-          const trades = await fetchOpenCabinetTrades(pol.name);
-          allTrades.push(...trades);
-        }
-      } catch { /* skip failed source */ }
-    }
-  }
-
-  if (allTrades.length === 0) {
-    return { ok: false, message: 'No featured trades fetched from any source' };
-  }
-
-  // Save to localStorage (instant read cache)
-  const { setItem } = await import('@/lib/storage');
-  setItem('stockpulse_featured_trades', JSON.stringify({ data: allTrades, fetchedAt: Date.now() }));
-
-  // Push to Supabase (primary store)
-  let cloudNote = '';
-  try {
-    const { getClient, pushFeaturedTrades, normalizeFeaturedTradeNames } = await import('@/lib/supabaseDb');
-    if (getClient()) {
-      const n = await pushFeaturedTrades(allTrades);
-      const fixed = await normalizeFeaturedTradeNames();
-      cloudNote = n > 0 ? ` | Supabase: ${n} pushed, ${fixed} names fixed` : ' | Supabase: nothing to push';
-    }
-  } catch (e) {
-    console.warn('[LocalCron] Featured trades Supabase push failed:', e);
-    cloudNote = ' | Supabase push FAILED';
-  }
-
-  window.dispatchEvent(new Event('stockpulse-politician-sync'));
-
-  return {
-    ok: true,
-    message: `Fetched ${allTrades.length} featured trades (${allTrades.filter(t => t.politician.includes('Trump')).length} Trump + ${allTrades.filter(t => t.politician.includes('Pelosi')).length} Pelosi) (${((Date.now() - start) / 1000).toFixed(1)}s)${cloudNote}`,
-  };
-}
-
 // ─── Job definitions ───────────────────────────────────────────────
 
 const CRON_ENABLED_KEY = 'stockpulse_cron_enabled';
@@ -321,21 +114,15 @@ function persistEnabledState() {
 }
 
 export const CRON_JOBS: CronJob[] = [
-  {
-    id: 'simulate-ledger',
-    label: 'Simulate traders (ledger)',
-    schedule: '0 5 * * 1-5',
-    description: 'Run today\'s simulated-trader day ONCE (on weekdays) and push the ledger to Supabase so every browser/machine shows the same result. The ledger page no longer auto-runs.',
-    enabled: loadEnabledState()['simulate-ledger'] ?? false,
-    run: runSimulateLedger,
-  },
-  // sync-stock-data and sync-politician-trades moved to Supabase scheduled
-  // Edge Functions (pg_cron) — removed here to prevent duplicate runs.
+  // simulate-ledger, sync-stock-data, sync-politician-trades and
+  // sync-featured-trades run server-side as Supabase scheduled Edge
+  // Functions (pg_cron) — see supabase/schedules.sql. Only local-machine
+  // maintenance jobs remain here.
   {
     id: 'archive-sqlite',
     label: 'Local SQLite archive',
     schedule: '30 8 * * *',
-    description: 'Flush all pending writes into the local SQLite backup (.db file / IndexedDB) and report archive stats.',
+    description: 'Flush any pending writes into the local SQLite backup (.db file / IndexedDB) and report archive stats.',
     enabled: loadEnabledState()['archive-sqlite'] ?? false,
     run: runSqliteArchive,
   },
@@ -346,14 +133,6 @@ export const CRON_JOBS: CronJob[] = [
     description: 'Pull quotes + price bars from Supabase (primary) into the local SQLite mirror so offline data stays fresh.',
     enabled: loadEnabledState()['pull-stock-data'] ?? false,
     run: runPullFromSupabase,
-  },
-  {
-    id: 'sync-featured-trades',
-    label: 'Featured trades → Supabase',
-    schedule: '0 8 * * *',
-    description: 'Fetch Trump (Open Cabinet + UnusualWhales) + Pelosi (StockSpill + UnusualWhales) politician trades, store to Supabase (primary).',
-    enabled: loadEnabledState()['sync-featured-trades'] ?? false,
-    run: runSyncFeaturedTrades,
   },
 ];
 
@@ -431,7 +210,7 @@ async function runJob(job: CronJob): Promise<CronRun> {
 // ─── Scheduler loop ────────────────────────────────────────────────
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
-let runningJobs = new Set<string>();
+const runningJobs = new Set<string>();
 
 function checkAndRun() {
   const now = new Date();

@@ -64,14 +64,6 @@ function loadLedger(): LedgerStore {
   return createLedger();
 }
 
-/**
- * Non-hook local-ledger read, exported for the browser cron job (localCron) and
- * any other non-React caller — pulls the same persisted ledger the hook uses.
- */
-export function loadLedgerLocal(): LedgerStore {
-  return loadLedger();
-}
-
 function loadMatrixRows(): MatrixRow[] {
   try {
     const raw = storage.getItem('stockpulse_masters_top50');
