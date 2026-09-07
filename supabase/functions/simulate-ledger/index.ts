@@ -331,17 +331,24 @@ async function loadCloudPrice(supabase: any, symbol: string): Promise<number> {
 }
 
 async function loadBars(supabase: any, symbol: string): Promise<StockData[]> {
+  // Fetch the NEWEST bars: order descending + limit, then reverse to
+  // chronological. (Ordering ascending with a limit would return the OLDEST
+  // N rows of the multi-year history — split-adjusted prices from years ago
+  // that have nothing to do with today's regime.)
   const { data } = await supabase.from('stock_historical')
     .select('date,open,high,low,close,volume')
     .eq('symbol', symbol.toUpperCase())
-    .order('date', { ascending: true })
+    .order('date', { ascending: false })
     .limit(300);
   if (!Array.isArray(data)) return [];
-  return data.map((b: any) => ({
-    date: String(b.date).slice(0, 10),
-    open: b.open ?? b.close, high: b.high ?? b.close,
-    low: b.low ?? b.close, close: b.close, volume: b.volume ?? 0,
-  })).filter((b: any) => typeof b.close === 'number');
+  return data
+    .map((b: any) => ({
+      date: String(b.date).slice(0, 10),
+      open: b.open ?? b.close, high: b.high ?? b.close,
+      low: b.low ?? b.close, close: b.close, volume: b.volume ?? 0,
+    }))
+    .filter((b: any) => typeof b.close === 'number')
+    .reverse();
 }
 
 async function loadLedger(supabase: any): Promise<LedgerStore | null> {
