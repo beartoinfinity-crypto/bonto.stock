@@ -60,10 +60,14 @@ All data-production jobs run **server-side on Supabase**, 24/7, no browser neede
 
 | Function | Schedule (UTC) | What it does | Writes to |
 |----------|----------------|--------------|-----------|
-| `sync-stock-data` | `0 6 * * 1-5` | Yahoo quotes + 10y bars, top 20 symbols | `stock_quotes`, `stock_historical` |
+| `sync-stock-data?batch=1` | `0 22 * * 1-5` | Yahoo quotes + 10y bars, index-universe batch 1/3 (~27 symbols) | `stock_quotes`, `stock_historical` |
+| `sync-stock-data?batch=2` | `0 23 * * 1-5` | Batch 2/3 (~27 symbols) | `stock_quotes`, `stock_historical` |
+| `sync-stock-data?batch=3` | `0 0 * * 2-6` | Batch 3/3 (~26 symbols) | `stock_quotes`, `stock_historical` |
 | `sync-politician-trades` | `0 7 * * 1-5` | CapitolExposed + CongressInvests congressional trades | `stockpulse_kv` (`stockpulse_politician_trades`) |
 | `sync-featured-trades` | `30 7 * * *` | Trump (OpenCabinet + UnusualWhales) + Pelosi (StockSpill + UnusualWhales) | `politician_featured_trades` |
 | `simulate-ledger` | `0 12 * * 1-5` | Simulated-traders day, ONCE per day (write-protected; heals legacy conflicts) | `stockpulse_kv` (`stockpulse_trade_ledger`) |
+
+**Stock-data universe** = the app's index universe (S&P 500 ∪ NASDAQ-100 curated constituents, 80 symbols — mirrors `src/lib/masterAnalysis.ts` `INDEX_UNIVERSE_TICKERS`). The 3 batches are staggered across the 3 hours after the US close (22:00/23:00/00:00 UTC) to stay under Yahoo rate limits; each batch paces its fetches ~1.2s apart. By pre-open US time (12:00 UTC sim), all 80 symbols carry the latest close.
 
 `simulate-ledger` mirrors the browser's `tradeSimulator` semantics (persona thresholds, 10%-equity buys, -8%/+30% stops) with a Deno port of the tactical engine. Universe input: the cloud `stockpulse_master_matrix` snapshot (browsers still produce it when the Master Matrix page runs — if nobody visits that page, the sim trades the latest snapshot with fresh prices).
 
@@ -88,7 +92,7 @@ Every function checks the `x-cron-secret` header against the `CRON_SECRET` env s
 Run `supabase/schedules.sql` (pg_cron + pg_net extensions required — enable via Dashboard → Database → Extensions). Verify:
 
 ```sql
-select jobname, schedule, active from cron.job;   -- expect 4 active jobs
+select jobname, schedule, active from cron.job;   -- expect 6 active jobs
 ```
 
 Manual fire (returns a request id; note it):
