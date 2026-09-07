@@ -1,6 +1,7 @@
 // Multi-source local sentiment analysis - no Supabase/AI needed
 // Sources: Google News, StockTwits, Yahoo Finance, ApeWisdom, SocialTickers,
-//          Finnhub, Reddit (WSB+stocks+investing), MarketWatch RSS, CNBC RSS, Google Trends
+//          Finnhub, Reddit (WSB+stocks+investing), MarketWatch RSS, CNBC RSS,
+//          Google Trends, Adanos (Reddit/X/news/Polymarket aggregate)
 
 const SERVER_PROXY = (url: string) => `/api/proxy?url=${encodeURIComponent(url)}`;
 
@@ -304,6 +305,80 @@ async function fetchFinnhubSentiment(symbol: string): Promise<SourceResult> {
   }
 }
 
+// --- Source: Adanos aggregate sentiment -------------------------------
+// Adanos (api.adanos.org) — Reddit/X/news/Polymarket aggregate per ticker.
+// X-Api-Key auth (NOT Bearer). Verified response shape:
+//   { found, buzz_score, mentions, sentiment_score (-1..1), bullish_pct,
+//     bearish_pct, trend, top_subreddits: [{subreddit, mentions, sentiment_score}] }
+//
+// Key resolution order: VITE_ADANOS_API_KEY build/env var (set on Render)
+// -> browser localStorage (`stockpulse_api_config` .adanos.api_key, editable
+// on the Settings page). GitHub push protection blocks hardcoded API keys,
+// so the key must NOT live in the source.
+
+function adanosApiKey(): string {
+  const envKey = (import.meta.env.VITE_ADANOS_API_KEY as string | undefined)?.trim();
+  if (envKey) return envKey;
+  try {
+    const cfg = JSON.parse(localStorage.getItem('stockpulse_api_config') || '{}');
+    const k = (cfg && cfg.adanos && cfg.adanos.api_key) || '';
+    return typeof k === 'string' ? k.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+async function fetchAdanosSentiment(symbol: string): Promise<SourceResult> {
+  const apiKey = adanosApiKey();
+  if (!apiKey) return { name: 'Adanos', score: 0, count: 0, headlines: [] };
+  try {
+    const url = `https://api.adanos.org/reddit/stocks/v1/stock/${encodeURIComponent(symbol)}`;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    try {
+      const res = await fetch(url, {
+        signal: ctrl.signal,
+        headers: { 'X-Api-Key': apiKey },
+      });
+      if (!res.ok) return { name: 'Adanos', score: 0, count: 0, headlines: [] };
+      const d = await res.json();
+      if (!d?.found) return { name: 'Adanos', score: 0, count: 0, headlines: [] };
+
+      const mentions: number = d.mentions ?? 0;
+      const score: number = typeof d.sentiment_score === 'number'
+        ? Math.max(-1, Math.min(1, d.sentiment_score))
+        : 0;
+
+      // Headlines: the top subreddits driving the sentiment, plus the trend.
+      const headlines: string[] = [];
+      const subs: Array<{ subreddit?: string; mentions?: number; sentiment_score?: number }> = d.top_subreddits ?? [];
+      for (const s of subs.slice(0, 3)) {
+        if (s?.subreddit) {
+          headlines.push(`r/${s.subreddit}: ${s.mentions ?? 0} mentions, sentiment ${typeof s.sentiment_score === 'number' ? s.sentiment_score.toFixed(2) : '0.00'}`);
+        }
+      }
+      if (d.trend) headlines.push(`Trend: ${d.trend} · buzz ${d.buzz_score ?? 0}/100`);
+      if (typeof d.bullish_pct === 'number' && typeof d.bearish_pct === 'number') {
+        headlines.push(`${d.bullish_pct}% bullish / ${d.bearish_pct}% bearish (7d)`);
+      }
+
+      return {
+        name: 'Adanos',
+        score,
+        // Weight for the aggregate: comparable to other sources (they report
+        // ~5-30 items). Raw mention counts (100s-1000s) would dominate the
+        // weighted average, so cap at 30.
+        count: mentions > 0 ? Math.min(mentions, 30) : 1,
+        headlines: headlines.slice(0, 5),
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return { name: 'Adanos', score: 0, count: 0, headlines: [] };
+  }
+}
+
 // --- Source: MarketWatch RSS -----------------------------------------
 
 async function fetchMarketWatch(symbol: string): Promise<SourceResult> {
@@ -487,6 +562,7 @@ export async function fetchSentiment(symbol: string): Promise<AggregatedSentimen
     fetchMarketWatch(symbol),
     fetchCNBC(symbol),
     fetchGoogleTrends(symbol),
+    fetchAdanosSentiment(symbol),
   ]);
 
   const sources = results

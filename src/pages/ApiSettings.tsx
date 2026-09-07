@@ -56,6 +56,14 @@ const PROVIDERS: ProviderConfig[] = [
       { key: 'api_key', label: 'API key', type: 'key', placeholder: '(...)', required: true },
     ],
   },
+  {
+    id: 'adanos',
+    label: 'Adanos',
+    description: 'Aggregate social sentiment (Reddit, X, news, Polymarket) for the Social Sentiment Check panel.',
+    fields: [
+      { key: 'api_key', label: 'API key (sk_live_...)', type: 'key', placeholder: 'sk_live_(...)', required: true },
+    ],
+  },
 ];
 
 // ─── Storage helpers ───────────────────────────────────────────────
