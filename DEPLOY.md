@@ -69,6 +69,19 @@ All data-production jobs run **server-side on Supabase**, 24/7, no browser neede
 
 **Stock-data universe** = the app's index universe (S&P 500 ∪ NASDAQ-100 curated constituents, 80 symbols — mirrors `src/lib/masterAnalysis.ts` `INDEX_UNIVERSE_TICKERS`). The 3 batches are staggered across the 3 hours after the US close (22:00/23:00/00:00 UTC) to stay under Yahoo rate limits; each batch paces its fetches ~1.2s apart. By pre-open US time (12:00 UTC sim), all 80 symbols carry the latest close.
 
+### Schedule in local time zones
+
+| Job | UTC | Hong Kong (HKT, UTC+8) | US Eastern (ET) |
+|-----|-----|------------------------|------------------|
+| Stock batch 1 | 22:00 Mon–Fri | 06:00 Tue–Sat | 5/6 PM Mon–Fri (post-close) |
+| Stock batch 2 | 23:00 Mon–Fri | 07:00 Tue–Sat | 6/7 PM Mon–Fri |
+| Stock batch 3 | 00:00 Tue–Sat | 08:00 Tue–Sat | 7/8 PM Mon–Fri |
+| Politician trades | 07:00 Mon–Fri | 15:00 Mon–Fri | 2/3 AM Mon–Fri |
+| Featured trades | 07:30 daily | 15:30 daily | 2:30/3:30 AM daily |
+| Simulate ledger | 12:00 Mon–Fri | 20:00 Mon–Fri | 7/8 AM Mon–Fri (pre-open) |
+
+ET entries alternate because US close/move between EST (UTC-5) and EDT (UTC-4); HKT has no DST. Batch runtime is ~1-2 min each (first sync of a new symbol backfills 10y of bars and can take ~2 min); **all stock batches finish by ~8:02 AM HKT** — well before a 9 AM HK deadline. Batch 3 runs Tue–Sat because its weekday close lands on the next calendar day.
+
 `simulate-ledger` mirrors the browser's `tradeSimulator` semantics (persona thresholds, 10%-equity buys, -8%/+30% stops) with a Deno port of the tactical engine. Universe input: the cloud `stockpulse_master_matrix` snapshot (browsers still produce it when the Master Matrix page runs — if nobody visits that page, the sim trades the latest snapshot with fresh prices).
 
 ### Deploying Edge Functions

@@ -81,12 +81,14 @@ Serves `dist/` SPA and provides server-side API endpoints.
 
 | Function | Schedule | Action |
 |----------|----------|--------|
-| `sync-stock-data` | Weekdays 06:00 UTC | Yahoo quotes + 10y bars → `stock_quotes` / `stock_historical` |
+| `sync-stock-data?batch=1` | Weekdays 22:00 UTC (6 AM HKT) | Yahoo quotes + 10y bars, index-universe batch 1/3 (~27 symbols) → `stock_quotes` / `stock_historical` |
+| `sync-stock-data?batch=2` | Weekdays 23:00 UTC (7 AM HKT) | Batch 2/3 (~27 symbols) |
+| `sync-stock-data?batch=3` | Tue–Sat 00:00 UTC (8 AM HKT) | Batch 3/3 (~26 symbols) |
 | `sync-politician-trades` | Weekdays 07:00 UTC | CapitolExposed + CongressInvests → `stockpulse_kv` |
 | `sync-featured-trades` | Daily 07:30 UTC | Trump (OpenCabinet + UW) + Pelosi (StockSpill + UW) → `politician_featured_trades` |
 | `simulate-ledger` | Weekdays 12:00 UTC | Simulated-traders day ONCE from cloud data (master matrix snapshot + cloud quotes) → `stockpulse_kv` ledger row. Write-protected per day; heals legacy conflicts. |
 
-`simulate-ledger` mirrors the browser's `tradeSimulator` semantics (persona thresholds, 10% equity buys, -8%/+30% stops) with a Deno port of the tactical engine (`compute-tactical-history/engine.ts`); the agent persona uses the bounded matrix-rating path (the browser's non-holding path). Universe input is the cloud `stockpulse_master_matrix` snapshot — which browser sessions still produce and push; if a browser hasn't pushed a fresh matrix, the sim uses the latest snapshot present.
+Stock sync covers the full 80-symbol index universe (S&P 500 ∪ NASDAQ-100, mirroring `masterAnalysis.ts` `INDEX_UNIVERSE_TICKERS`) split into 3 batches staggered across the 3 post-close hours to stay under Yahoo rate limits; batches pace fetches ~1.2s apart and finish by ~8:02 AM HKT. `simulate-ledger` mirrors the browser's `tradeSimulator` semantics (persona thresholds, 10% equity buys, -8%/+30% stops) with a Deno port of the tactical engine (`compute-tactical-history/engine.ts`); the agent persona uses the bounded matrix-rating path (the browser's non-holding path). Universe input is the cloud `stockpulse_master_matrix` snapshot — which browser sessions still produce and push; if a browser hasn't pushed a fresh matrix, the sim uses the latest snapshot present.
 
 **Browser cron (`src/lib/localCron.ts`)** — local-machine maintenance only:
 
