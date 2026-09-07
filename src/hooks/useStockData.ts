@@ -37,7 +37,7 @@ export function useStockData(initialStock: Stock = popularStocks[0]): UseStockDa
       return result;
     },
     staleTime: 60 * 1000, // 1 minute
-    refetchInterval: 5 * 60 * 1000, // Refetch every 5 minutes
+    refetchInterval: 15 * 60 * 1000, // Refetch every 15 minutes (was 5 — lower call volume)
   });
 
   // Fetch historical data
@@ -55,7 +55,7 @@ export function useStockData(initialStock: Stock = popularStocks[0]): UseStockDa
       setIsRealData(prev => prev || result.isRealData);
       return result;
     },
-    staleTime: 5 * 60 * 1000, // 5 minutes
+    staleTime: 60 * 60 * 1000, // 60 minutes — daily bars change once a day
   });
 
   // Update stock data when quote is fetched

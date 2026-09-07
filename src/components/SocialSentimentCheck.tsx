@@ -32,7 +32,8 @@ export function SocialSentimentCheck({ symbol, action }: SocialSentimentCheckPro
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['social-sentiment', symbol],
     queryFn: () => fetchSentiment(symbol),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30 * 60 * 1000, // 30 min — 9-source burst is the dominant call cost
+    refetchOnWindowFocus: false, // don't re-fire the burst on every tab refocus
     retry: 2,
     retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
   });
