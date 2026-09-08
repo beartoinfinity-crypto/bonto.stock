@@ -15,7 +15,7 @@
 // Scheduled via pg_cron (see supabase/schedules.sql).
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { runEngine, DEFAULT_PARAMS, StockData } from '../compute-tactical-history/engine.ts';
+import { runEngine, DEFAULT_PARAMS, StockData } from './engine.ts';
 
 // ─── Constants (mirror tradeSimulator.ts) ──────────────────────────
 
