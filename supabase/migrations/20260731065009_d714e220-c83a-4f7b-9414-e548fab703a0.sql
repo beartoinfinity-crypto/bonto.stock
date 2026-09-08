@@ -8,8 +8,8 @@ SELECT cron.schedule(
   '30 8 * * 0',
   $$
   SELECT net.http_post(
-    url := 'https://qwezfxdfaistnabwqols.supabase.co/functions/v1/asymmetric-value-screener',
-    headers := '{"Content-Type": "application/json", "apikey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF3ZXpmeGRmYWlzdG5hYndxb2xzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjkwNDQxMzQsImV4cCI6MjA4NDYyMDEzNH0.aJMjxcRdvaSEHkVZziruVSpwh7aYkrD8GyOD7hpFZFE"}'::jsonb,
+    url := 'https://aqyaarnpmvvdzasjefje.supabase.co/functions/v1/asymmetric-value-screener',
+    headers := '{"Content-Type": "application/json", "apikey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFxeWFhcm5wbXZ2ZHphc2plZmplIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg1NTI5NDUsImV4cCI6MjA4NDEyODk0NX0.jRnq1lbI3WBfjuwnOFtL9W9PG5LJt3tBCr_TO3uMQOA"}'::jsonb,
     body := '{}'::jsonb
   );
   $$

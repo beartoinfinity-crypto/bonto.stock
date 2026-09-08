@@ -406,7 +406,7 @@ serve(async (req) => {
       try {
         // Fetch historical from DB (need at least 200+ candles for SMA200)
         const { data: hist, error: histErr } = await supabase
-          .from('stock_price_history')
+          .from('stock_historical')
           .select('date, open, high, low, close, volume')
           .eq('symbol', symbol)
           .order('date', { ascending: true });

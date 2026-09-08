@@ -41,7 +41,7 @@ async function loadHistory(symbol: string): Promise<StockData[]> {
   const pageSize = 1000;
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await supabase
-      .from('stock_price_history')
+      .from('stock_historical')
       .select('date, open, high, low, close, volume')
       .eq('symbol', symbol)
       .order('date', { ascending: true })

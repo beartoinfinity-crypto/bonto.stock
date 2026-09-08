@@ -31,7 +31,7 @@ const { storedSpy } = vi.hoisted(() => {
       } as StockData);
       return bars;
     }
-    // Stored Supabase history (`stock_price_history`) is the offline safety net.
+    // Stored Supabase history (`stock_historical`) is the offline safety net.
     // Return bars designed to arm a tactical entry when the live APIs are down.
     return { storedSpy: storedSpy.mockImplementation(async (_symbol: string) => craftedBars(100)) };
   });

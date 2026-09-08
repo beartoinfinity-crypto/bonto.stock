@@ -76,7 +76,7 @@ function loadMatrixRows(): MatrixRow[] {
   return [];
 }
 
-/** Real OHLCV bars stored in Supabase (`stock_price_history`, publicly readable).
+/** Real OHLCV bars stored in Supabase (`stock_historical`, publicly readable).
  *  Used as the authoritative history when the live quote/history APIs are down —
  *  synthetic `generateHistoricalData` bars never carry tactical entry signals. */
 async function storedHistoryFor(symbol: string): Promise<StockData[] | null> {

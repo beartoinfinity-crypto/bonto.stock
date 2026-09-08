@@ -378,7 +378,7 @@ export function useMasterMatrix(): UseMasterMatrixResult {
     setIsLoading(false);
   }, [universe]);
 
-  // Build the matrix from history already stored in Supabase (stock_price_history),
+  // Build the matrix from history already stored in Supabase (stock_historical),
   // without live per-stock fetching. Runs the 12 masters on each stored bar series.
   const loadFromSupabase = useCallback(async () => {
     setIsLoading(true);
