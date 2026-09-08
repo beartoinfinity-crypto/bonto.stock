@@ -37,6 +37,7 @@ npm start                  # Express on http://localhost:10000
 | `SUPABASE_SYNC_ENABLED` | `true` | Set to `false` to disable server-managed sync even when the URL/key are set |
 | `FINNHUB_API_KEY` | *(none)* | Optional: server-side Finnhub key for the quote/sentiment proxies (rotates with any browser-supplied keys) |
 | `FINNHUB_API_KEY_2` | *(none)* | Optional: second Finnhub key — proxy rotates between them on rate-limits |
+| `ADANOS_API_KEY` | *(none)* | Optional: Adanos sentiment API key, served to every browser via `GET /api/api-keys` (enables the Adanos source in Social Sentiment Check). Falls back to per-browser Settings → API Keys → Adanos when unset |
 
 ## Supabase Setup
 

@@ -602,6 +602,18 @@ app.get('/api/sync-config', (req, res) => {
   });
 });
 
+// --- Server-managed API-key config (secret-free bundle) --------------
+// The dist bundle is committed to git, so client env vars (VITE_*) would leak
+// secrets into the repo (GitHub push protection blocks them). Instead, keys
+// live ONLY as Render env vars and are served to browsers at runtime.
+// Set ADANOS_API_KEY on Render to enable the Adanos sentiment source for
+// every browser — no per-browser input needed. Unset -> omitted, and the app
+// falls back to per-browser Settings (API Keys -> Adanos).
+const ADANOS_API_KEY_ENV = process.env.ADANOS_API_KEY || '';
+app.get('/api/api-keys', (req, res) => {
+  res.json(ADANOS_API_KEY_ENV ? { adanosApiKey: ADANOS_API_KEY_ENV } : {});
+});
+
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });

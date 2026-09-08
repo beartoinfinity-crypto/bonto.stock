@@ -311,14 +311,15 @@ async function fetchFinnhubSentiment(symbol: string): Promise<SourceResult> {
 //   { found, buzz_score, mentions, sentiment_score (-1..1), bullish_pct,
 //     bearish_pct, trend, top_subreddits: [{subreddit, mentions, sentiment_score}] }
 //
-// Key resolution order: VITE_ADANOS_API_KEY build/env var (set on Render)
-// -> browser localStorage (`stockpulse_api_config` .adanos.api_key, editable
-// on the Settings page). GitHub push protection blocks hardcoded API keys,
-// so the key must NOT live in the source.
+// Key resolution order (secrets must NEVER be baked into the committed dist
+// bundle — GitHub push protection blocks that):
+//   1. `/api/api-keys` endpoint (ADANOS_API_KEY env var on Render — configure
+//      once, every browser gets it)
+//   2. per-browser Settings (localStorage `stockpulse_api_config` .adanos.api_key)
 
-function adanosApiKey(): string {
-  const envKey = (import.meta.env.VITE_ADANOS_API_KEY as string | undefined)?.trim();
-  if (envKey) return envKey;
+let adanosKeyPromise: Promise<string> | null = null;
+
+function adanosKeyFromSettings(): string {
   try {
     const cfg = JSON.parse(localStorage.getItem('stockpulse_api_config') || '{}');
     const k = (cfg && cfg.adanos && cfg.adanos.api_key) || '';
@@ -328,8 +329,27 @@ function adanosApiKey(): string {
   }
 }
 
+function fetchAdanosKey(): Promise<string> {
+  if (!adanosKeyPromise) {
+    adanosKeyPromise = (async () => {
+      try {
+        const res = await fetch('/api/api-keys');
+        if (res.ok) {
+          const cfg = await res.json();
+          const k = typeof cfg.adanosApiKey === 'string' ? cfg.adanosApiKey.trim() : '';
+          if (k) return k;
+        }
+      } catch { /* server unreachable / cold start — retry next call */ }
+      // Failure means don't cache: allow retry, fall back to Settings.
+      adanosKeyPromise = null;
+      return adanosKeyFromSettings();
+    })();
+  }
+  return adanosKeyPromise;
+}
+
 async function fetchAdanosSentiment(symbol: string): Promise<SourceResult> {
-  const apiKey = adanosApiKey();
+  const apiKey = await fetchAdanosKey();
   if (!apiKey) return { name: 'Adanos', score: 0, count: 0, headlines: [] };
   try {
     const url = `https://api.adanos.org/reddit/stocks/v1/stock/${encodeURIComponent(symbol)}`;
