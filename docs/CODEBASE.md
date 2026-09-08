@@ -23,11 +23,11 @@ User selects stock
   ??stockData.generateSignals()
     ??8 strategy analysis ??Signal[] returned to UI
 
-Cron job runs (background)
-  ??stockApi for 20 popular stocks
-  ??supabaseDb.pushStockData()
-  ??dispatches stockpulse-sync event
-  ??useStockData invalidates React Query caches ??UI refreshes
+Server cron job runs (Supabase Edge Functions, 24/7)
+  ??sync-stock-data (3 batched jobs, post-close) fills stock_quotes + stock_historical
+  ??sync-featured-trades / sync-politician-trades fill featured/congressional trade rows
+  ??simulate-ledger runs the simulated-traders day once per date
+  ??browser boot hydration (pullAll) + stockpulse-sync event update React Query caches ??UI refreshes
 ```
 
 ## Core Modules
