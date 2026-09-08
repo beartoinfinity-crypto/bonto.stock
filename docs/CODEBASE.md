@@ -243,7 +243,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | Component | Lines | Purpose |
 |-----------|-------|---------|
 | `PoliticianTrades.tsx` | 809 | 5-source politician trades (UW, StockSpill, OpenCabinet, CapitolExposed, CongressInvests). Featured: Trump + Pelosi. Supabase cache. |
-| `SocialSentimentCheck.tsx` | 210 | 10-source sentiment (Google News, StockTwits, Yahoo, ApeWisdom, SocialTickers, Finnhub, Reddit, MarketWatch, CNBC, Google Trends). Keyword scoring, no AI. |
+| `SocialSentimentCheck.tsx` | 210 | 10-source sentiment (Google News, StockTwits, Yahoo, ApeWisdom, SocialTickers, Finnhub, Adanos, MarketWatch, CNBC, Google Trends). Keyword scoring, no AI. |
 | `AsymmetricValueScreener.tsx` | 326 | Risk/reward scoring. Inside Screener. |
 | `SectorHeatmap.tsx` | 262 | Sector performance heatmap. Inside Screener. |
 | `ChartAnalyst.tsx` | 589 | Pattern recognition: S/R, trendlines, candle patterns. |

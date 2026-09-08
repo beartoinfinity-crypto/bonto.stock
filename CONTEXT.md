@@ -14,7 +14,7 @@
 
 **Featured trade**: A trade by a prominent politician (Trump, Pelosi) fetched from external sources and stored in the `politician_featured_trades` Supabase table.
 
-**Cron job**: A scheduled task that runs in the browser while a tab is open. Jobs fetch data from external APIs and push results to Supabase (primary store).
+**Cron job**: A scheduled task. **Data-production jobs run server-side** — Supabase Edge Functions triggered by pg_cron (stock sync, featured trades, politician trades, simulated ledger), authenticated by `x-cron-secret`. The browser keeps only local-maintenance jobs (`archive-sqlite`, `pull-stock-data`).
 
 **Server proxy**: The Express endpoint `/api/proxy?url=<encoded>` that fetches external URLs server-side, bypassing CORS restrictions. Has SSRF protection (blocks localhost, private IPs).
 

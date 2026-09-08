@@ -24,7 +24,7 @@ npm start          # serve dist/ via Express
 | Data Fetching | TanStack React Query |
 | Local DB | sql.js (WASM SQLite) — IndexedDB / File System API persistence |
 | Cloud DB | Supabase (PostgreSQL) — primary source of truth |
-| Cron | Browser-based scheduler (runs while tab is open) |
+| Cron | **Supabase Edge Functions + pg_cron** (server-side, 24/7) for data production; browser scheduler keeps only local maintenance |
 | Server | Express (`index.js`) — serves dist/ + server-side proxy |
 | Deploy | Render.com (auto-deploy on push to main) |
 
@@ -33,14 +33,17 @@ npm start          # serve dist/ via Express
 | Route | Page | Description |
 |-------|------|-------------|
 | `/` | Dashboard | Price charts, signals, sentiment, action plan |
-| `/screener` | Screener | Batch-screen all stocks by signal confidence |
-| `/tactical` | Tactical Engine | Per-stock trade planner with position sizing |
+| `/tactical` | Tactical | Per-stock trade planner with regime state machine and position sizing |
+| `/screener` | Screener | Batch-screen all stocks (incl. Sector Heatmap + Asymmetric Value Screener) by signal confidence |
 | `/masters` | Trading Masters | 12 legendary investors analyze any stock |
+| `/trading-agents` | Trading Agents | Rule-based multi-agent analyst report (bull/bear debate, risk committee) |
 | `/masters-matrix` | Master Matrix | Rank S&P 500 / NASDAQ-100 / custom stocks into a top-50 matrix by 12-master verdicts |
 | `/masters-matrix/:symbol` | Stock History | Per-stock daily 12-master history, with past-year backfill |
+| `/hedge-fund` | Hedge Fund | PEAD post-earnings-drift alpha model |
 | `/ledger` | Simulated Traders | Six personas trade the shared S&P 500 / NASDAQ-100 universe daily; accumulated Decisions + All Transactions with filter bar, live stats, pagination |
+| `/api-settings` | API Settings | Third-party provider API-key entry |
 | `/settings` | Settings | Auth, watchlist, DB export/import, cloud sync |
-| `/admin` | Admin | Cron job management (password-protected) |
+| `/admin` | Admin | Browser cron job management (local maintenance only, password-protected) |
 
 ## Architecture
 
