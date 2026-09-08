@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fetchStoredHistory, fetchStoredHistoryForSymbol } from './supabaseHistory';
 
-// Mocks fetch so the module can pull paginated stock_price_history rows
-// without a real network call.
+// Mocks fetch so the module can pull paginated stock_historical rows without
+// a real network call. The runtime config resolves from /api/sync-config.
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
+
+const TEST_CFG = { url: 'https://test-project.supabase.co', anonKey: 'test-anon-key' };
 
 // Two symbols x two dates, delivered across two 1000-cap pages to exercise
 // pagination. COKE has only 1 bar (filtered out by the min-bars threshold).
@@ -19,6 +21,10 @@ const ALL_ROWS = [
 beforeEach(() => {
   mockFetch.mockReset();
   mockFetch.mockImplementation(async (url: string) => {
+    // Runtime config endpoint (server-managed Supabase project)
+    if (url.includes('/api/sync-config')) {
+      return { ok: true, json: async () => TEST_CFG };
+    }
     const u = new URL(url);
     const offset = Number(u.searchParams.get('offset') ?? 0);
     const limit = Number(u.searchParams.get('limit') ?? 1000);

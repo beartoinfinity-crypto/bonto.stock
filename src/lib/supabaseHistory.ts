@@ -1,31 +1,53 @@
-// supabaseHistory.ts — reads stored OHLCV bar history from the build-time
-// Supabase project (public.stock_price_history) to generate the Master Matrix
+// supabaseHistory.ts — reads stored OHLCV bar history from the current
+// Supabase project (public.stock_historical) to generate the Master Matrix
 // without needing a live network fetch per stock.
 //
-// The sync-stock-data edge function + local cron populate stock_price_history
-// with daily bars (symbol, date, open, high, low, close, volume). The anon key
-// in .env can read it (RLS "publicly readable"), so the whole matrix can be
-// rebuilt from this past data.
+// The sync-stock-data edge function populates stock_historical with daily
+// bars (symbol, date, open, high, low, close, volume) for the 80-symbol
+// index universe (10y depth). The anon key can read it (RLS "publicly
+// readable"), so the whole matrix can be rebuilt from this past data.
+//
+// Config resolution (secrets must never be baked into the committed dist
+// bundle): runtime server config first (/api/sync-config — the Supabase
+// project URL + anon key on Render), then VITE_ env vars for local dev.
 
 import { StockData } from './stockData';
-import { SUPABASE_STOCK_PROJECT_URL, SUPABASE_STOCK_ANON_KEY } from './supabaseConfig';
 
-// Prefer committed public anon credentials (available in every build, incl.
-// Render). Fall back to VITE_ env vars if the operator overrode them.
-const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined) || SUPABASE_STOCK_PROJECT_URL;
-const SUPABASE_KEY = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined) || SUPABASE_STOCK_ANON_KEY;
-
-const HISTORY_TABLE = 'stock_price_history';
+const HISTORY_TABLE = 'stock_historical';
 const PAGE = 1000;
 
-interface StoredBarRow {
+interface BarRow {
   symbol: string;
   date: string;
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  close: number | null;
+  volume: number | null;
+}
+
+interface RestConfig { url: string; anonKey: string; }
+
+let restConfigPromise: Promise<RestConfig | null> | null = null;
+
+function fetchRestConfig(): Promise<RestConfig | null> {
+  if (!restConfigPromise) {
+    restConfigPromise = (async () => {
+      try {
+        const res = await fetch('/api/sync-config');
+        if (res.ok) {
+          const cfg = await res.json();
+          if (cfg.url && cfg.anonKey) return { url: cfg.url, anonKey: cfg.anonKey } as RestConfig;
+        }
+      } catch { /* cold start / not set — retry next call */ }
+      restConfigPromise = null; // don't cache failures
+      // Local dev fallback: VITE_ env vars (gitignored .env)
+      const url = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim();
+      const anonKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined)?.trim();
+      return url && anonKey ? { url, anonKey } : null;
+    })();
+  }
+  return restConfigPromise;
 }
 
 export interface StoredHistoryResult {
@@ -42,19 +64,20 @@ export interface StoredHistoryResult {
   sim?: string;
 }
 
-export function isSupabaseHistoryConfigured(): boolean {
-  return !!(SUPABASE_URL && SUPABASE_KEY);
+export async function isSupabaseHistoryConfigured(): Promise<boolean> {
+  return (await fetchRestConfig()) !== null;
 }
 
 /**
- * Fetch every row of stock_price_history (paginated) and group by symbol into
+ * Fetch every row of stock_historical (paginated) and group by symbol into
  * ascending daily StockData[] arrays. Returns all symbols with a usable bar count.
  */
 export async function fetchStoredHistory(minBars = 100): Promise<StoredHistoryResult> {
-  if (!SUPABASE_URL || !SUPABASE_KEY) {
+  const cfg = await fetchRestConfig();
+  if (!cfg) {
     return {
       ok: false,
-      error: 'Supabase not configured (VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY)',
+      error: 'Supabase not configured (set SUPABASE_URL / SUPABASE_ANON_KEY on Render, or VITE_SUPABASE_* in local .env)',
       history: new Map(),
       totalBars: 0,
       coveredSymbols: [],
@@ -63,18 +86,18 @@ export async function fetchStoredHistory(minBars = 100): Promise<StoredHistoryRe
   }
 
   const headers: Record<string, string> = {
-    apikey: SUPABASE_KEY,
-    Authorization: `Bearer ${SUPABASE_KEY}`,
+    apikey: cfg.anonKey,
+    Authorization: `Bearer ${cfg.anonKey}`,
     'Content-Type': 'application/json',
   };
 
-  const bySymbol = new Map<string, StoredBarRow[]>();
+  const bySymbol = new Map<string, BarRow[]>();
   let totalBars = 0;
 
   try {
     let offset = 0;
     for (;;) {
-      const url = `${SUPABASE_URL}/rest/v1/${HISTORY_TABLE}?select=symbol,date,open,high,low,close,volume&order=symbol.asc,date.asc&limit=${PAGE}&offset=${offset}`;
+      const url = `${cfg.url}/rest/v1/${HISTORY_TABLE}?select=symbol,date,open,high,low,close,volume&order=symbol.asc,date.asc&limit=${PAGE}&offset=${offset}`;
       const res = await fetch(url, { headers });
       if (!res.ok) {
         return {
@@ -86,7 +109,7 @@ export async function fetchStoredHistory(minBars = 100): Promise<StoredHistoryRe
           lastBarDate: null,
         };
       }
-      const rows = (await res.json()) as StoredBarRow[];
+      const rows = (await res.json()) as BarRow[];
       if (!rows.length) break;
 
       for (const r of rows) {
@@ -135,7 +158,7 @@ export async function fetchStoredHistory(minBars = 100): Promise<StoredHistoryRe
 
   return {
     ok: history.size > 0,
-    error: history.size > 0 ? null : 'No usable S&P 500 history found in Supabase',
+    error: history.size > 0 ? null : 'No usable index-universe history found in Supabase',
     history,
     totalBars,
     coveredSymbols,
@@ -148,10 +171,11 @@ export async function fetchStoredHistory(minBars = 100): Promise<StoredHistoryRe
  * sorted ascending by date. Returns [] when the symbol has no stored data.
  */
 export async function fetchStoredHistoryForSymbol(symbol: string): Promise<StockData[]> {
-  if (!SUPABASE_URL || !SUPABASE_KEY) return [];
+  const cfg = await fetchRestConfig();
+  if (!cfg) return [];
   const headers: Record<string, string> = {
-    apikey: SUPABASE_KEY,
-    Authorization: `Bearer ${SUPABASE_KEY}`,
+    apikey: cfg.anonKey,
+    Authorization: `Bearer ${cfg.anonKey}`,
     'Content-Type': 'application/json',
   };
   const bars: StockData[] = [];
@@ -159,12 +183,19 @@ export async function fetchStoredHistoryForSymbol(symbol: string): Promise<Stock
     const sym = encodeURIComponent(symbol.toUpperCase());
     let offset = 0;
     for (;;) {
-      const url = `${SUPABASE_URL}/rest/v1/${HISTORY_TABLE}?select=date,open,high,low,close,volume&symbol=eq.${sym}&order=date.asc&limit=${PAGE}&offset=${offset}`;
+      const url = `${cfg.url}/rest/v1/${HISTORY_TABLE}?select=date,open,high,low,close,volume&symbol=eq.${sym}&order=date.asc&limit=${PAGE}&offset=${offset}`;
       const res = await fetch(url, { headers });
       if (!res.ok) break;
-      const rows = (await res.json()) as StockData[];
+      const rows = (await res.json()) as BarRow[];
       if (!rows.length) break;
-      bars.push(...rows);
+      bars.push(...rows.map(r => ({
+        date: r.date,
+        open: r.open ?? 0,
+        high: r.high ?? 0,
+        low: r.low ?? 0,
+        close: r.close ?? 0,
+        volume: r.volume ?? 0,
+      })));
       if (rows.length < PAGE) break;
       offset += PAGE;
     }
@@ -173,3 +204,4 @@ export async function fetchStoredHistoryForSymbol(symbol: string): Promise<Stock
   }
   return bars;
 }
+

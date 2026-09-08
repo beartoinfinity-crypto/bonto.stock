@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { edgeFn, isEdgeFnAvailable } from '@/lib/edgeFn';
+import { edgeFn, edgeRest, isEdgeFnAvailable } from '@/lib/edgeFn';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -116,8 +116,8 @@ export const AsymmetricValueScreener = () => {
   const highConviction = (data ?? []).filter((r) => r.classification === 'High Conviction').length;
 
   const runScreen = async () => {
-    if (!isEdgeFnAvailable()) {
-      toast({ title: 'Not available', description: 'Asymmetric Value Screener requires Supabase edge functions. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env.', variant: 'destructive' });
+    if (!(await isEdgeFnAvailable())) {
+      toast({ title: 'Not available', description: 'Asymmetric Value Screener requires the Supabase edge functions (EDGE_FN_URL / EDGE_FN_KEY on Render).', variant: 'destructive' });
       return;
     }
     setIsRunning(true);
@@ -127,17 +127,8 @@ export const AsymmetricValueScreener = () => {
       if (error) throw error;
       // Fetch updated results from Supabase REST and cache locally
       try {
-        const url = `${import.meta.env.VITE_SUPABASE_URL}/rest/v1/avs_results?select=*&order=total_score.desc`;
-        const resp = await fetch(url, {
-          headers: {
-            apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-        });
-        if (resp.ok) {
-          const rows: AvsRow[] = await resp.json();
-          if (rows.length > 0) saveAvsToCache(rows);
-        }
+        const rows = await edgeRest<AvsRow[]>('avs_results?select=*&order=total_score.desc');
+        if (rows && rows.length > 0) saveAvsToCache(rows);
       } catch { /* cache update failed, ignore */ }
       await queryClient.invalidateQueries({ queryKey: ['avs-results'] });
       toast({ title: 'Screen complete', description: `${res?.processed ?? 0} companies analyzed.` });

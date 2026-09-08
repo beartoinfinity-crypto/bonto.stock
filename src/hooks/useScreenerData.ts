@@ -83,18 +83,11 @@ function classifyArticle(headline: string, summary: string): 'bullish' | 'bearis
 
 async function fetchNewsSentiment(symbol: string): Promise<NewsSentimentSummary | null> {
   try {
-    const response = await fetch(
-      `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stock-data?symbol=${symbol}&action=news`,
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        },
-      }
+    if (!(await isEdgeFnAvailable())) return null;
+    const { data: articles, error } = await edgeFn<Array<{ headline: string; summary: string; datetime: number }>>(
+      `stock-data?symbol=${encodeURIComponent(symbol)}&action=news`,
     );
-    if (!response.ok) return null;
-    const articles: Array<{ headline: string; summary: string; datetime: number }> = await response.json();
-    if (!Array.isArray(articles) || articles.length === 0) return null;
+    if (error || !Array.isArray(articles) || articles.length === 0) return null;
 
     // Filter to past 10 days
     const tenDaysAgo = Date.now() / 1000 - 10 * 24 * 60 * 60;
@@ -120,7 +113,7 @@ async function fetchNewsSentiment(symbol: string): Promise<NewsSentimentSummary 
 }
 
 async function runQueuedSocialSentiment(symbol: string, action: string): Promise<SocialSentimentSummary | null> {
-  if (!isEdgeFnAvailable()) return null;
+  if (!(await isEdgeFnAvailable())) return null;
   const previous = socialQueue;
   let releaseQueue!: () => void;
   socialQueue = new Promise<void>((resolve) => {

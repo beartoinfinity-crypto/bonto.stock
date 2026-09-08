@@ -79,7 +79,7 @@ async function getHistoricalFromDB(symbol: string): Promise<StockPriceRecord[] |
   
   while (true) {
     const { data, error } = await supabase
-      .from('stock_price_history')
+      .from('stock_historical')
       .select('symbol, date, open, high, low, close, volume')
       .eq('symbol', symbol.toUpperCase())
       .order('date', { ascending: true })

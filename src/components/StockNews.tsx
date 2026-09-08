@@ -8,7 +8,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'sonner';
 import { NewsSentimentTrend } from './NewsSentimentTrend';
 import { useLanguage } from '@/lib/i18n';
-import { isEdgeFnAvailable } from '@/lib/edgeFn';
+import { isEdgeFnAvailable, edgeFn } from '@/lib/edgeFn';
 
 interface NewsArticle {
   id: number;
@@ -68,42 +68,22 @@ const sentimentConfig: Record<Sentiment, { label: string; icon: typeof TrendingU
 };
 
 async function fetchStockNews(symbol: string): Promise<NewsArticle[]> {
-  if (!isEdgeFnAvailable()) {
+  if (!(await isEdgeFnAvailable())) {
     // Return empty — keyword sentiment still works from headlines in the UI
     return [];
   }
-  const response = await fetch(
-    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/stock-data?symbol=${symbol}&action=news`,
-    {
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-      },
-    }
-  );
-  if (!response.ok) throw new Error('Failed to fetch news');
-  return response.json();
+  const { data, error } = await edgeFn<NewsArticle[]>(`stock-data?symbol=${encodeURIComponent(symbol)}&action=news`);
+  if (error || !data) throw new Error(error || 'Failed to fetch news');
+  return data;
 }
 
 async function fetchAISentiment(articles: NewsArticle[]): Promise<SentimentResult[]> {
   const payload = articles.map(a => ({ id: a.id, headline: a.headline, summary: a.summary }));
-  const response = await fetch(
-    `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-news-sentiment`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-      },
-      body: JSON.stringify({ articles: payload }),
-    }
-  );
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({ error: 'Unknown error' }));
-    throw new Error(err.error || `Status ${response.status}`);
+  const { data, error } = await edgeFn<SentimentResult[]>('analyze-news-sentiment', { articles: payload });
+  if (error || !data) {
+    throw new Error(error || 'Sentiment analysis failed');
   }
-  const data = await response.json();
-  return data.results || [];
+  return data.results || data;
 }
 
 interface StockNewsProps {

@@ -614,6 +614,26 @@ app.get('/api/api-keys', (req, res) => {
   res.json(ADANOS_API_KEY_ENV ? { adanosApiKey: ADANOS_API_KEY_ENV } : {});
 });
 
+// --- Server-managed edge-function endpoint (for the Screener / News
+//     features that call Supabase edge functions directly) -------------
+// EDGE_FN_URL / EDGE_FN_KEY on Render point at the Supabase project hosting
+// the compute functions (stock-data, analyze-news-sentiment, social-sentiment,
+// asymmetric-value-screener). The key is the project's PUBLIC anon key, so
+// serving it to browsers is safe. Unset -> 404, and the app falls back to
+// per-browser Settings (Cloud Sync values) or disables those panels.
+const EDGE_FN_URL_ENV = process.env.EDGE_FN_URL || '';
+const EDGE_FN_KEY_ENV = process.env.EDGE_FN_KEY || '';
+app.get('/api/edge-config', (req, res) => {
+  if (!EDGE_FN_URL_ENV || !EDGE_FN_KEY_ENV) {
+    res.status(404).json({ enabled: false });
+    return;
+  }
+  res.json({
+    url: EDGE_FN_URL_ENV,
+    anonKey: EDGE_FN_KEY_ENV,
+  });
+});
+
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
