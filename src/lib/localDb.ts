@@ -4,6 +4,21 @@ import initSqlJs, { Database } from 'sql.js';
 const QUOTE_TTL = 15 * 60 * 1000;              // 15 min
 const HISTORICAL_TTL = 90 * 24 * 60 * 60 * 1000; // 90 days
 const GENERIC_TTL = 24 * 60 * 60 * 1000;       // 24 hours
+/** Max calendar days the newest cached daily bar may lag "now" before the
+ *  series is treated as stale (a cache miss) — covers long weekends/holidays
+ *  plus a post-close refresh window. Daily bars are only worth re-fetching
+ *  when they're behind the latest trading day. */
+export const HISTORICAL_BAR_STALENESS_DAYS = 4;
+
+/** Pure freshness check for a cached daily-bar series: true when the newest
+ *  bar is recent enough to still be trusted (vs. a calendar-day cutoff). */
+export function isDailyBarSeriesFresh(lastBarDate: string | null | undefined, now = Date.now()): boolean {
+  if (!lastBarDate) return false;
+  const lastBarMs = Date.parse(`${lastBarDate}T00:00:00Z`);
+  if (!Number.isFinite(lastBarMs)) return false;
+  const daysLagMs = now - lastBarMs;
+  return daysLagMs <= HISTORICAL_BAR_STALENESS_DAYS * 24 * 60 * 60 * 1000;
+}
 
 // ─── State ────────────────────────────────────────────────────────
 let fsHandle: FileSystemFileHandle | null = null;
@@ -450,6 +465,17 @@ export async function getHistorical(symbol: string): Promise<Record<string, unkn
   const maxAge = meta[0].values[0] as number;
   if (Date.now() - maxAge > HISTORICAL_TTL) return null;
 
+  // Bar-currency gate: a 90-day-old write is "valid" by TTL, but the series
+  // itself may end far in the past (the fetch path blocked since then). Daily
+  // bars change once a day — if the newest cached bar lags more than a few
+  // calendar days, treat it as a miss so callers refetch live/cloud bars.
+  const lastBar = d.exec(
+    `SELECT MAX(date) FROM historical WHERE symbol = ?`,
+    [symbol.toUpperCase()],
+  );
+  const lastBarDate = lastBar?.[0]?.values?.[0]?.[0] as string | null | undefined;
+  if (!isDailyBarSeriesFresh(lastBarDate)) return null;
+
   const rows = d.exec(
     `SELECT date, open, high, low, close, volume FROM historical WHERE symbol = ? ORDER BY date ASC`,
     [symbol.toUpperCase()],
@@ -482,6 +508,20 @@ export async function putHistorical(symbol: string, data: Record<string, unknown
     throw e;
   }
   markDirty();
+}
+
+/** Raw per-symbol bar read that bypasses the bar-currency gate — the
+ *  last-resort fallback (stale real bars beat synthetic data). */
+export async function getHistoricalDump(symbol: string): Promise<Record<string, unknown>[] | null> {
+  const d = await dbReady;
+  const rows = d.exec(
+    `SELECT date, open, high, low, close, volume FROM historical WHERE symbol = ? ORDER BY date ASC`,
+    [symbol.toUpperCase()],
+  );
+  if (!rows.length) return null;
+  return rows[0].values.map(([date, open, high, low, close, volume]) => ({
+    date, open, high, low, close, volume,
+  }));
 }
 
 // ─── Bulk dump / restore (for cloud sync) ─────────────────────────

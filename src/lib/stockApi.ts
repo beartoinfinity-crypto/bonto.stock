@@ -1,5 +1,5 @@
 import { Stock, StockData, popularStocks, generateHistoricalData } from './stockData';
-import { getQuote, putQuote, getHistorical, putHistorical, getMeta, putMeta, type CachedQuote } from './localDb';
+import { getQuote, putQuote, getHistorical, putHistorical, getHistoricalDump, getMeta, putMeta, isDailyBarSeriesFresh, type CachedQuote } from './localDb';
 
 export interface FetchResult<T> {
   data: T | null;
@@ -428,6 +428,33 @@ export async function fetchHistoricalData(symbol: string, forceRefresh = false):
       }
     } catch { continue; }
   }
+
+  // Live providers blocked — fall back to the nightly-synced Supabase bars
+  // (stock_historical, refreshed by the server-side sync-stock-data jobs).
+  // A fresher cloud series also wins over a stale SQLite cache below.
+  try {
+    const cloudBars = await (await import('./supabaseHistory')).fetchStoredHistoryForSymbol(symbol);
+    if (cloudBars.length > 0) {
+      await putHistorical(symbol, cloudBars as unknown as Record<string, unknown>[]);
+      const lastBarDate = cloudBars[cloudBars.length - 1].date;
+      return {
+        data: cloudBars,
+        error: isDailyBarSeriesFresh(lastBarDate) ? null : `Cloud bars end ${lastBarDate} (stale)`,
+        isRealData: true,
+        fromCache: false,
+      };
+    }
+  } catch { /* cloud unavailable — keep falling back */ }
+
+  // Stale SQLite cache is still better than synthetic bars (real OHLCV,
+  // tactical signals stay computable) — read it raw, bypassing the
+  // freshness gate via the dump API.
+  try {
+    const raw = await getHistoricalDump(symbol);
+    if (raw && raw.length > 0) {
+      return { data: raw as StockData[], error: `Cached bars end ${raw[raw.length - 1].date}`, isRealData: true, fromCache: true };
+    }
+  } catch { /* no cache at all */ }
 
   const mockStock = popularStocks.find(s => s.symbol === symbol) || popularStocks[0];
   return {
