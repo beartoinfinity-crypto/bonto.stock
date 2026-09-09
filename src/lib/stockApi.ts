@@ -111,24 +111,63 @@ function localFundamentals(symbol: string): { sector: string; marketCap: string;
   };
 }
 
-async function fetchQuoteSummary(symbol: string, preferredHost?: string): Promise<{ pe: number; marketCap: string; sector: string } | null> {
+export interface QuoteSummaryResult {
+  pe: number;
+  marketCap: string;
+  sector: string;
+  name?: string;
+  week52High?: number;
+  week52Low?: number;
+  volume?: number;
+  avgVolume10Day?: number;
+}
+
+/** Parse a v10 quoteSummary payload (summaryDetail + assetProfile + price modules). */
+function parseQuoteSummary(data: unknown): QuoteSummaryResult | null {
+  const result = (data as { quoteSummary?: { result?: unknown[] } })?.quoteSummary?.result?.[0] as
+    | {
+        summaryDetail?: {
+          trailingPE?: { raw?: number }; marketCap?: { raw?: number }; volume?: { raw?: number };
+          fiftyTwoWeekHigh?: { raw?: number }; fiftyTwoWeekLow?: { raw?: number };
+          averageDailyVolume10Day?: { raw?: number };
+        };
+        assetProfile?: { sector?: string };
+        price?: {
+          longName?: string; shortName?: string;
+          regularMarketVolume?: { raw?: number };
+        };
+      }
+    | undefined;
+  const detail = result?.summaryDetail;
+  const profile = result?.assetProfile;
+  const price = result?.price;
+  if (!detail && !profile && !price) return null;
+  return {
+    pe: typeof detail?.trailingPE?.raw === 'number' ? detail.trailingPE.raw : 0,
+    marketCap: formatMarketCap(detail?.marketCap?.raw),
+    sector: (profile?.sector as string) || 'Unknown',
+    name: price?.longName || price?.shortName || undefined,
+    week52High: typeof detail?.fiftyTwoWeekHigh?.raw === 'number' ? detail.fiftyTwoWeekHigh.raw : undefined,
+    week52Low: typeof detail?.fiftyTwoWeekLow?.raw === 'number' ? detail.fiftyTwoWeekLow.raw : undefined,
+    volume: typeof price?.regularMarketVolume?.raw === 'number' ? price.regularMarketVolume.raw
+      : (typeof detail?.volume?.raw === 'number' ? detail.volume.raw : undefined),
+    avgVolume10Day: typeof detail?.averageDailyVolume10Day?.raw === 'number' ? detail.averageDailyVolume10Day.raw : undefined,
+  };
+}
+
+async function fetchQuoteSummary(symbol: string, preferredHost?: string): Promise<QuoteSummaryResult | null> {
+  const MODULES = 'summaryDetail,assetProfile,price';
   // Primary: server-side quoteSummary proxy. Yahoo crumbs are session-bound
   // (they only authorize calls carrying the same session cookie that minted
   // them), so the browser can never call v10 directly — the server keeps the
   // cookie+crumb pair and runs the call for us.
   try {
-    const res = await fetch(`/api/yahoo/quote-summary?symbol=${encodeURIComponent(symbol)}&modules=summaryDetail,assetProfile`);
+    const res = await fetch(`/api/yahoo/quote-summary?symbol=${encodeURIComponent(symbol)}&modules=${MODULES}`);
     if (res.ok) {
-      const data = await res.json();
-      const result = data?.quoteSummary?.result?.[0];
-      const detail = result?.summaryDetail;
-      const profile = result?.assetProfile;
-      if (detail || profile) {
-        const pe = typeof detail?.trailingPE?.raw === 'number' ? detail.trailingPE.raw : 0;
-        const marketCap = formatMarketCap(detail?.marketCap?.raw);
-        const sector = (profile?.sector as string) || 'Unknown';
-        console.log(`[quoteSummary] ${symbol}: server proxy success`, { pe, marketCap, sector });
-        return { pe, marketCap, sector };
+      const parsed = parseQuoteSummary(await res.json());
+      if (parsed) {
+        console.log(`[quoteSummary] ${symbol}: server proxy success`, parsed);
+        return parsed;
       }
     }
   } catch { /* fall through to direct calls */ }
@@ -142,17 +181,12 @@ async function fetchQuoteSummary(symbol: string, preferredHost?: string): Promis
   if (crumb) {
     for (const host of hosts) {
       try {
-        const url = `${host}/v10/finance/quoteSummary/${symbol}?modules=summaryDetail,assetProfile&crumb=${encodeURIComponent(crumb)}`;
-        const data = await fetchJson(url, 8000, { 'User-Agent': 'Mozilla/5.0' });
-        const result = data?.quoteSummary?.result?.[0];
-        const detail = result?.summaryDetail;
-        const profile = result?.assetProfile;
-        if (!detail && !profile) continue;
-        const pe = typeof detail?.trailingPE?.raw === 'number' ? detail.trailingPE.raw : 0;
-        const marketCap = formatMarketCap(detail?.marketCap?.raw);
-        const sector = (profile?.sector as string) || 'Unknown';
-        console.log(`[quoteSummary] ${symbol}: v10+crumb success from ${host}`, { pe, marketCap, sector });
-        return { pe, marketCap, sector };
+        const url = `${host}/v10/finance/quoteSummary/${symbol}?modules=${MODULES}&crumb=${encodeURIComponent(crumb)}`;
+        const parsed = parseQuoteSummary(await fetchJson(url, 8000, { 'User-Agent': 'Mozilla/5.0' }));
+        if (parsed) {
+          console.log(`[quoteSummary] ${symbol}: v10+crumb success from ${host}`, parsed);
+          return parsed;
+        }
       } catch { continue; }
     }
   }
@@ -160,20 +194,15 @@ async function fetchQuoteSummary(symbol: string, preferredHost?: string): Promis
   // Fallback: try v10 without crumb (may work through CORS proxies)
   for (const host of hosts) {
     try {
-      const data = await fetchJson(
-        `${host}/v10/finance/quoteSummary/${symbol}?modules=summaryDetail,assetProfile`,
+      const parsed = parseQuoteSummary(await fetchJson(
+        `${host}/v10/finance/quoteSummary/${symbol}?modules=${MODULES}`,
         8000,
         { 'User-Agent': 'Mozilla/5.0' },
-      );
-      const result = data?.quoteSummary?.result?.[0];
-      const detail = result?.summaryDetail;
-      const profile = result?.assetProfile;
-      if (!detail && !profile) continue;
-      const pe = typeof detail?.trailingPE?.raw === 'number' ? detail.trailingPE.raw : 0;
-      const marketCap = formatMarketCap(detail?.marketCap?.raw);
-      const sector = (profile?.sector as string) || 'Unknown';
-      console.log(`[quoteSummary] ${symbol}: v10 no-crumb success from ${host}`, { pe, marketCap, sector });
-      return { pe, marketCap, sector };
+      ));
+      if (parsed) {
+        console.log(`[quoteSummary] ${symbol}: v10 no-crumb success from ${host}`, parsed);
+        return parsed;
+      }
     } catch { continue; }
   }
   return null;
@@ -370,18 +399,41 @@ async function quoteFromFinnhub(symbol: string): Promise<Stock | null> {
   const local = localFundamentals(symbol);
   const change = typeof data.d === 'number' ? data.d : price - prevClose;
   const changePercent = typeof data.dp === 'number' ? data.dp : (prevClose ? ((price - prevClose) / prevClose) * 100 : 0);
+  // Live fundamentals for symbols outside the curated list (e.g. BE) —
+  // curated fallback covers the rest.
+  let pe = local.pe;
+  let marketCap = local.marketCap;
+  let sector = local.sector;
+  let name = local.name || symbol;
+  let week52High = 0;
+  let week52Low = 0;
+  let volume = 0;
+  if (local.sector === 'Unknown') {
+    try {
+      const summary = await fetchQuoteSummary(symbol);
+      if (summary) {
+        pe = summary.pe || pe;
+        marketCap = summary.marketCap !== 'N/A' ? summary.marketCap : marketCap;
+        sector = summary.sector !== 'Unknown' ? summary.sector : sector;
+        name = summary.name || name;
+        week52High = summary.week52High ?? week52High;
+        week52Low = summary.week52Low ?? week52Low;
+        volume = summary.volume ?? volume;
+      }
+    } catch { /* keep curated fallback */ }
+  }
   return {
     symbol,
-    name: local.name || symbol,
-    sector: local.sector,
+    name,
+    sector,
     price,
     change,
     changePercent,
-    volume: 0,
-    marketCap: local.marketCap,
-    pe: local.pe,
-    week52High: 0,
-    week52Low: 0,
+    volume,
+    marketCap,
+    pe,
+    week52High,
+    week52Low,
   };
 }
 
@@ -389,15 +441,41 @@ export async function fetchStockQuote(symbol: string, forceRefresh = false): Pro
   if (!forceRefresh) {
     const cached = await getQuote(symbol);
     if (cached) {
-      // Self-heal stale/blank fundamentals from curated local data.
+      // Self-heal stale/blank fields. Curated data covers the tracked
+      // universe; for non-curated symbols (e.g. BE) a blank cached row gets
+      // one live quoteSummary attempt (server proxy) to fill the gaps.
       const local = localFundamentals(symbol);
-      const merged: Stock = {
+      const curatedBlank = local.sector === 'Unknown';
+      let merged: Stock = {
         ...cached,
         sector: cached.sector && cached.sector !== 'Unknown' ? cached.sector : local.sector,
         marketCap: cached.marketCap && cached.marketCap !== 'N/A' ? cached.marketCap : local.marketCap,
         pe: cached.pe && cached.pe > 0 ? cached.pe : local.pe,
-        name: cached.name && cached.name !== 'Unknown' ? cached.name : (local.name ?? cached.name),
+        name: cached.name && cached.name !== 'Unknown' && cached.name !== symbol ? cached.name : (local.name ?? cached.name),
+        week52High: cached.week52High || 0,
+        week52Low: cached.week52Low || 0,
       };
+      const needsLive = curatedBlank
+        && ((merged.sector === 'Unknown' || (merged.marketCap === 'N/A' && merged.pe <= 0)) || (!merged.week52High && !merged.week52Low));
+      if (needsLive) {
+        try {
+          const summary = await fetchQuoteSummary(symbol);
+          if (summary) {
+            merged = {
+              ...merged,
+              name: merged.name === symbol ? (summary.name ?? merged.name) : merged.name,
+              sector: summary.sector !== 'Unknown' ? summary.sector : merged.sector,
+              marketCap: summary.marketCap !== 'N/A' ? summary.marketCap : merged.marketCap,
+              pe: summary.pe > 0 ? summary.pe : merged.pe,
+              week52High: summary.week52High ?? merged.week52High,
+              week52Low: summary.week52Low ?? merged.week52Low,
+              volume: summary.volume ?? merged.volume,
+            };
+            // persist the healed quote so later loads skip this work
+            await putQuote(merged as CachedQuote);
+          }
+        } catch { /* serve curated/blank values */ }
+      }
       return { data: merged, error: null, isRealData: true, fromCache: true };
     }
   }
