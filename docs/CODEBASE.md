@@ -18,8 +18,10 @@ User selects stock
     ??SQLite cache (localDb)
     ??storage.setItem() ??localStorage + Supabase (debounced)
   ??useStockData.fetchHistoricalData()
-    ??Yahoo v8 chart (10y) or Stooq CSV
-    ??SQLite cache
+    ??fresh SQLite cache (bar-currency gate: newest bar ??4 days old)
+    ??live: Yahoo v8 chart (10y) or Stooq CSV
+    ??Supabase cloud bars (stock_historical; primes the cache)
+    ??stale SQLite cache (last resort before synthetic)
   ??stockData.generateSignals()
     ??8 strategy analysis ??Signal[] returned to UI
 
@@ -79,13 +81,15 @@ Fetch chain: `proxyFetch()` ??server proxy first ??direct ??CORS proxies.
 
 | Function | Purpose |
 |----------|---------|
-| `fetchStockQuote(symbol)` | cache ??Finnhub quote ??Yahoo v8 chart ??Stooq CSV ??mock |
-| `fetchHistoricalData(symbol)` | 10y daily OHLCV. Yahoo v8 ??Stooq ??synthetic |
+| `fetchStockQuote(symbol)` | cache → Finnhub quote → Yahoo v8 chart → Stooq CSV → mock |
+| `fetchHistoricalData(symbol)` | 10y daily OHLCV. Fresh SQLite cache → Yahoo v8 → Stooq → **Supabase cloud bars** (`stock_historical`, primes the cache) → stale SQLite cache (better than synthetic) → synthetic |
 | `getYahooCrumb()` | `/api/yahoo/crumb`, cached 30 min |
 | `fetchQuoteSummary(symbol)` | Yahoo v10: P/E, market cap, sector |
 | `localFundamentals(symbol)` | Curated fallback (name, sector, marketCap, pe) from `popularStocks`. Used when live `quoteSummary` returns null. |
 
 **Fundamentals fallback chain:** `quoteFromYahoo`/`quoteFromStooq` try live `fetchQuoteSummary`, then fall back to `localFundamentals()`. The cached-quote return path in `fetchStockQuote` also self-heals stale/blank fundamentals by merging curated values. Custom symbols not in `popularStocks` will still show `Unknown/N/A/0` when the live endpoint is unreachable.
+
+**Historical-bar cache freshness (bar-currency gate):** the SQLite historical cache (`localDb.getHistorical`) is a hit only if its newest bar is ≤4 calendar days old (`isDailyBarSeriesFresh`) — a 90-day-old *write* is worthless when the *data* ends weeks back. A stale series is a miss, so callers refetch (live → cloud). The stale series is still served as a last resort before synthetic bars (`getHistoricalDump`), labeled `error: "Cached bars end <date>"`.
 
 **Fresh-quote speed (Master Matrix):** `fetchStockQuote` reads the local cache first, then (for uncached symbols) tries `quoteFromFinnhub` via the `/api/finnhub/quote` proxy ??which rotates over the server `FINNHUB_API_KEY`/`FINNHUB_API_KEY_2` env keys plus any browser-saved `api_key`/`api_key_2` tokens ??before falling back to Yahoo/Stooq. This makes fresh quote retrieval on the Master Matrix page much faster than Yahoo's slow/blocked endpoints. `useMasterMatrix.runAnalysis` also fetches in larger batches (6) with a shorter 120 ms delay between them.
 
@@ -142,7 +146,7 @@ Pulls real daily bars from the **`stock_historical`** Supabase table (the 80-sym
 | Function | Purpose |
 |----------|---------|
 | `fetchStoredHistory()` | All symbols with bars (min-bar filtered), paginated `order=date.asc` |
-| `fetchStoredHistoryForSymbol(symbol)` | Bars for one symbol, case-insensitive `symbol=eq.` |
+| `fetchStoredHistoryForSymbol(symbol)` | Bars for one symbol, case-insensitive `symbol=eq.`. Also the cloud fallback in `fetchHistoricalData` when live providers fail. |
 
 ### Supabase config resolution (runtime, secret-free)
 
@@ -270,7 +274,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | `useScreenerData.ts` | 361 | Fetches all screener stocks, runs recommendations, caches results. |
 | `useTacticalHistory.ts` | 48 | In-browser tactical engine replay. No server calls. |
 | `edgeFn.ts` | ??| Supabase Edge Function client. |
-| `localDb.ts` | ??| sql.js WASM wrapper, IndexedDB persistence. |
+| `localDb.ts` | ?? | sql.js WASM wrapper, IndexedDB persistence. Historical cache has a bar-currency gate (`isDailyBarSeriesFresh`): newest bar must be ??4 days old or the series is a miss. |
 
 ## Design Decisions
 

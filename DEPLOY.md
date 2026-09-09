@@ -157,6 +157,7 @@ The four data jobs above were migrated off the browser — do **not** re-add the
 | 404 on refresh | Express catch-all should handle client-side routes |
 | "All providers unavailable" | Check Render logs; server proxy may be failing |
 | Stale data | Data now refreshes server-side on schedule; check the freshness queries above before assuming a browser problem |
+| Chart ends on an old date (e.g. bars frozen weeks back) | The browser's SQLite historical cache self-heals since the bar-currency gate (`be5b2d9`): a series whose newest bar is >4 days old is a cache miss and refetches live, then falls back to Supabase `stock_historical` (nightly server sync) — hard-refresh the page once. If it *still* shows old bars, check the freshness queries above (server sync may have stopped) |
 | Server proxy 502 | Render outbound requests may be blocked |
 | Trump shows no records | Verify the UnusualWhales URL uses `Donald J Trump` (no period) |
 | Render slow to respond | Free tier sleeps after inactivity; first request takes 30-50s |

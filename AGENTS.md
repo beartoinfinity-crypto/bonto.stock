@@ -4,7 +4,7 @@
 
 1. Set Node on PATH: `$env:Path = "C:\Program Files\nodejs;" + $env:Path`
 2. Run `npm run build` before committing — `dist/` is committed to git (Render serves it directly)
-3. Run `npm run test` after changes — 114 tests across 12 files, must pass
+3. Run `npm run test` after changes — 126 tests across 14 files, must pass
 4. Use `npm.cmd` (not `npm`) in PowerShell commands
 5. Supabase CLI deploy runs from the **repo root** (`supabase/config.toml` is resolved relative to cwd). If the link is lost: `npx.cmd supabase link --project-ref aqyaarnpmvvdzasjefje`
 
