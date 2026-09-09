@@ -112,6 +112,27 @@ function localFundamentals(symbol: string): { sector: string; marketCap: string;
 }
 
 async function fetchQuoteSummary(symbol: string, preferredHost?: string): Promise<{ pe: number; marketCap: string; sector: string } | null> {
+  // Primary: server-side quoteSummary proxy. Yahoo crumbs are session-bound
+  // (they only authorize calls carrying the same session cookie that minted
+  // them), so the browser can never call v10 directly — the server keeps the
+  // cookie+crumb pair and runs the call for us.
+  try {
+    const res = await fetch(`/api/yahoo/quote-summary?symbol=${encodeURIComponent(symbol)}&modules=summaryDetail,assetProfile`);
+    if (res.ok) {
+      const data = await res.json();
+      const result = data?.quoteSummary?.result?.[0];
+      const detail = result?.summaryDetail;
+      const profile = result?.assetProfile;
+      if (detail || profile) {
+        const pe = typeof detail?.trailingPE?.raw === 'number' ? detail.trailingPE.raw : 0;
+        const marketCap = formatMarketCap(detail?.marketCap?.raw);
+        const sector = (profile?.sector as string) || 'Unknown';
+        console.log(`[quoteSummary] ${symbol}: server proxy success`, { pe, marketCap, sector });
+        return { pe, marketCap, sector };
+      }
+    }
+  } catch { /* fall through to direct calls */ }
+
   const hosts = preferredHost
     ? [preferredHost, ...['https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com'].filter(h => h !== preferredHost)]
     : ['https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com'];

@@ -83,7 +83,6 @@ describe('fetchStockQuote — quoteSummary integration', () => {
     setupMocks(
       finnhubMiss,
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 195.89, fiftyTwoWeekHigh: 199.62, fiftyTwoWeekLow: 164.08, longName: 'Apple Inc.' }, indicators: { quote: [{ close: [190, 192, 195.89], volume: [50e6, 55e6, 60e6] }] } }] } }),
-      jsonResponse({ crumb: 'abc123crumb' }),
       jsonResponse({ quoteSummary: { result: [{ summaryDetail: { trailingPE: { raw: 32.1 }, marketCap: { raw: 3_000_000_000_000 } }, assetProfile: { sector: 'Technology' } }] } }),
     );
 
@@ -98,7 +97,6 @@ describe('fetchStockQuote — quoteSummary integration', () => {
     setupMocks(
       finnhubMiss,
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 195.89, fiftyTwoWeekHigh: 199.62, fiftyTwoWeekLow: 164.08, longName: 'Apple Inc.' }, indicators: { quote: [{ close: [190, 192, 195.89], volume: [50e6, 55e6, 60e6] }] } }] } }),
-      jsonResponse({ crumb: 'abc123crumb' }),  // server-side crumb
       jsonResponse({ quoteSummary: { result: [{ summaryDetail: { trailingPE: { raw: 32.1 }, marketCap: { raw: 3_000_000_000_000 } }, assetProfile: { sector: 'Technology' } }] } }),
     );
 
@@ -108,13 +106,28 @@ describe('fetchStockQuote — quoteSummary integration', () => {
     expect(result.data?.sector).toBe('Technology');
     expect(result.data?.price).toBe(195.89);
     expect(result.data?.name).toBe('Apple Inc.');
+    // The fundamentals came from the new server endpoint
+    expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/api/yahoo/quote-summary'));
+  });
+
+  it('falls back to the direct v10+crumb path when the server endpoint fails', async () => {
+    setupMocks(
+      finnhubMiss,
+      jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 195.89, fiftyTwoWeekHigh: 199.62, fiftyTwoWeekLow: 164.08, longName: 'Apple Inc.' }, indicators: { quote: [{ close: [190, 192, 195.89], volume: [50e6, 55e6, 60e6] }] } }] } }),
+      { ok: false, status: 502 } as Response,
+      jsonResponse({ crumb: 'abc123crumb' }),
+      jsonResponse({ quoteSummary: { result: [{ summaryDetail: { trailingPE: { raw: 28.5 }, marketCap: { raw: 2_800_000_000_000 } }, assetProfile: { sector: 'Technology' } }] } }),
+    );
+
+    const result = await fetchStockQuote('AAPL');
+    expect(result.data?.pe).toBe(28.5);
+    expect(result.data?.marketCap).toBe('2.8T');
   });
 
   it('formats marketCap as billions', async () => {
     setupMocks(
       finnhubMiss,
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 45.20 }, indicators: { quote: [{ close: [44, 45], volume: [10e6, 12e6] }] } }] } }),
-      jsonResponse({ crumb: 'crumbXYZ' }),
       jsonResponse({ quoteSummary: { result: [{ summaryDetail: { trailingPE: { raw: 12.5 }, marketCap: { raw: 180_000_000_000 } }, assetProfile: { sector: 'Technology' } }] } }),
     );
 
@@ -178,7 +191,6 @@ describe('fetchStockQuote — quoteSummary integration', () => {
     setupMocks(
       finnhubMiss,
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 10.0 }, indicators: { quote: [{ close: [9, 10], volume: [1e6, 2e6] }] } }] } }),
-      jsonResponse({ crumb: 'crumbOK' }),
       jsonResponse({ quoteSummary: { result: [{ summaryDetail: { trailingPE: { raw: 15.0 } }, assetProfile: { sector: 'Healthcare' } }] } }),
     );
 
@@ -192,7 +204,6 @@ describe('fetchStockQuote — quoteSummary integration', () => {
     setupMocks(
       finnhubMiss,
       jsonResponse({ chart: { result: [{ meta: { regularMarketPrice: 50.0 }, indicators: { quote: [{ close: [49, 50], volume: [3e6, 4e6] }] } }] } }),
-      jsonResponse({ crumb: 'crumbOK' }),
       jsonResponse({ quoteSummary: { result: [{ summaryDetail: { marketCap: { raw: 5_000_000_000 } }, assetProfile: { sector: 'Financial' } }] } }),
     );
 

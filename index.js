@@ -61,52 +61,106 @@ app.get('/api/proxy', async (req, res) => {
 // GET /api/yahoo/crumb
 // Fetches Yahoo crumb server-side (cookies work from server, not browser).
 
-let yahooCrumbCache = { crumb: null, expiry: 0 };
+let yahooCrumbCache = { crumb: null, cookie: null, expiry: 0 };
+
+// Crumb is SESSION-BOUND: a crumb only authorizes quoteSummary calls made
+// with the same session cookie that minted it. The browser can't hold that
+// cookie (CORS), so all crumb'd calls must happen here, server-side.
+
+async function getYahooSession() {
+  if (yahooCrumbCache.crumb && yahooCrumbCache.cookie && Date.now() < yahooCrumbCache.expiry) {
+    return { crumb: yahooCrumbCache.crumb, cookie: yahooCrumbCache.cookie };
+  }
+
+  // Step 1: hit fc.yahoo.com to set the A3 session cookie (finance.yahoo.com
+  // now bounces to a consent page that drops the cookie; fc.yahoo.com still
+  // sets it directly). This exchange works server-side only (CORS).
+  const ctrl1 = new AbortController();
+  const timer1 = setTimeout(() => ctrl1.abort(), 10000);
+  const cookieRes = await fetch('https://fc.yahoo.com', {
+    signal: ctrl1.signal,
+    redirect: 'follow',
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+  });
+  clearTimeout(timer1);
+
+  // Step 2: mint a crumb bound to that same session cookie
+  const cookieHeader = cookieRes.headers.get('set-cookie') || '';
+  if (!cookieHeader) {
+    throw new Error('No session cookie returned by fc.yahoo.com');
+  }
+  const cookie = cookieHeader.split(';')[0];
+  const ctrl2 = new AbortController();
+  const timer2 = setTimeout(() => ctrl2.abort(), 10000);
+  const crumbRes = await fetch('https://query2.finance.yahoo.com/v1/test/getcrumb', {
+    signal: ctrl2.signal,
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Cookie': cookie,
+    },
+  });
+  clearTimeout(timer2);
+
+  if (!crumbRes.ok) {
+    throw new Error(`getcrumb failed: ${crumbRes.status}`);
+  }
+  const crumb = (await crumbRes.text()).trim();
+  if (!crumb || crumb.length <= 2 || crumb.includes('error')) {
+    throw new Error('Invalid crumb response');
+  }
+  yahooCrumbCache = { crumb, cookie, expiry: Date.now() + 30 * 60 * 1000 };
+  console.log('[YahooCrumb] Server session minted:', crumb.substring(0, 6) + '...');
+  return { crumb, cookie };
+}
 
 app.get('/api/yahoo/crumb', async (req, res) => {
-  if (yahooCrumbCache.crumb && Date.now() < yahooCrumbCache.expiry) {
-    res.set('Access-Control-Allow-Origin', '*');
-    return res.json({ crumb: yahooCrumbCache.crumb });
-  }
-
+  res.set('Access-Control-Allow-Origin', '*');
   try {
-    // Step 1: hit finance.yahoo.com to set session cookies
-    const ctrl1 = new AbortController();
-    const timer1 = setTimeout(() => ctrl1.abort(), 10000);
-    const cookieRes = await fetch('https://finance.yahoo.com/', {
-      signal: ctrl1.signal,
-      redirect: 'follow',
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-    });
-    clearTimeout(timer1);
-
-    // Step 2: get crumb using cookies from step 1
-    const cookieHeader = cookieRes.headers.get('set-cookie') || '';
-    const ctrl2 = new AbortController();
-    const timer2 = setTimeout(() => ctrl2.abort(), 10000);
-    const crumbRes = await fetch('https://query2.finance.yahoo.com/v1/test/getcrumb', {
-      signal: ctrl2.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Cookie': cookieHeader.split(';')[0],
-      },
-    });
-    clearTimeout(timer2);
-
-    if (crumbRes.ok) {
-      const crumb = (await crumbRes.text()).trim();
-      if (crumb && crumb.length > 2 && !crumb.includes('error')) {
-        yahooCrumbCache = { crumb, expiry: Date.now() + 30 * 60 * 1000 };
-        console.log('[YahooCrumb] Server got crumb:', crumb.substring(0, 6) + '...');
-        res.set('Access-Control-Allow-Origin', '*');
-        return res.json({ crumb });
-      }
-    }
-    res.status(502).json({ error: 'Failed to get Yahoo crumb', status: crumbRes.status });
+    const { crumb } = await getYahooSession();
+    return res.json({ crumb });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    res.status(502).json({ error: 'Yahoo crumb fetch failed', detail: msg });
+    return res.status(502).json({ error: 'Yahoo crumb fetch failed', detail: msg });
   }
+});
+
+// --- Yahoo quoteSummary proxy ----------------------------------------
+// GET /api/yahoo/quote-summary?symbol=BE&modules=summaryDetail,assetProfile
+// Runs the crumb'd v10 call server-side with its session cookie — the only
+// place it can succeed (crumbs are session-bound).
+
+app.get('/api/yahoo/quote-summary', async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const symbol = String(req.query.symbol || '').trim().toUpperCase();
+  const modules = String(req.query.modules || 'summaryDetail,assetProfile');
+  if (!symbol || !/^[A-Za-z0-9.\-^=]{1,12}$/.test(symbol)) {
+    return res.status(400).json({ error: 'Missing or invalid symbol' });
+  }
+
+  for (const host of ['https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com']) {
+    try {
+      const { crumb, cookie } = await getYahooSession();
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 10000);
+      const url = `${host}/v10/finance/quoteSummary/${encodeURIComponent(symbol)}?modules=${encodeURIComponent(modules)}&crumb=${encodeURIComponent(crumb)}`;
+      const r = await fetch(url, {
+        signal: ctrl.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Cookie': cookie,
+        },
+      });
+      clearTimeout(timer);
+      if (r.ok) {
+        const body = await r.text();
+        res.set('Content-Type', 'application/json');
+        return res.status(200).send(body);
+      }
+      // Non-OK: invalidate the cached session (crumb may have expired) and retry other host
+      yahooCrumbCache = { crumb: null, cookie: null, expiry: 0 };
+    } catch { /* try next host */ }
+  }
+  return res.status(502).json({ error: 'quoteSummary failed for ' + symbol });
 });
 
 // --- Finnhub social sentiment proxy ---------------------------------
