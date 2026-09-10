@@ -93,7 +93,7 @@ describe('simulateDay integration (offline first-run)', () => {
   it('produces trades even when network is fully unavailable', async () => {
     const next = await simulateDay(createLedger(), '2026-01-02');
     expect(next.lastRunDate).toBe('2026-01-02');
-    expect(next.decisions).toHaveLength(6);
+    expect(next.decisions).toHaveLength(7);
     for (const r of next.decisions) expect(r.decisions.length).toBeGreaterThan(0);
     // Regression: the universe once silently contained `undefined`, crashing
     // runDayForPerson and leaving the ledger untouched.
@@ -152,7 +152,7 @@ describe('simulateDay integration (offline first-run)', () => {
     expect(persisted.lastRunDate).toBe('2026-01-02');
     expect(persisted.accounts).toBeDefined();
     expect(persisted.trades.length).toBe(next.trades.length);
-    expect(persisted.decisions.length).toBe(6);
+    expect(persisted.decisions.length).toBe(7);
   });
 
   it('appends trades across days (no history is ever dropped)', async () => {
@@ -177,13 +177,13 @@ describe('simulateDay integration (offline first-run)', () => {
     mem.clear();
     const afterDay1 = await simulateDay(createLedger(), '2026-01-02');
     const day1Log = afterDay1.decisions.length;
-    expect(day1Log).toBe(6);
+    expect(day1Log).toBe(7);
     // Same-day re-run is a write-protected no-op (a day runs once); a different
     // day appends.
     const rerunSame = await simulateDay(afterDay1, '2026-01-02');
-    expect(rerunSame.decisions.length).toBe(6);
+    expect(rerunSame.decisions.length).toBe(7);
     const newDay = await simulateDay(rerunSame, '2026-01-05');
-    expect(newDay.decisions.length).toBe(12);
+    expect(newDay.decisions.length).toBe(14);
     // Expose what's stored for a future audit.
     const audit = newDay.decisions.map(l => `${l.personaId}:${l.date}:${l.decisions.length}`);
     console.log('AUDIT_DAYS', JSON.stringify(audit));

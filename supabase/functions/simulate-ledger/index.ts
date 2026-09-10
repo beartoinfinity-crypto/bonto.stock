@@ -27,8 +27,8 @@ const STOP_LOSS = -0.08;
 const TAKE_PROFIT = 0.30;
 const HEAVY_TOPN = 8;
 
-type PersonaId = 'value' | 'wealth' | 'contrarian' | 'momentum' | 'tactical' | 'agent';
-const PERSONA_IDS: PersonaId[] = ['value', 'wealth', 'contrarian', 'momentum', 'tactical', 'agent'];
+type PersonaId = 'value' | 'wealth' | 'inverted' | 'contrarian' | 'momentum' | 'tactical' | 'agent';
+const PERSONA_IDS: PersonaId[] = ['value', 'wealth', 'inverted', 'contrarian', 'momentum', 'tactical', 'agent'];
 
 // ─── Ledger types (mirror tradeSimulator.ts) ────────────────────────
 
@@ -226,6 +226,23 @@ function wealthDecision(r: MatrixRowLike): SymbolSignal {
       : action === 'SELL'
         ? `${r.sellCount}/12 SELL/AVOID — wealth-level weakness`
         : `${r.buyCount}/12 BUY votes — below 35% bar`,
+  };
+}
+
+function invertedWealthDecision(r: MatrixRowLike): SymbolSignal {
+  const ratio = r.buyCount / 12;
+  const buy = r.sellCount >= 5;          // Eleanor's SELL bar becomes the BUY
+  const sell = ratio >= 0.35;            // Eleanor's BUY bar becomes the SELL
+  const action = buy ? 'BUY' as const : sell ? 'SELL' as const : 'HOLD' as const;
+  const strength = buy ? Math.min(100, r.sellCount * 20) : sell ? Math.min(100, ratio * 100) : (1 - Math.max(ratio, r.sellCount / 12)) * 100;
+  return {
+    symbol: r.symbol, price: r.price, changePercent: r.changePercent, action, strength,
+    buyCount: r.buyCount, sellCount: r.sellCount, avgConfidence: strength,
+    reason: action === 'BUY'
+      ? `${r.sellCount}/12 SELL/AVOID — Eleanor would walk away; Rosalind steps in`
+      : action === 'SELL'
+        ? `${r.buyCount}/12 BUY votes (${(ratio * 100).toFixed(0)}%) — Eleanor's darling; Rosalind fades it`
+        : `${r.buyCount}/12 BUY / ${r.sellCount}/12 SELL — nothing worth fading`,
   };
 }
 
@@ -483,6 +500,7 @@ Deno.serve(async (req) => {
       let sig: SymbolSignal;
       if (p === 'value') sig = valueDecision(row);
       else if (p === 'wealth') sig = wealthDecision(row);
+      else if (p === 'inverted') sig = invertedWealthDecision(row);
       else if (p === 'contrarian') sig = contrarianDecision(row);
       else if (p === 'momentum') sig = momentumDecision(row, await trendUpFor(sym));
       else if (p === 'tactical') {

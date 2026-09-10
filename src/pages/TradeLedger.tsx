@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
-const LEADER_ICON = { value: '🦁', wealth: '💎', contrarian: '🐻', momentum: '⚡', tactical: '🎯', agent: '🤖' };
+const LEADER_ICON = { value: '🦁', wealth: '💎', inverted: '🪞', contrarian: '🐻', momentum: '⚡', tactical: '🎯', agent: '🤖' };
 
 function nl(n: number): string {
   const sign = n < 0 ? '-' : '';

@@ -24,7 +24,7 @@
 
 export type Action = 'BUY' | 'SELL' | 'HOLD';
 
-export type PersonaId = 'value' | 'wealth' | 'contrarian' | 'momentum' | 'tactical' | 'agent';
+export type PersonaId = 'value' | 'wealth' | 'contrarian' | 'momentum' | 'tactical' | 'agent' | 'inverted';
 
 export interface Persona {
   id: PersonaId;
@@ -36,6 +36,7 @@ export interface Persona {
 export const PERSONAS: Persona[] = [
   { id: 'value', name: 'Warren', engine: '12 Masters', description: 'Bargain hunter — buys strong consensus' },
   { id: 'wealth', name: 'Eleanor', engine: '12 Masters', description: 'High-conviction value — only pristine setups' },
+  { id: 'inverted', name: 'Rosalind', engine: '12 Masters (inverted Eleanor)', description: 'Fades Eleanor — sells her picks, buys her rejects' },
   { id: 'contrarian', name: 'Temple', engine: '12 Masters (inverted)', description: 'Buys the hated, sells the loved' },
   { id: 'momentum', name: 'Nancy', engine: 'Matrix rank', description: 'Rides leaders above the trend line' },
   { id: 'tactical', name: 'Jerry', engine: 'Tactical engine', description: 'Entries/exits with stops and sizing' },
@@ -367,6 +368,32 @@ export function wealthDecision(r: MatrixRowLike): SymbolSignal {
     : action === 'SELL'
       ? `${r.sellCount}/${12} SELL/AVOID — wealth-level weakness`
       : `${r.buyCount}/${12} BUY votes — below 35% bar`;
+  return {
+    symbol: r.symbol, price: r.price, changePercent: r.changePercent,
+    action, strength, buyCount: r.buyCount, sellCount: r.sellCount,
+    avgConfidence: strength, reason,
+  };
+}
+
+/**
+ * Rosalind (inverted Eleanor) — fades the wealth screen with Eleanor's own
+ * bars: what Eleanor would buy (>=35% BUY votes) she SELLS; what Eleanor
+ * would sell (>=5 SELL/AVOID) she BUYS; otherwise HOLD. Exit precedence in
+ * runDayForPerson stops/targets/signals is unchanged — only the daily
+ * matrix call is mirrored, so Rosalind exits positions exactly as a mirror
+ * of Eleanor's entries would.
+ */
+export function invertedWealthDecision(r: MatrixRowLike): SymbolSignal {
+  const ratio = r.buyCount / 12;
+  const buy = r.sellCount >= 5;          // Eleanor's SELL bar becomes the BUY
+  const sell = ratio >= 0.35;            // Eleanor's BUY bar becomes the SELL
+  const action: Action = buy ? 'BUY' : sell ? 'SELL' : 'HOLD';
+  const strength = buy ? Math.min(100, r.sellCount * 20) : sell ? Math.min(100, ratio * 100) : (1 - Math.max(ratio, r.sellCount / 12)) * 100;
+  const reason = action === 'BUY'
+    ? `${r.sellCount}/${12} SELL/AVOID — Eleanor would walk away; Rosalind steps in`
+    : action === 'SELL'
+      ? `${r.buyCount}/${12} BUY votes (${(ratio * 100).toFixed(0)}%) — Eleanor's darling; Rosalind fades it`
+      : `${r.buyCount}/${12} BUY / ${r.sellCount}/${12} SELL — nothing worth fading`;
   return {
     symbol: r.symbol, price: r.price, changePercent: r.changePercent,
     action, strength, buyCount: r.buyCount, sellCount: r.sellCount,

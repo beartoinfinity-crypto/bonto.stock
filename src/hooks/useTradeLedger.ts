@@ -32,6 +32,7 @@ import {
   buildDecisionLog,
   valueDecision,
   wealthDecision,
+  invertedWealthDecision,
   contrarianDecision,
   momentumDecision,
   tacticalDecision,
@@ -286,6 +287,8 @@ async function decisionFor(
       return valueDecision({ symbol: row.symbol, price, changePercent, score: row.score, buyCount: row.buyCount, sellCount: row.analyses.filter(a => a.verdict === 'SELL' || a.verdict === 'AVOID').length });
     case 'wealth':
       return wealthDecision({ symbol: row.symbol, price, changePercent, score: row.score, buyCount: row.buyCount, sellCount: row.analyses.filter(a => a.verdict === 'SELL' || a.verdict === 'AVOID').length });
+    case 'inverted':
+      return invertedWealthDecision({ symbol: row.symbol, price, changePercent, score: row.score, buyCount: row.buyCount, sellCount: row.analyses.filter(a => a.verdict === 'SELL' || a.verdict === 'AVOID').length });
     case 'contrarian':
       return contrarianDecision({ symbol: row.symbol, price, changePercent, score: row.score, buyCount: row.buyCount, sellCount: row.analyses.filter(a => a.verdict === 'SELL' || a.verdict === 'AVOID').length });
     case 'momentum': {
@@ -317,7 +320,7 @@ async function decisionFor(
   }
 }
 
-const PERSONA_IDS: PersonaId[] = ['value', 'wealth', 'contrarian', 'momentum', 'tactical', 'agent'];
+const PERSONA_IDS: PersonaId[] = ['value', 'wealth', 'inverted', 'contrarian', 'momentum', 'tactical', 'agent'];
 
 export function useTradeLedger() {
   const [ledger, setLedger] = useState<LedgerStore>(() => loadLedger());

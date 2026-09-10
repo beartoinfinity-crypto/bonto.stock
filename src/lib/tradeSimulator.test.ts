@@ -11,6 +11,7 @@ import {
   POSITION_FRACTION,
   valueDecision,
   wealthDecision,
+  invertedWealthDecision,
   contrarianDecision,
   momentumDecision,
   agentDecision,
@@ -149,6 +150,23 @@ describe('tradeSimulator — persona decisions', () => {
     expect(hold.action).toBe('HOLD');
     const buy = wealthDecision({ symbol: 'AAPL', price: 200, changePercent: 1, score: 60, buyCount: 5, sellCount: 1 });
     expect(buy.action).toBe('BUY');
+  });
+
+  it('invertedWealthDecision fades Eleanor exactly (mirror bars)', () => {
+    // Eleanor BUY bar: >=35% BUY votes -> Rosalind SELLs the same row
+    const eleanorBuy = { symbol: 'AAPL', price: 200, changePercent: 1, score: 60, buyCount: 5, sellCount: 1 };
+    expect(wealthDecision(eleanorBuy).action).toBe('BUY');
+    expect(invertedWealthDecision(eleanorBuy).action).toBe('SELL');
+
+    // Eleanor SELL bar: >=5 SELL/AVOID -> Rosalind BUYs the same row
+    const eleanorSell = { symbol: 'TSLA', price: 200, changePercent: -2, score: 5, buyCount: 1, sellCount: 6 };
+    expect(wealthDecision(eleanorSell).action).toBe('SELL');
+    expect(invertedWealthDecision(eleanorSell).action).toBe('BUY');
+
+    // Between the bars: both HOLD
+    const mid = { symbol: 'MSFT', price: 200, changePercent: 0, score: 20, buyCount: 2, sellCount: 2 };
+    expect(wealthDecision(mid).action).toBe('HOLD');
+    expect(invertedWealthDecision(mid).action).toBe('HOLD');
   });
 
   it('contrarianDecision buys names the consensus hates', () => {
