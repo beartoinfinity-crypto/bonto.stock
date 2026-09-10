@@ -126,6 +126,15 @@ export interface PersonAccount {
   lastRunDate: string | null;
 }
 
+/** One day's recorded performance: every persona's equity at that day's close. */
+export interface LedgerHistoryEntry {
+  date: string;
+  /** personaId -> mark-to-market equity (cash + positions at the day's prices). */
+  equity: Partial<Record<PersonaId, number>>;
+  /** prices snapshot used for marking that day (positions + universe). */
+  prices: Record<string, number>;
+}
+
 export interface LedgerStore {
   createdAt: string;
   initialCash: number;
@@ -137,6 +146,8 @@ export interface LedgerStore {
   prices: Record<string, number>;
   /** accumulated per-person, per-day decision logs (incl. HOLDs). */
   decisions: DailyDecisionLog[];
+  /** one entry per simulated day — the daily performance track record. */
+  history: LedgerHistoryEntry[];
 }
 
 export const LEDGER_KEY = 'stockpulse_trade_ledger';
@@ -152,7 +163,38 @@ export function createLedger(): LedgerStore {
   for (const p of PERSONAS) {
     accounts[p.id] = { personaId: p.id, cash: STARTING_CASH, positions: [], lastRunDate: null };
   }
-  return { createdAt: new Date().toISOString(), initialCash: STARTING_CASH, accounts, trades: [], lastRunDate: null, prices: {}, decisions: [] };
+  return { createdAt: new Date().toISOString(), initialCash: STARTING_CASH, accounts, trades: [], lastRunDate: null, prices: {}, decisions: [], history: [] };
+}
+
+/** Record one simulated day's equity snapshot into `history` (union by date:
+ *  a re-run of the same date replaces that day's entry; other days are kept). */
+export function appendHistory(
+  ledger: LedgerStore,
+  date: string,
+  accounts: Record<PersonaId, PersonAccount>,
+  prices: Record<string, number>,
+): LedgerHistoryEntry[] {
+  const equity = {} as LedgerHistoryEntry['equity'];
+  for (const p of PERSONAS) {
+    const acct = accounts[p.id];
+    if (acct) equity[p.id] = round2(accountEquity(acct, prices));
+  }
+  const entry: LedgerHistoryEntry = { date, equity, prices };
+  return [...(ledger.history ?? []).filter(h => h.date !== date), entry]
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+/** Daily P/L series per persona from history: equity deltas between consecutive days. */
+export function dailyPnlSeries(history: LedgerHistoryEntry[], personaId: PersonaId, initialCash = STARTING_CASH): Array<{ date: string; pnl: number }> {
+  const out: Array<{ date: string; pnl: number }> = [];
+  let prev = initialCash;
+  for (const h of [...history].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))) {
+    const eq = h.equity[personaId];
+    if (typeof eq !== 'number') continue;
+    out.push({ date: h.date, pnl: round2(eq - prev) });
+    prev = eq;
+  }
+  return out;
 }
 
 let tradeSeq = 0;

@@ -15,6 +15,7 @@ function makeLedger(overrides: Partial<LedgerStore> = {}): LedgerStore {
     lastRunDate: null,
     prices: {},
     decisions: [],
+    history: [],
     ...overrides,
   };
 }
@@ -186,5 +187,25 @@ describe('mergeLedgers', () => {
       makeTrade('s1', '2026-09-02', 'agent', 'AAPL', 'SELL', 10, 100),
     ];
     expect(healSameDayConflicts(trades)).toEqual(trades);
+  });
+
+  it('unions history by date and keeps the fuller entry for the same day', () => {
+    const a = makeLedger({
+      history: [
+        { date: '2026-01-02', equity: { value: 100_000 }, prices: { AAPL: 100 } },
+        { date: '2026-01-03', equity: { value: 101_000 }, prices: {} },
+      ],
+    });
+    const b = makeLedger({
+      history: [
+        // same day as a's Jan-3 but with more personas covered — wins
+        { date: '2026-01-03', equity: { value: 101_000, agent: 99_500, tactical: 100_200 }, prices: {} },
+        { date: '2026-01-04', equity: { value: 102_000 }, prices: {} },
+      ],
+    });
+
+    const m = mergeLedgers(a, b);
+    expect(m.history.map(h => h.date)).toEqual(['2026-01-02', '2026-01-03', '2026-01-04']);
+    expect(Object.keys(m.history[1].equity)).toEqual(['value', 'agent', 'tactical']);
   });
 });

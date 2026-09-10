@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -10,8 +10,10 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Header } from '@/components/Header';
 import { useTradeLedger } from '@/hooks/useTradeLedger';
 import {
-  PERSONAS, STARTING_CASH, accountEquity, positionValue, personaPnl, PersonaId, Trade, Position,
+  PERSONAS, STARTING_CASH, accountEquity, positionValue, personaPnl, dailyPnlSeries,
+  PersonaId, Trade, Position, LedgerHistoryEntry,
 } from '@/lib/tradeSimulator';
+import { fetchStockQuote } from '@/lib/stockApi';
 import {
   DEFAULT_VIEW_FILTERS,
   ViewFilters,
@@ -23,7 +25,7 @@ import {
   sortTrades,
 } from '@/lib/ledgerView';
 import {
-  RotateCcw, RefreshCw, TrendingUp, TrendingDown, Minus, Users, History, Briefcase, ListChecks, CloudDownload,
+  RotateCcw, RefreshCw, TrendingUp, TrendingDown, Minus, Users, History, Briefcase, ListChecks, CloudDownload, LineChart, Radio,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -172,6 +174,44 @@ export default function TradeLedger() {
   const { ledger, reset, syncFromCloud, running } = useTradeLedger();
   const [active, setActive] = useState<PersonaId>('value');
 
+  // Live re-marking: fetch fresh quotes for every open-position symbol so the
+  // leaderboard/positions show current prices, not the last simulated day's
+  // snapshot. Falls back to the snapshot when live fetch fails (offline/asleep).
+  const openSymbols = useMemo(() => {
+    const s = new Set<string>();
+    for (const acct of Object.values(ledger?.accounts ?? {})) {
+      for (const pos of acct.positions) s.add(pos.symbol.toUpperCase());
+    }
+    return [...s];
+  }, [ledger]);
+
+  const [livePrices, setLivePrices] = useState<Record<string, number> | null>(null);
+  const [liveLoading, setLiveLoading] = useState(false);
+  const liveFetchedRef = useRef<string>('');
+
+  useEffect(() => {
+    const key = openSymbols.join(',');
+    if (!key || liveFetchedRef.current === key) return;
+    liveFetchedRef.current = key;
+    let cancelled = false;
+    setLiveLoading(true);
+    (async () => {
+      const out: Record<string, number> = {};
+      await Promise.all(openSymbols.map(async sym => {
+        try {
+          const q = await fetchStockQuote(sym);
+          if (q?.data?.price && q.data.price > 0) out[sym] = q.data.price;
+        } catch { /* keep snapshot */ }
+      }));
+      if (!cancelled && Object.keys(out).length) setLivePrices(prev => ({ ...(prev ?? {}), ...out }));
+    })().finally(() => { if (!cancelled) setLiveLoading(false); });
+    return () => { cancelled = true; };
+  }, [openSymbols]);
+
+  /** Mark price: live when available, else the snapshot price, else cost. */
+  const markPrice = (snapshotPrices: Record<string, number>, symbol: string, avgCost: number): number =>
+    livePrices?.[symbol.toUpperCase()] ?? snapshotPrices[symbol.toUpperCase()] ?? avgCost;
+
   const handleReset = () => {
     reset();
     toast.success("Today's record cleared — the day can run again");
@@ -185,12 +225,19 @@ export default function TradeLedger() {
   };
 
   const prices = ledger?.prices ?? {};
+  // Live/snapshot blend: live quotes win for held symbols; the snapshot fills the rest.
+  const markPrices = useMemo(() => {
+    if (!livePrices) return prices;
+    return { ...prices, ...livePrices };
+  }, [prices, livePrices]);
+  const isLive = livePrices != null && openSymbols.some(s => livePrices[s] != null);
+
   const leaderboard = PERSONAS.map(p => {
     const acct = ledger?.accounts[p.id];
     const cash = acct?.cash ?? 0;
-    const marketValue = acct ? positionValue(acct, prices) : 0;
-    const equity = acct ? accountEquity(acct, prices) : STARTING_CASH;
-    const pnl = acct ? personaPnl(acct, prices) : 0;
+    const marketValue = acct ? positionValue(acct, markPrices) : 0;
+    const equity = acct ? accountEquity(acct, markPrices) : STARTING_CASH;
+    const pnl = acct ? personaPnl(acct, markPrices) : 0;
     return { ...p, cash, marketValue, equity, pnl, positions: acct?.positions.length ?? 0 };
   }).sort((a, b) => b.pnl - a.pnl);
 
@@ -258,8 +305,17 @@ export default function TradeLedger() {
         {/* Leaderboard */}
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Leaderboard</CardTitle>
-            <CardDescription>Mark-to-market equity vs ${STARTING_CASH.toLocaleString()} starting cash.</CardDescription>
+            <CardTitle className="text-lg flex items-center gap-2">
+              Leaderboard
+              {liveLoading ? (
+                <Badge variant="outline" className="text-muted-foreground"><RefreshCw className="h-3 w-3 mr-1 animate-spin" />marking live…</Badge>
+              ) : isLive ? (
+                <Badge variant="outline" className="text-emerald-500 border-emerald-500/40"><Radio className="h-3 w-3 mr-1" />live</Badge>
+              ) : null}
+            </CardTitle>
+            <CardDescription>
+              Mark-to-market equity vs ${STARTING_CASH.toLocaleString()} starting cash{isLive ? ' — re-marked at current live prices' : ' — as of the last simulated day'}.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {leaderboard.map((l, i) => (
@@ -302,6 +358,48 @@ export default function TradeLedger() {
           </CardContent>
         </Card>
 
+        {/* Performance history — one equity snapshot per simulated day */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2"><LineChart className="h-4 w-4" /> Performance History</CardTitle>
+            <CardDescription>
+              Daily mark-to-market equity per persona, recorded once on each simulated day ({(ledger?.history ?? []).length} day(s) tracked). Daily P/L = day-over-day equity change.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {(ledger?.history ?? []).length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4">No days recorded yet — history accrues from each simulated day.</p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    {PERSONAS.map(p => (
+                      <TableHead key={p.id} className="text-right">{LEADER_ICON[p.id]} {p.name}{p.id === active ? ' ●' : ''}</TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {[...(ledger?.history ?? [])].reverse().map((h: LedgerHistoryEntry) => (
+                    <TableRow key={h.date} className={h.date === ledger?.lastRunDate ? 'bg-accent/30' : undefined}>
+                      <TableCell className="font-mono text-xs whitespace-nowrap">{h.date}</TableCell>
+                      {PERSONAS.map(p => {
+                        const eq = h.equity[p.id];
+                        const pnl = eq != null ? eq - STARTING_CASH : null;
+                        return (
+                          <TableCell key={p.id} className={`text-right font-mono text-xs ${pnl == null ? 'text-muted-foreground' : pnl >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                            {eq != null ? `${nl(eq)} (${pct(pnl! / STARTING_CASH * 100)})` : '—'}
+                          </TableCell>
+                        );
+                      })}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+
         <Tabs value={active} onValueChange={v => setActive(v as PersonaId)} className="w-full">
           <TabsList className="flex flex-wrap h-auto">
             {PERSONAS.map(p => (
@@ -336,14 +434,17 @@ export default function TradeLedger() {
                         </TableHeader>
                         <TableBody>
                           {activeAcct.positions.map((pos: Position, idx) => {
-                            const mkt = prices[pos.symbol.toUpperCase()] ?? pos.avgCost;
+                            const mkt = markPrice(prices, pos.symbol, pos.avgCost);
                             const pl = (mkt - pos.avgCost) * pos.qty;
+                            const live = livePrices?.[pos.symbol.toUpperCase()];
                             return (
                               <TableRow key={idx}>
                                 <TableCell className="font-mono font-medium">{pos.symbol}</TableCell>
                                 <TableCell className="text-right font-mono">{pos.qty}</TableCell>
                                 <TableCell className="text-right font-mono">{nl(pos.avgCost)}</TableCell>
-                                <TableCell className="text-right font-mono">{nl(mkt)}</TableCell>
+                                <TableCell className="text-right font-mono">
+                                  {nl(mkt)}{live != null ? <span className="ml-1 text-[10px] text-emerald-500">live</span> : null}
+                                </TableCell>
                                 <TableCell className="text-right font-mono">{pos.stop ? nl(pos.stop) : '—'}</TableCell>
                                 <TableCell className={`text-right font-mono ${pl >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{nl(pl)}</TableCell>
                               </TableRow>
@@ -359,6 +460,25 @@ export default function TradeLedger() {
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-base flex items-center gap-2"><History className="h-4 w-4" /> Trades — {p.name}</CardTitle>
+                    {p.id === active ? (
+                      <CardDescription>
+                        {(() => {
+                          const series = dailyPnlSeries(ledger?.history ?? [], p.id, ledger?.initialCash ?? STARTING_CASH);
+                          const total = series.reduce((s, d) => s + d.pnl, 0);
+                          const best = series.reduce((b, d) => (d.pnl > b.pnl ? d : b), { date: '—', pnl: 0 });
+                          const worst = series.reduce((w, d) => (d.pnl < w.pnl ? d : w), { date: '—', pnl: 0 });
+                          return (
+                            <span>
+                              Daily P/L {total >= 0 ? '+' : ''}{nl(total)} across {series.length} day(s)
+                              {series.length > 0 && (
+                                <> · best <span className="text-emerald-500">{nl(best.pnl)} ({best.date})</span>
+                                  · worst <span className="text-red-500">{nl(worst.pnl)} ({worst.date})</span></>
+                              )}
+                            </span>
+                          );
+                        })()}
+                      </CardDescription>
+                    ) : null}
                   </CardHeader>
                   <CardContent>
                     {p.id === active && allTrades.filter(t => t.personaId === active).length === 0 ? (

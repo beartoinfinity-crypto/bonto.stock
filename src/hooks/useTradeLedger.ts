@@ -25,6 +25,7 @@ import {
   PersonaId,
   SymbolSignal,
   STARTING_CASH,
+  appendHistory,
   createLedger,
   holdSignal,
   runDayForPerson,
@@ -56,6 +57,7 @@ function loadLedger(): LedgerStore {
     if (raw && raw.accounts && raw.trades) {
       if (!raw.decisions) raw.decisions = [];
       if (!raw.prices) raw.prices = {};
+      if (!raw.history) raw.history = [];
       return raw;
     }
   } catch {
@@ -266,6 +268,8 @@ export async function simulateDay(ledger: LedgerStore, date = todayStr()): Promi
   }
   next.lastRunDate = date;
   next.prices = prices;
+  // Daily performance track: one equity snapshot per simulated day.
+  next.history = appendHistory(next, date, next.accounts, prices);
   storage.setJson(LEDGER_KEY, next);
   return next;
 }
@@ -365,6 +369,7 @@ export function useTradeLedger() {
     const current = loadLedger();
     const trades = (current.trades ?? []).filter(t => t.date !== today);
     const decisions = (current.decisions ?? []).filter(d => d.date !== today);
+    const history = (current.history ?? []).filter(h => h.date !== today);
     const accounts = replayAccounts(trades, current.initialCash ?? STARTING_CASH);
     const dates = trades.map(t => t.date).sort();
     const next: LedgerStore = {
@@ -372,6 +377,7 @@ export function useTradeLedger() {
       trades,
       decisions,
       accounts,
+      history,
       lastRunDate: dates.length ? dates[dates.length - 1] : null,
     };
     storage.setJson(LEDGER_KEY, next);

@@ -136,6 +136,17 @@ export function mergeLedgers(a: LedgerStore, b: LedgerStore): LedgerStore {
     if (!prev || (d.decisions?.length ?? 0) >= (prev.decisions?.length ?? 0)) decisions.set(key, d);
   }
 
+  // history: one entry per simulated day. Union by date — the entry that covers
+  // more personas wins (a fuller run of the same day replaces a partial one).
+  const history = new Map<string, (typeof a.history)[number]>();
+  for (const h of [...(a.history ?? []), ...(b.history ?? [])]) {
+    if (!h?.date) continue;
+    const prev = history.get(h.date);
+    const hCount = Object.keys(h.equity ?? {}).length;
+    const prevCount = prev ? Object.keys(prev.equity ?? {}).length : -1;
+    if (!prev || hCount >= prevCount) history.set(h.date, h);
+  }
+
   const { latest, latestSide } = pickLatestRun(a.lastRunDate, b.lastRunDate);
   const prices = latestSide === 'a'
     ? a.prices ?? {}
@@ -155,6 +166,7 @@ export function mergeLedgers(a: LedgerStore, b: LedgerStore): LedgerStore {
     lastRunDate: latest,
     prices,
     decisions: [...decisions.values()].sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0)),
+    history: [...history.values()].sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0)),
   };
 }
 

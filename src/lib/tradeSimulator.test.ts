@@ -5,6 +5,8 @@ import {
   accountEquity,
   personaPnl,
   buildDecisionLog,
+  appendHistory,
+  dailyPnlSeries,
   STARTING_CASH,
   POSITION_FRACTION,
   valueDecision,
@@ -189,5 +191,59 @@ describe('tradeSimulator — decision log', () => {
     expect(aapl?.price).toBe(200);
     expect(aapl?.reason).toBe('consensus');
     expect(log.decisions.find(x => x.symbol === 'MSFT')?.action).toBe('HOLD');
+  });
+});
+
+describe('tradeSimulator — daily performance history', () => {
+  it('appendHistory records one equity snapshot per day and unions by date', () => {
+    const ledger = createLedger();
+    const accounts = { ...ledger.accounts };
+    // value persona spent 10k on a position now worth 11k -> equity 101k
+    accounts.value = {
+      personaId: 'value', cash: 90_000, lastRunDate: '2026-01-02',
+      positions: [{ symbol: 'AAPL', qty: 100, avgCost: 100, stop: null, target: null }],
+    };
+    const prices = { AAPL: 110 };
+
+    const h1 = appendHistory(ledger, '2026-01-02', accounts, prices);
+    expect(h1).toHaveLength(1);
+    expect(h1[0].date).toBe('2026-01-02');
+    expect(h1[0].equity.value).toBe(101_000); // 90k cash + 100 * 110
+
+    // every persona gets an entry (all hold starting cash)
+    expect(h1[0].equity.agent).toBe(STARTING_CASH);
+
+    // a second day replaces nothing, just appends
+    const h2 = appendHistory({ ...ledger, history: h1 }, '2026-01-03', accounts, { AAPL: 105 });
+    expect(h2.map(x => x.date)).toEqual(['2026-01-02', '2026-01-03']);
+
+    // re-recording the SAME date replaces that day's entry (re-run semantics)
+    const h3 = appendHistory({ ...ledger, history: h2 }, '2026-01-03', accounts, { AAPL: 120 });
+    expect(h3).toHaveLength(2);
+    expect(h3[1].equity.value).toBe(102_000); // 90k + 100*120
+  });
+
+  it('dailyPnlSeries computes day-over-day equity deltas', () => {
+    const history = [
+      { date: '2026-01-02', equity: { value: 100_500 }, prices: {} },
+      { date: '2026-01-03', equity: { value: 101_200 }, prices: {} },
+      { date: '2026-01-06', equity: { value: 100_900 }, prices: {} },
+    ];
+    const series = dailyPnlSeries(history, 'value', STARTING_CASH);
+    expect(series.map(s => s.date)).toEqual(['2026-01-02', '2026-01-03', '2026-01-06']);
+    expect(series[0].pnl).toBe(500);       // 100.5k - 100k starting
+    expect(series[1].pnl).toBe(700);       // 101.2k - 100.5k
+    expect(series[2].pnl).toBe(-300);      // 100.9k - 101.2k
+  });
+
+  it('dailyPnlSeries skips days without the persona recorded', () => {
+    const history = [
+      { date: '2026-01-02', equity: { value: 100_500 }, prices: {} },
+      { date: '2026-01-03', equity: { agent: 100_000 }, prices: {} }, // no value entry
+      { date: '2026-01-04', equity: { value: 101_000 }, prices: {} },
+    ];
+    const series = dailyPnlSeries(history, 'value', STARTING_CASH);
+    expect(series.map(s => s.date)).toEqual(['2026-01-02', '2026-01-04']);
+    expect(series[1].pnl).toBe(500); // 101k - 100.5k (delta over the gap)
   });
 });

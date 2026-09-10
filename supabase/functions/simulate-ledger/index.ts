@@ -45,11 +45,18 @@ interface PersonaDecision {
   stopLoss: number | null; takeProfit: number | null; reason: string;
 }
 interface DailyDecisionLog { date: string; personaId: PersonaId; decisions: PersonaDecision[]; }
+/** One day's recorded performance: every persona's equity at that day's close. */
+interface LedgerHistoryEntry {
+  date: string;
+  equity: Partial<Record<PersonaId, number>>;
+  prices: Record<string, number>;
+}
 interface LedgerStore {
   createdAt: string; initialCash: number;
   accounts: Record<PersonaId, PersonAccount>;
   trades: Trade[]; lastRunDate: string | null;
   prices: Record<string, number>; decisions: DailyDecisionLog[];
+  history: LedgerHistoryEntry[];
 }
 
 interface SymbolSignal {
@@ -69,8 +76,24 @@ function freshAccounts(): Record<PersonaId, PersonAccount> {
 function createLedger(): LedgerStore {
   return {
     createdAt: new Date().toISOString(), initialCash: STARTING_CASH,
-    accounts: freshAccounts(), trades: [], lastRunDate: null, prices: {}, decisions: [],
+    accounts: freshAccounts(), trades: [], lastRunDate: null, prices: {}, decisions: [], history: [],
   };
+}
+
+/** Record one simulated day's equity snapshot (union by date — a re-run replaces). */
+function appendHistory(
+  ledger: LedgerStore,
+  date: string,
+  prices: Record<string, number>,
+): LedgerHistoryEntry[] {
+  const equity = {} as LedgerHistoryEntry['equity'];
+  for (const p of PERSONA_IDS) {
+    const acct = ledger.accounts[p];
+    if (acct) equity[p] = round2(accountEquity(acct, prices));
+  }
+  const entry: LedgerHistoryEntry = { date, equity, prices };
+  return [...(ledger.history ?? []).filter(h => h.date !== date), entry]
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
 // ─── Account math (mirror tradeSimulator.runDayForPerson) ─────────
@@ -359,6 +382,7 @@ async function loadLedger(supabase: any): Promise<LedgerStore | null> {
     if (parsed && parsed.accounts && parsed.trades) {
       if (!parsed.decisions) parsed.decisions = [];
       if (!parsed.prices) parsed.prices = {};
+      if (!parsed.history) parsed.history = [];
       return parsed;
     }
   } catch { /* corrupted row */ }
@@ -499,6 +523,8 @@ Deno.serve(async (req) => {
   next.lastRunDate = date;
   next.prices = prices;
   next.trades = healSameDayConflicts(next.trades);
+  // Daily performance track: one equity snapshot per simulated day.
+  next.history = appendHistory(next, date, prices);
 
   // 5. Write back.
   await saveLedger(supabase, next);

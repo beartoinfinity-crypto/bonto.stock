@@ -1,9 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 
 // localDb initializes sql.js (WASM) at import time, which aborts under jsdom.
-// Mock the WASM loader so the pure staleness gate can be tested directly.
+// Stub the WASM loader with a never-resolving promise so the module-level
+// initDb() stays pending forever (no rejection, no WASM) while the pure
+// staleness gate is tested directly.
 vi.mock('sql.js', () => ({
-  default: vi.fn(async () => { throw new Error('wasm not loaded in tests'); }),
+  default: vi.fn(async () => new Promise(() => { /* never resolves in tests */ })),
 }));
 
 import { isDailyBarSeriesFresh, HISTORICAL_BAR_STALENESS_DAYS } from './localDb';
