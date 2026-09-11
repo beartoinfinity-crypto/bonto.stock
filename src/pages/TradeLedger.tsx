@@ -14,6 +14,7 @@ import {
   PersonaId, Trade, Position, LedgerHistoryEntry,
 } from '@/lib/tradeSimulator';
 import { fetchStockQuote } from '@/lib/stockApi';
+import { pullFreshCloudPrices } from '@/lib/supabaseDb';
 import {
   DEFAULT_VIEW_FILTERS,
   ViewFilters,
@@ -200,9 +201,25 @@ export default function TradeLedger() {
       await Promise.all(openSymbols.map(async sym => {
         try {
           const q = await fetchStockQuote(sym);
-          if (q?.data?.price && q.data.price > 0) out[sym] = q.data.price;
+          // Only REAL provider data counts as a live mark — the fallback mock
+          // (curated popularStocks prices, isRealData:false) is a snapshot
+          // from months ago and must never re-mark a position.
+          if (q?.data?.price && q.data.price > 0 && q.isRealData) out[sym] = q.data.price;
         } catch { /* keep snapshot */ }
       }));
+      // Cloud quote board (nightly-synced official closes) fills any symbol
+      // the live providers couldn't serve — still real market data, unlike
+      // the curated fallback.
+      const missing = openSymbols.filter(s => !out[s]);
+      if (missing.length) {
+        try {
+          const board = await pullFreshCloudPrices();
+          for (const s of missing) {
+            const p = board.get(s);
+            if (p && p > 0) out[s] = p;
+          }
+        } catch { /* keep snapshot */ }
+      }
       if (!cancelled && Object.keys(out).length) setLivePrices(prev => ({ ...(prev ?? {}), ...out }));
     })().finally(() => { if (!cancelled) setLiveLoading(false); });
     return () => { cancelled = true; };

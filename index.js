@@ -48,6 +48,9 @@ app.get('/api/proxy', async (req, res) => {
     const contentType = response.headers.get('content-type') || 'application/json';
     res.set('Access-Control-Allow-Origin', '*');
     res.set('Content-Type', contentType);
+    // Market-data fetches through the proxy must never be HTTP-cached —
+    // stale cached responses would re-mark positions at old prices.
+    res.set('Cache-Control', 'no-store');
 
     const body = await response.text();
     res.status(response.status).send(body);
@@ -304,7 +307,10 @@ app.get('/api/finnhub/quote', async (req, res) => {
         lastDetail = 'no quote';
         continue;
       }
+      // Quotes must never be HTTP-cached by the browser — the /ledger
+      // live re-marking depends on freshness.
       res.set('Access-Control-Allow-Origin', '*');
+      res.set('Cache-Control', 'no-store');
       return res.status(response.status).json({ finnhubStatus: response.status, body: raw });
     } catch (err) {
       lastDetail = err instanceof Error ? err.message : String(err);
