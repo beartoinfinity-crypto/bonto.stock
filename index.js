@@ -692,6 +692,13 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`App listening on port ${PORT}`);
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`App listening on port ${PORT}`);
+  });
+}
+
+// Vercel serverless — @vercel/node invokes the Express app directly.
+// (Bound to /index.js via vercel.json; static dist/ and the SPA fallback
+// are served through Express just like on Render.)
+export default app;
