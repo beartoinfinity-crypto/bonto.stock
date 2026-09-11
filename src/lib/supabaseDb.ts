@@ -290,7 +290,16 @@ export async function pullLedger(): Promise<LedgerStore | null> {
   try {
     const local = localStorage.getItem(LEDGER_KEY) ?? '';
     const remote = await fetchRow(c, LEDGER_KEY);
-    const merged = mergeLedgerValue(local, remote?.value ?? null);
+    const remoteValue = remote?.value ?? null;
+    // Cloud copy missing — return whatever local has (possibly null).
+    if (!remoteValue) return safeParse<LedgerStore>(local);
+    // Local missing or corrupt — adopt the cloud copy wholesale so a fresh
+    // browser instantly gets the cloud state (e.g. new domain/origin).
+    if (!local || !safeParse<LedgerStore>(local)) {
+      writeLocal(LEDGER_KEY, remoteValue);
+      return safeParse<LedgerStore>(remoteValue);
+    }
+    const merged = mergeLedgerValue(local, remoteValue);
     if (merged !== local) writeLocal(LEDGER_KEY, merged);
     return safeParse<LedgerStore>(merged);
   } catch (e) {
