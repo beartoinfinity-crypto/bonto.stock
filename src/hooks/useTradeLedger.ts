@@ -38,7 +38,7 @@ import {
   tacticalDecision,
   agentDecision,
 } from '@/lib/tradeSimulator';
-import { overwriteLedger, pullLedger } from '@/lib/supabaseDb';
+import { overwriteLedger, pullLedger, pullFreshCloudPrices } from '@/lib/supabaseDb';
 import { replayAccounts } from '@/lib/ledgerMerge';
 
 /** Symbols the heavy engines (Tactical/Agent) are allowed to evaluate per day. */
@@ -195,6 +195,18 @@ export async function simulateDay(ledger: LedgerStore, date = todayStr()): Promi
   if (ledger.lastRunDate === date) return ledger;
   const rows = await buildUniverse();
   const next = JSON.parse(JSON.stringify(ledger)) as LedgerStore;
+
+  // Fresh cloud quotes override cached Matrix prices before any decision or
+  // fill runs — the Matrix cache can carry days-old prices (it's whatever the
+  // browser had when the Matrix page last ran), while the nightly server sync
+  // keeps stock_quotes current. Verdicts/scores stay Matrix-owned; only the
+  // market price is re-resolved so fills print at the real market price.
+  const freshPrices = await pullFreshCloudPrices();
+  for (const row of rows) {
+    const q = freshPrices.get(row.symbol.toUpperCase());
+    if (q && q > 0) row.price = q;
+  }
+
   const symbols = new Map<string, MatrixRow>();
   for (const r of rows) symbols.set(r.symbol.toUpperCase(), r);
 

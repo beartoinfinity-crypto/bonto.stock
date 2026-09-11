@@ -81,6 +81,7 @@ vi.mock('@/lib/supabaseHistory', () => ({
 // supabaseDb -> localDb -> sql.js, whose WASM load aborts in jsdom. Stub it so
 // this test file never triggers the sql.js wasm initialization.
 vi.mock('@/lib/supabaseDb', () => ({
+  pullFreshCloudPrices: vi.fn(async () => new Map()),
   pullLedger: vi.fn(async () => null),
 }));
 

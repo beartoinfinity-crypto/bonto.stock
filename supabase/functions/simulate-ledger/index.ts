@@ -370,6 +370,25 @@ async function loadCloudPrice(supabase: any, symbol: string): Promise<number> {
   return typeof last === 'number' && last > 0 ? last : 0;
 }
 
+/** Quotes are considered fresh for the same window as the browser's
+ *  bar-currency gate (4 days) so weekends/holidays never misfire. */
+const QUOTE_STALENESS_MS = 4 * 24 * 60 * 60 * 1000;
+
+async function loadFreshQuotes(supabase: any): Promise<Map<string, number>> {
+  const { data } = await supabase.from('stock_quotes').select('symbol, updated_at, data');
+  if (!Array.isArray(data)) return new Map();
+  const cutoff = Date.now() - QUOTE_STALENESS_MS;
+  const out = new Map<string, number>();
+  for (const row of data) {
+    if (new Date(row.updated_at).getTime() < cutoff) continue;
+    try {
+      const q = JSON.parse(row.data);
+      if (q?.price && q.price > 0) out.set(row.symbol.toUpperCase(), q.price);
+    } catch { /* skip bad row */ }
+  }
+  return out;
+}
+
 async function loadBars(supabase: any, symbol: string): Promise<StockData[]> {
   // Fetch the NEWEST bars: order descending + limit, then reverse to
   // chronological. (Ordering ascending with a limit would return the OLDEST
@@ -446,6 +465,18 @@ Deno.serve(async (req) => {
   const universe = await loadUniverse(supabase);
   if (universe.length === 0) {
     return jsonRes({ ok: false, simulated: false, reason: 'master matrix snapshot empty in cloud', date }, 503);
+  }
+
+  // 2b. Fresh quotes override matrix snapshot prices. The matrix snapshot can
+  // be days old (it's pushed by a browser run of the Master Matrix page and
+  // carries whatever prices that browser had cached), while the nightly
+  // sync-stock-data jobs refresh stock_quotes/stock_historical every evening.
+  // Verdicts/scores stay matrix-owned (they're the analytics) — only the
+  // MARKET price is re-resolved so fills print at the real market price.
+  const freshQuotes = await loadFreshQuotes(supabase);
+  for (const row of universe) {
+    const q = freshQuotes.get(row.symbol.toUpperCase());
+    if (q && q > 0) row.price = q;
   }
 
   const rows = new Map(universe.map(r => [r.symbol.toUpperCase(), r]));

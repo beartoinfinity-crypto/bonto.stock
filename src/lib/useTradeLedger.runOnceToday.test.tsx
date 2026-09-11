@@ -33,6 +33,7 @@ vi.mock('@/lib/storage', () => ({
 }));
 
 vi.mock('@/lib/supabaseDb', () => ({
+  pullFreshCloudPrices: vi.fn(async () => new Map()),
   pullLedger: pullLedgerMock,
 }));
 

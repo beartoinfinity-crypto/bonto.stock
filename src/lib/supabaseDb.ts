@@ -516,6 +516,48 @@ export async function pullStockData(): Promise<{ quotes: number; bars: number }>
   return { quotes: quoteCount, bars: barCount };
 }
 
+/**
+ * Bulk-read the cloud quote board (stock_quotes) and return fresh
+ * symbol -> price entries. Stale rows (>4 days, same window as the
+ * bar-currency gate) are skipped. Returns an empty map when cloud sync
+ * is off/unreachable — callers keep their existing prices then.
+ *
+ * Used by the trade ledger so fills print at the REAL market price even
+ * when the local Master Matrix cache carries days-old prices.
+ */
+export async function pullFreshCloudPrices(): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  let c;
+  try {
+    await fetchRemoteSyncConfig();
+    c = getClient();
+    if (!c) return out;
+  } catch {
+    return out;
+  }
+  try {
+    const PAGE = 500;
+    const cutoff = Date.now() - 4 * 24 * 60 * 60 * 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await c.from(QUOTES_TABLE).select('symbol, updated_at, data').range(from, from + PAGE - 1);
+      if (error) break;
+      if (!data || data.length === 0) break;
+      for (const row of data as { symbol: string; updated_at: string | number; data: string }[]) {
+        const at = typeof row.updated_at === 'number' ? row.updated_at : Date.parse(row.updated_at);
+        if (!Number.isFinite(at) || at < cutoff) continue;
+        try {
+          const q = JSON.parse(row.data);
+          if (q?.price && q.price > 0) out.set(row.symbol.toUpperCase(), q.price);
+        } catch { /* skip bad row */ }
+      }
+      if (data.length < PAGE) break;
+    }
+  } catch {
+    /* network/cloud hiccup — partial map is fine */
+  }
+  return out;
+}
+
 // ─── Featured politician trades sync ─────────────────────────────
 
 export interface FeaturedTradeRow {
