@@ -17,7 +17,7 @@ import { fetchStockQuote, fetchHistoricalData } from '@/lib/stockApi';
 import { runEngine, DEFAULT_PARAMS } from '@/lib/tacticalEngine';
 import { runTradingAgents } from '@/lib/tradingAgents';
 import { analyzeStock, buildStockInput, StockMasterResult, summarizeMasterResult, isIndexTrackedSymbol } from '@/lib/masterAnalysis';
-import { fetchStoredHistoryForSymbol } from '@/lib/supabaseHistory';
+import { fetchStoredHistoryForSymbol, fetchLatestSessionCloses } from '@/lib/supabaseHistory';
 import {
   LEDGER_KEY,
   LedgerStore,
@@ -229,12 +229,26 @@ export async function simulateDay(ledger: LedgerStore, date = todayStr()): Promi
   // Matrix-owned; only the market price is re-resolved so fills print at the
   // real market price.
   const freshPrices = await pullFreshCloudPrices();
-  for (const row of rows) {
-    const sym = row.symbol.toUpperCase();
-    const close = sessionCloses?.get(sym);
-    const q = freshPrices.get(sym);
-    if (close && close > 0) row.price = close;
-    else if (q && q > 0) row.price = q;
+  const online = sessionCloses != null || freshPrices.size > 0;
+  if (online) {
+    let pricedRows = 0;
+    for (const row of rows) {
+      const sym = row.symbol.toUpperCase();
+      const close = sessionCloses?.get(sym);
+      const q = freshPrices.get(sym);
+      if (close && close > 0) { row.price = close; pricedRows++; }
+      else if (q && q > 0) { row.price = q; pricedRows++; }
+      else {
+        // Online but no fresh market data for this symbol (outside the
+        // nightly sync universe, or its rows are >4 days stale). Filling at
+        // the cached Matrix price would date a stale price to this session —
+        // the exact corruption the price-alignment fixes removed. Make it
+        // untradeable. (Fully offline runs keep the cache — it's all they
+        // have.)
+        row.price = 0;
+      }
+    }
+    if (pricedRows === 0) return ledger; // nothing verifiable — no-op day
   }
 
   const symbols = new Map<string, MatrixRow>();
@@ -280,6 +294,12 @@ export async function simulateDay(ledger: LedgerStore, date = todayStr()): Promi
       const row = symbols.get(sym);
       if (!row) { dayWatch.push(watch(sym)); continue; }
       const price = prices[sym] ?? row.price;
+
+      // Price-verifiability gate: symbols with no fresh market data were
+      // zeroed above (online runs). Never emit a BUY/SELL at a made-up price
+      // — a zero-price fill would be nonsense (and Infinity shares at 0).
+      // HOLD: exits re-evaluate once fresh data returns.
+      if (!(price > 0)) { dayWatch.push(holdSignal(sym, 0, row.changePercent)); continue; }
 
       if (p === 'tactical' || p === 'agent') {
         const isHeavy = heavySymbols.includes(sym) || held.has(sym);
@@ -414,35 +434,33 @@ export function useTradeLedger() {
     }
   }, []);
 
-  // Clear the latest simulated session so the day may run again (once). Keeps
-  // all earlier history; accounts are rebuilt by replaying the remaining
-  // fills; the cloud row is overwritten (not union-merged) so the cleared
-  // state wins there too. Keyed on the ledger's own lastRunDate (the last
-  // SIMULATED session — under session-date semantics that can be wall-clock
-  // yesterday, e.g. before the server bars arrive for today's session).
-  const reset = useCallback((): void => {
-    const current = loadLedger();
-    const lastSession = current.lastRunDate ?? todayStr();
-    const trades = (current.trades ?? []).filter(t => t.date !== lastSession);
-    const decisions = (current.decisions ?? []).filter(d => d.date !== lastSession);
-    const history = (current.history ?? []).filter(h => h.date !== lastSession);
-    const accounts = replayAccounts(trades, current.initialCash ?? STARTING_CASH);
-    const dates = trades.map(t => t.date).sort();
-    const next: LedgerStore = {
-      ...current,
-      trades,
-      decisions,
-      accounts,
-      history,
-      lastRunDate: dates.length ? dates[dates.length - 1] : null,
-    };
-    storage.setJson(LEDGER_KEY, next);
-    setLedger(next);
-    void overwriteLedger(next);
+  // Server-authoritative re-run: the simulate-ledger edge fn clears the
+  // latest simulated session (cloud) and re-simulates it in one atomic call.
+  // The browser is a viewer — it never recomputes fills locally anymore
+  // (local recompute is what let browser and cloud states diverge).
+  const rerunOnServer = useCallback(async (): Promise<{ ok: boolean; date?: string; error?: string }> => {
+    if (inFlightRef.current) return { ok: false, error: 'already running' };
+    inFlightRef.current = true;
+    setRunning(true);
+    try {
+      const res = await fetch('/api/ledger/rerun', { method: 'POST' });
+      const body = await res.json().catch(() => null);
+      if (!res.ok || !body?.ok) return { ok: false, error: body?.error ?? `server returned ${res.status}` };
+      // Adopt the fresh server state locally (mirror, not merge).
+      storage.setJson(LEDGER_KEY, { ...body.ledger });
+      setLedger(body.ledger);
+      return { ok: true, date: body.date };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    } finally {
+      inFlightRef.current = false;
+      setRunning(false);
+    }
   }, []);
 
-  // Replace local ledger entirely with the Supabase copy — use after reset
-  // when the user wants to discard local state and re-sync from the cloud.
+  // Replace local ledger entirely with the Supabase copy — the viewer's
+  // refresh path. On mount the page calls this automatically so a fresh
+  // browser or a stale localStorage shows the server's ledger immediately.
   const syncFromCloud = useCallback(async (): Promise<boolean> => {
     setRunning(true);
     try {
@@ -458,8 +476,21 @@ export function useTradeLedger() {
     }
   }, []);
 
+  // Viewer pull on mount: adopt the cloud ledger so a fresh browser or stale
+  // localStorage immediately shows the server-authoritative state. Falls back
+  // silently to the local copy when the server is unreachable.
+  useEffect(() => {
+    let cancelled = false;
+    pullLedger().then(cloud => {
+      if (!cancelled && cloud) {
+        setLedger(cloud);
+      }
+    }).catch(() => { /* viewer fallback: keep local copy */ });
+    return () => { cancelled = true; };
+  }, []);
+
   return useMemo(
-    () => ({ ledger, running, ranToday, lastRunDate, load, run: runOnceToday, runOnceToday, reset, syncFromCloud }),
-    [ledger, running, ranToday, lastRunDate, load, runOnceToday, reset, syncFromCloud]
+    () => ({ ledger, running, ranToday, lastRunDate, load, run: runOnceToday, runOnceToday, rerunOnServer, syncFromCloud }),
+    [ledger, running, ranToday, lastRunDate, load, runOnceToday, rerunOnServer, syncFromCloud]
   );
 }

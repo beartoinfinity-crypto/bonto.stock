@@ -688,6 +688,78 @@ app.get('/api/edge-config', (req, res) => {
   });
 });
 
+// ─── Simulated traders ledger (server-authoritative) ────────────────────
+// The simulate-ledger edge fn is the ONLY writer. These endpoints proxy it
+// so the browser never needs (or sees) the x-cron-secret.
+
+const LEDGER_FN_BASE = 'https://aqyaarnpmvvdzasjefje.supabase.co/functions/v1';
+
+function ledgerFnHeaders() {
+  const secret = process.env.CRON_SECRET || '';
+  return { 'Content-Type': 'application/json', ...(secret ? { 'x-cron-secret': secret } : {}) };
+}
+
+async function callLedgerFn(path, body) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 90000);
+  try {
+    const res = await fetch(`${LEDGER_FN_BASE}${path}`, {
+      method: body ? 'POST' : 'GET',
+      headers: ledgerFnHeaders(),
+      body: body ? JSON.stringify(body) : undefined,
+      signal: ctrl.signal,
+    });
+    const text = await res.text();
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch { /* non-JSON error body */ }
+    return { status: res.status, body: parsed ?? text };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// GET /api/ledger/status — latest session + whether it's simulated.
+app.get('/api/ledger/status', async (req, res) => {
+  try {
+    const r = await callLedgerFn('/simulate-ledger', { });
+    if (r.status !== 200) return res.status(502).json({ error: 'simulate-ledger call failed', status: r.status, detail: r.body });
+    res.json(r.body);
+  } catch (err) {
+    res.status(502).json({ error: 'simulate-ledger unreachable', detail: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// POST /api/ledger/rerun — clear the latest simulated session (cloud) and
+// re-simulate it server-side. This is the only re-run path; the browser is a
+// viewer and never recomputes fills.
+app.post('/api/ledger/rerun', async (req, res) => {
+  try {
+    const r = await callLedgerFn('/simulate-ledger', { rerun: true });
+    if (r.status !== 200) return res.status(502).json({ error: 'simulate-ledger rerun failed', status: r.status, detail: r.body });
+    res.json(r.body);
+  } catch (err) {
+    res.status(502).json({ error: 'simulate-ledger unreachable', detail: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// GET /api/ledger — the full cloud ledger (viewer pull for /ledger mount).
+app.get('/api/ledger', async (req, res) => {
+  try {
+    const cfgRes = await fetch(`https://aqyaarnpmvvdzasjefje.supabase.co/rest/v1/stockpulse_kv?key=eq.stockpulse_trade_ledger&select=value`, {
+      headers: {
+        apikey: process.env.SUPABASE_ANON_KEY || '',
+        Authorization: `Bearer ${process.env.SUPABASE_ANON_KEY || ''}`,
+      },
+    });
+    if (!cfgRes.ok) return res.status(cfgRes.status).json({ error: 'Supabase KV read failed' });
+    const rows = await cfgRes.json();
+    if (!rows?.length) return res.json({ ledger: null });
+    res.json({ ledger: JSON.parse(rows[0].value) });
+  } catch (err) {
+    res.status(502).json({ error: 'Supabase unreachable', detail: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });

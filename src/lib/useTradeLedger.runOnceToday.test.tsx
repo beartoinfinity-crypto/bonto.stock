@@ -74,7 +74,8 @@ describe('useTradeLedger.runOnceToday — cloud-aware auto-run', () => {
     pullLedgerMock.mockResolvedValue(ledgerLastRun(todayStr()));
     const { result } = renderHook(() => useTradeLedger());
     const ran = await act(async () => result.current.runOnceToday());
-    expect(pullLedgerMock).toHaveBeenCalledTimes(1);
+    // mount viewer pull + the run's own pre-decision pull
+    expect(pullLedgerMock).toHaveBeenCalledTimes(2);
     expect(ran).toBe(false);
     // Today's cloud copy was adopted into state and no new day was simulated
     // (persistence of the adopted copy is pullLedger's own writeLocal).

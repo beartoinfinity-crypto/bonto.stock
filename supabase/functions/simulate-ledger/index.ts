@@ -475,6 +475,16 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   );
 
+  // Body flags: { "rerun": true } clears the latest simulated session from
+  // the CLOUD ledger and re-simulates it in the same request (the server-side
+  // replacement for the browser's old Reset-today button — the browser is a
+  // viewer; it never recomputes fills).
+  let rerun = false;
+  try {
+    const body = await req.json();
+    rerun = body?.rerun === true;
+  } catch { /* no/empty body — normal scheduled run */ }
+
   // Session date = the last COMPLETED trading session (the newest synced
   // bar), not the wall-clock date. This 12:00 UTC run happens before the US
   // session opens, so "today" hasn't traded yet — the latest close on file is
@@ -486,8 +496,20 @@ Deno.serve(async (req) => {
 
   // 1. Load ledger (or start fresh) — write-protect check.
   const ledger = (await loadLedger(supabase)) ?? createLedger();
-  if (ledger.lastRunDate === date) {
+  if (ledger.lastRunDate === date && !rerun) {
     return jsonRes({ ok: true, simulated: false, reason: `already simulated session ${date}`, date });
+  }
+  if (rerun && ledger.lastRunDate != null) {
+    // Strip the ledger's latest simulated session (cloud copy) so the day can
+    // be re-simulated fresh; accounts are rebuilt by replaying the remaining
+    // fills. Same clearing rule the old browser-side Reset used, minus the
+    // local copy (browsers re-sync from this result).
+    const strip = ledger.lastRunDate;
+    ledger.trades = (ledger.trades ?? []).filter(t => t.date !== strip);
+    ledger.decisions = (ledger.decisions ?? []).filter(d => d.date !== strip);
+    ledger.history = (ledger.history ?? []).filter(h => h.date !== strip);
+    const remaining = ledger.trades.map(t => t.date).sort();
+    ledger.lastRunDate = remaining.length ? remaining[remaining.length - 1] : null;
   }
 
   // 2. Universe + day prices (cloud snapshot).
@@ -503,7 +525,9 @@ Deno.serve(async (req) => {
   // Verdicts/scores stay matrix-owned (they're the analytics) — only the
   // MARKET price is re-resolved. Preference: the session's own official close
   // (inside that day's range by construction) > fresh quote-board price >
-  // stale matrix price.
+  // stale matrix price. A symbol with NO fresh market data is made untradeable
+  // (price 0) — filling at a stale cache price would date that price to this
+  // session, the exact corruption the alignment fixes removed.
   const freshQuotes = await loadFreshQuotes(supabase);
   const sessionCloses = await loadSessionCloses(supabase, date);
   for (const row of universe) {
@@ -512,6 +536,7 @@ Deno.serve(async (req) => {
     const q = freshQuotes.get(sym);
     if (close && close > 0) row.price = close;
     else if (q && q > 0) row.price = q;
+    else row.price = 0;
   }
 
   const rows = new Map(universe.map(r => [r.symbol.toUpperCase(), r]));
@@ -557,6 +582,13 @@ Deno.serve(async (req) => {
       const row = rows.get(sym);
       if (!row) { dayWatch.push(watch(sym)); continue; }
       const price = prices[sym] ?? row.price;
+
+      // Price-verifiability gate: symbols with no fresh market data were
+      // zeroed in step 2b. They can't trade (a zero-price BUY would be
+      // nonsense — and Infinity shares at price 0), and a zero-price SELL
+      // would give the position away. HOLD them: exits stay keyed to stops,
+      // which a later fresh price will re-evaluate.
+      if (!(price > 0)) { dayWatch.push(holdSignal(sym, 0, row.changePercent)); continue; }
 
       if (p === 'tactical' || p === 'agent') {
         const isHeavy = heavySymbols.includes(sym) || held.has(sym);
@@ -620,5 +652,7 @@ Deno.serve(async (req) => {
   }));
 
   console.log(`[simulate-ledger] simulated ${date}: ${JSON.stringify(summary)}`);
-  return jsonRes({ ok: true, simulated: true, date, universe: universe.length, summary });
+  // Include the full updated ledger so the browser (viewer) can adopt it
+  // without a second read (the rerun path relies on this).
+  return jsonRes({ ok: true, simulated: true, reran: rerun, date, universe: universe.length, summary, ledger: next });
 });
