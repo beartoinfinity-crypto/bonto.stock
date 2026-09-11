@@ -167,6 +167,39 @@ export async function fetchStoredHistory(minBars = 100): Promise<StoredHistoryRe
 }
 
 /**
+ * The last COMPLETED trading session on the server: its date plus every
+ * symbol's official close for that date (one page, ordered date desc, so the
+ * newest date's rows come first). Trade-ledger fills carry this session's
+ * date and close — always inside that day's high-low range by construction.
+ * Returns null when the table is unreachable.
+ */
+export async function fetchLatestSessionCloses(): Promise<{ date: string; closes: Map<string, number> } | null> {
+  const cfg = await fetchRestConfig();
+  if (!cfg) return null;
+  const headers: Record<string, string> = {
+    apikey: cfg.anonKey,
+    Authorization: `Bearer ${cfg.anonKey}`,
+    'Content-Type': 'application/json',
+  };
+  try {
+    const url = `${cfg.url}/rest/v1/${HISTORY_TABLE}?select=symbol,date,close&order=date.desc&limit=${PAGE}`;
+    const res = await fetch(url, { headers });
+    if (!res.ok) return null;
+    const rows = (await res.json()) as { symbol: string; date: string; close: number | null }[];
+    if (!rows.length) return null;
+    const date = rows[0].date;
+    const closes = new Map<string, number>();
+    for (const r of rows) {
+      if (r.date !== date) break; // older sessions start here
+      if (typeof r.close === 'number' && r.close > 0) closes.set(r.symbol.toUpperCase(), r.close);
+    }
+    return { date, closes };
+  } catch {
+    return null; // network failure — caller falls back to wall-clock semantics
+  }
+}
+
+/**
  * Fetch the full stored OHLCV bar series for a single symbol (paginated),
  * sorted ascending by date. Returns [] when the symbol has no stored data.
  */

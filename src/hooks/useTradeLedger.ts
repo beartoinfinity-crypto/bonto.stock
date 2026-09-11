@@ -196,15 +196,45 @@ export async function simulateDay(ledger: LedgerStore, date = todayStr()): Promi
   const rows = await buildUniverse();
   const next = JSON.parse(JSON.stringify(ledger)) as LedgerStore;
 
+  // Session semantics: simulate the last COMPLETED trading session (the
+  // newest synced server bar). Fills carry that session's date and its
+  // official close — inside the day's high-low range by construction. Offline
+  // fallback: the wall-clock date + fresh quote-board prices.
+  let simDate = date;
+  let sessionCloses: Map<string, number> | null = null;
+  try {
+    const session = await fetchLatestSessionCloses();
+    if (session && session.closes.size > 0) {
+      simDate = session.date;
+      sessionCloses = session.closes;
+    }
+  } catch { /* offline — wall-clock semantics below */ }
+  if (sessionCloses && simDate <= ledger.lastRunDate) {
+    // Server bars aren't newer than what the ledger already simulated —
+    // already ran this session. (Write-protect stays keyed on lastRunDate.)
+    if (simDate === ledger.lastRunDate) return ledger;
+    if (simDate < ledger.lastRunDate) {
+      // Server data lagging behind the ledger (e.g. local ran ahead with
+      // live quotes) — keep using the requested date so we never go back.
+      sessionCloses = null;
+      simDate = date;
+    }
+  }
+
   // Fresh cloud quotes override cached Matrix prices before any decision or
   // fill runs — the Matrix cache can carry days-old prices (it's whatever the
   // browser had when the Matrix page last ran), while the nightly server sync
-  // keeps stock_quotes current. Verdicts/scores stay Matrix-owned; only the
-  // market price is re-resolved so fills print at the real market price.
+  // keeps stock_quotes current. Preference: the session's official close >
+  // fresh quote-board price > stale matrix price. Verdicts/scores stay
+  // Matrix-owned; only the market price is re-resolved so fills print at the
+  // real market price.
   const freshPrices = await pullFreshCloudPrices();
   for (const row of rows) {
-    const q = freshPrices.get(row.symbol.toUpperCase());
-    if (q && q > 0) row.price = q;
+    const sym = row.symbol.toUpperCase();
+    const close = sessionCloses?.get(sym);
+    const q = freshPrices.get(sym);
+    if (close && close > 0) row.price = close;
+    else if (q && q > 0) row.price = q;
   }
 
   const symbols = new Map<string, MatrixRow>();
@@ -261,7 +291,7 @@ export async function simulateDay(ledger: LedgerStore, date = todayStr()): Promi
       if (sig.action === 'BUY') buySignals.push(sig);
     }
 
-    days.push({ date, personaId: p, buySignals, watch: dayWatch });
+    days.push({ date: simDate, personaId: p, buySignals, watch: dayWatch });
   }
 
   // Apply each persona's day, persisting trades + account state, and record the
@@ -279,10 +309,10 @@ export async function simulateDay(ledger: LedgerStore, date = todayStr()): Promi
     );
     next.decisions.push(logEntry);
   }
-  next.lastRunDate = date;
+  next.lastRunDate = simDate;
   next.prices = prices;
   // Daily performance track: one equity snapshot per simulated day.
-  next.history = appendHistory(next, date, next.accounts, prices);
+  next.history = appendHistory(next, simDate, next.accounts, prices);
   storage.setJson(LEDGER_KEY, next);
   return next;
 }
@@ -340,7 +370,12 @@ export function useTradeLedger() {
   const inFlightRef = useRef(false);
 
   const lastRunDate = ledger?.lastRunDate ?? null;
-  const ranToday = lastRunDate === todayStr();
+  // "Caught up" = the latest completed session is simulated. Under session
+  // semantics the ledger may legitimately record a date 1-3 wall-clock days
+  // back (weekends/holidays) — the same 4-day window the bar-currency gate
+  // uses. Older than that and the Run button re-arms.
+  const ranToday = lastRunDate != null
+    && (Date.now() - Date.parse(lastRunDate + 'T00:00:00Z') < 4 * 24 * 60 * 60 * 1000);
 
   const load = useCallback(() => setLedger(loadLedger()), []);
 
@@ -367,7 +402,10 @@ export function useTradeLedger() {
       if (fresh.lastRunDate === todayStr()) return false;
       const next = await simulateDay(fresh, todayStr());
       setLedger(next);
-      return true;
+      // simulateDay may resolve the newest completed session as already
+      // simulated (server bars not newer than lastRunDate) — that's a no-op,
+      // not a fresh day.
+      return next.lastRunDate !== fresh.lastRunDate;
     } catch {
       return false;
     } finally {
@@ -376,15 +414,18 @@ export function useTradeLedger() {
     }
   }, []);
 
-  // Clear today's simulation so the day may run again (once). Keeps all earlier
-  // history; accounts are rebuilt by replaying the remaining fills; the cloud
-  // row is overwritten (not union-merged) so the cleared state wins there too.
+  // Clear the latest simulated session so the day may run again (once). Keeps
+  // all earlier history; accounts are rebuilt by replaying the remaining
+  // fills; the cloud row is overwritten (not union-merged) so the cleared
+  // state wins there too. Keyed on the ledger's own lastRunDate (the last
+  // SIMULATED session — under session-date semantics that can be wall-clock
+  // yesterday, e.g. before the server bars arrive for today's session).
   const reset = useCallback((): void => {
-    const today = todayStr();
     const current = loadLedger();
-    const trades = (current.trades ?? []).filter(t => t.date !== today);
-    const decisions = (current.decisions ?? []).filter(d => d.date !== today);
-    const history = (current.history ?? []).filter(h => h.date !== today);
+    const lastSession = current.lastRunDate ?? todayStr();
+    const trades = (current.trades ?? []).filter(t => t.date !== lastSession);
+    const decisions = (current.decisions ?? []).filter(d => d.date !== lastSession);
+    const history = (current.history ?? []).filter(h => h.date !== lastSession);
     const accounts = replayAccounts(trades, current.initialCash ?? STARTING_CASH);
     const dates = trades.map(t => t.date).sort();
     const next: LedgerStore = {

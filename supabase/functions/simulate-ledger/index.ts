@@ -433,6 +433,28 @@ async function saveLedger(supabase: any, ledger: LedgerStore): Promise<void> {
   if (error) throw new Error(`ledger upsert failed: ${error.message}`);
 }
 
+/** Official close of the simulated session for every symbol that has a bar
+ *  on that date — the fill price. Always inside the day's high-low range by
+ *  construction. */
+async function loadSessionCloses(supabase: any, date: string): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  let from = 0;
+  const PAGE = 1000;
+  for (;;) {
+    const { data, error } = await supabase.from('stock_historical')
+      .select('symbol, close').eq('date', date).range(from, from + PAGE - 1);
+    if (error || !Array.isArray(data)) break;
+    for (const row of data) {
+      if (typeof row.close === 'number' && row.close > 0) {
+        out.set(row.symbol.toUpperCase(), row.close);
+      }
+    }
+    if (data.length < PAGE) break;
+    from += PAGE;
+  }
+  return out;
+}
+
 // ─── Main ──────────────────────────────────────────────────────────
 
 function jsonRes(body: unknown, status = 200) {
@@ -453,12 +475,19 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   );
 
-  const date = new Date().toISOString().slice(0, 10);
+  // Session date = the last COMPLETED trading session (the newest synced
+  // bar), not the wall-clock date. This 12:00 UTC run happens before the US
+  // session opens, so "today" hasn't traded yet — the latest close on file is
+  // yesterday's session. Fills carry the session's own date and its official
+  // close, which is inside that day's high-low range by construction.
+  const { data: latestBar } = await supabase.from('stock_historical')
+    .select('date').order('date', { ascending: false }).limit(1);
+  const date = String(latestBar?.[0]?.date ?? new Date().toISOString().slice(0, 10)).slice(0, 10);
 
   // 1. Load ledger (or start fresh) — write-protect check.
   const ledger = (await loadLedger(supabase)) ?? createLedger();
   if (ledger.lastRunDate === date) {
-    return jsonRes({ ok: true, simulated: false, reason: `already simulated ${date}`, date });
+    return jsonRes({ ok: true, simulated: false, reason: `already simulated session ${date}`, date });
   }
 
   // 2. Universe + day prices (cloud snapshot).
@@ -472,11 +501,17 @@ Deno.serve(async (req) => {
   // carries whatever prices that browser had cached), while the nightly
   // sync-stock-data jobs refresh stock_quotes/stock_historical every evening.
   // Verdicts/scores stay matrix-owned (they're the analytics) — only the
-  // MARKET price is re-resolved so fills print at the real market price.
+  // MARKET price is re-resolved. Preference: the session's own official close
+  // (inside that day's range by construction) > fresh quote-board price >
+  // stale matrix price.
   const freshQuotes = await loadFreshQuotes(supabase);
+  const sessionCloses = await loadSessionCloses(supabase, date);
   for (const row of universe) {
-    const q = freshQuotes.get(row.symbol.toUpperCase());
-    if (q && q > 0) row.price = q;
+    const sym = row.symbol.toUpperCase();
+    const close = sessionCloses.get(sym);
+    const q = freshQuotes.get(sym);
+    if (close && close > 0) row.price = close;
+    else if (q && q > 0) row.price = q;
   }
 
   const rows = new Map(universe.map(r => [r.symbol.toUpperCase(), r]));
