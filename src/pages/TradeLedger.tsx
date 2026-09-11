@@ -171,7 +171,7 @@ function Pager({ page, total, pageSize, onPage }: {
 }
 
 export default function TradeLedger() {
-  const { ledger, reset, syncFromCloud, running } = useTradeLedger();
+  const { ledger, syncFromCloud, rerunOnServer, running } = useTradeLedger();
   const [active, setActive] = useState<PersonaId>('value');
 
   // Live re-marking: fetch fresh quotes for every open-position symbol so the
@@ -212,9 +212,10 @@ export default function TradeLedger() {
   const markPrice = (snapshotPrices: Record<string, number>, symbol: string, avgCost: number): number =>
     livePrices?.[symbol.toUpperCase()] ?? snapshotPrices[symbol.toUpperCase()] ?? avgCost;
 
-  const handleReset = () => {
-    reset();
-    toast.success("Today's record cleared — the day can run again");
+  const handleRerun = async () => {
+    const r = await rerunOnServer();
+    if (r.ok) toast.success(`Session ${r.date} re-simulated on the server`);
+    else toast.error(`Re-run failed — ${r.error ?? 'server unreachable'}`);
   };
 
   const handleSyncFromCloud = async () => {
@@ -290,8 +291,9 @@ export default function TradeLedger() {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleReset}>
-              <RotateCcw className="h-4 w-4 mr-2" /> Reset today
+            <Button variant="outline" size="sm" onClick={handleRerun} disabled={running}>
+              <RotateCcw className="h-4 w-4 mr-2" />
+              {running ? 'Re-running…' : 'Re-run session'}
             </Button>
             <Button variant="outline" size="sm" onClick={handleSyncFromCloud} disabled={running}>
               {running
