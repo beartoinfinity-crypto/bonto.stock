@@ -180,24 +180,10 @@ async function fetchRow(c: SupabaseClient, key: string): Promise<KVRow | null> {
   return data && data.length ? ({ key: data[0].key, value: data[0].value as string } as KVRow) : null;
 }
 
-/**
- * Merge two ledger JSON values with the lossless `mergeLedgers` union so
- * concurrent machines never overwrite each other's simulated days. Falls back
- * to the local value when either side isn't a (parseable) ledger.
- */
-function mergeLedgerValue(localValue: string, remoteValue: string | null): string {
-  const local = safeParse<LedgerStore>(localValue);
-  if (!local || !Array.isArray(local.trades)) return localValue;
-  const remote = safeParse<LedgerStore>(remoteValue ?? '');
-  if (!remote || !Array.isArray(remote.trades)) return localValue;
-  try {
-    return JSON.stringify(mergeLedgers(local, remote));
-  } catch {
-    return localValue;
-  }
-}
-
 // ─── Push / Pull ───────────────────────────────────────────────────
+// NOTE: the trade ledger is NOT pushed by browsers — it's server-authoritative
+// (only the simulate-ledger edge fn writes it). SYNC_KEYS therefore does not
+// include the ledger, and no browser path may upsert LEDGER_KEY.
 
 /** Push all tracked keys (or a specific subset) to Supabase. Returns count. */
 export async function pushKeys(keys?: string[]): Promise<number> {
@@ -209,31 +195,8 @@ export async function pushKeys(keys?: string[]): Promise<number> {
   );
   if (!targets.length) return 0;
   const rows = targets.map(rowFor);
-  await mergeLedgerRowInto(c, rows);
   await upsertRows(c, rows);
   return targets.length;
-}
-
-/**
- * Replace the cloud ledger row with `next` verbatim (no union merge). Used by
- * "Reset today" so the cleared state actually lands in the cloud — otherwise
- * the next auto-push would re-merge the removed fills back in. No-op (false)
- * when cloud sync is off.
- */
-export async function overwriteLedger(next: LedgerStore): Promise<boolean> {
-  await fetchRemoteSyncConfig();
-  const c = getClient();
-  if (!c) return false;
-  try {
-    await c.from(TABLE).upsert(
-      { key: LEDGER_KEY, value: JSON.stringify(next), updated_at: new Date().toISOString() },
-      { onConflict: 'key' }
-    );
-    return true;
-  } catch (e) {
-    console.warn('[SupabaseSync] ledger overwrite failed:', e);
-    return false;
-  }
 }
 
 /** Pull all remote rows into localStorage + SQLite. Returns count applied. */
@@ -252,13 +215,15 @@ export async function pullAll(): Promise<number> {
       if (!data || data.length === 0) break;
       for (const row of data as { key: string; value: string | null }[]) {
         if (!row.key || row.value == null) continue;
-        if (!(SYNC_KEYS as string[]).includes(row.key)) continue;
         if (row.key === LEDGER_KEY) {
-          // True-merge the ledger: union this machine's days with the cloud's
-          // (no last-writer-wins snapshots that drop another machine's history).
-          writeLocal(LEDGER_KEY, mergeLedgerValue(localStorage.getItem(LEDGER_KEY) ?? '', row.value));
-        } else {
+          // The ledger is SERVER-AUTHORITATIVE — adopt the cloud copy
+          // verbatim (the edge fn is its only writer). Union-merging here
+          // would resurrect repaired-out fills from stale local copies.
+          writeLocal(LEDGER_KEY, row.value);
+        } else if ((SYNC_KEYS as string[]).includes(row.key)) {
           writeLocal(row.key, row.value);
+        } else {
+          continue; // unknown keys are not mirrored
         }
         applied++;
       }
@@ -277,11 +242,10 @@ const pending = new Set<string>();
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
- * Focused pre-decision pull: merge ONLY the cloud ledger into the local mirror
- * and return the fresh copy. Lets /ledger decide "has today's day run?" against
- * the *cloud* state right before auto-running, instead of its own stale local
- * snapshot. Returns null when cloud sync is off or unreachable (caller then
- * falls back to the local copy).
+ * Focused pre-decision pull: fetch the CLOUD ledger and return it verbatim.
+ * The ledger is SERVER-AUTHORITATIVE — the edge fn is its only writer, so the
+ * cloud copy always wins over any local mirror. Returns null when cloud sync
+ * is off or unreachable (caller falls back to the local copy).
  */
 export async function pullLedger(): Promise<LedgerStore | null> {
   await fetchRemoteSyncConfig();
@@ -293,15 +257,12 @@ export async function pullLedger(): Promise<LedgerStore | null> {
     const remoteValue = remote?.value ?? null;
     // Cloud copy missing — return whatever local has (possibly null).
     if (!remoteValue) return safeParse<LedgerStore>(local);
-    // Local missing or corrupt — adopt the cloud copy wholesale so a fresh
-    // browser instantly gets the cloud state (e.g. new domain/origin).
-    if (!local || !safeParse<LedgerStore>(local)) {
-      writeLocal(LEDGER_KEY, remoteValue);
-      return safeParse<LedgerStore>(remoteValue);
-    }
-    const merged = mergeLedgerValue(local, remoteValue);
-    if (merged !== local) writeLocal(LEDGER_KEY, merged);
-    return safeParse<LedgerStore>(merged);
+    // Adopt the server copy verbatim (no union merge — a stale local copy
+    // must never resurrect repaired-out fills or overwrite server state).
+    const cloud = safeParse<LedgerStore>(remoteValue);
+    if (!cloud) return safeParse<LedgerStore>(local);
+    writeLocal(LEDGER_KEY, remoteValue);
+    return cloud;
   } catch (e) {
     console.warn('[SupabaseSync] pre-run ledger pull failed:', e);
     return null;
@@ -325,29 +286,15 @@ async function flushPending(): Promise<void> {
   await fetchRemoteSyncConfig();
   const c = getClient();
   if (!c) return;
-  const rows = keys.filter(k => localStorage.getItem(k) !== null).map(rowFor);
+  // Defensive: the ledger must never ride the auto-push (server-authoritative).
+  const rows = keys.filter(k => k !== LEDGER_KEY && localStorage.getItem(k) !== null).map(rowFor);
   if (!rows.length) return;
   try {
-    await mergeLedgerRowInto(c, rows);
     await upsertRows(c, rows);
     console.log('[SupabaseSync] auto-pushed', rows.length, 'key(s):', rows.map(r => r.key).join(', '));
   } catch (e) {
     console.warn('[SupabaseSync] auto-push failed:', e);
   }
-}
-
-/**
- * If the outgoing rows contain the trade ledger, merge it against the current
- * cloud copy first (union, no history loss) and absorb the merged value back
- * into the local mirror so this machine sees the other machines' days too.
- */
-async function mergeLedgerRowInto(c: SupabaseClient, rows: KVRow[]): Promise<void> {
-  const ledgerRow = rows.find(r => r.key === LEDGER_KEY);
-  if (!ledgerRow) return;
-  const remote = await fetchRow(c, LEDGER_KEY);
-  const merged = mergeLedgerValue(ledgerRow.value, remote?.value ?? null);
-  ledgerRow.value = merged;
-  if (remote) writeLocal(LEDGER_KEY, merged);
 }
 
 // ─── SQL setup snippet shown in Settings ───────────────────────────

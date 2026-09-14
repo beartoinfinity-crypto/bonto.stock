@@ -71,17 +71,18 @@ describe('pullLedger edge cases', () => {
     expect(result!.trades[0].symbol).toBe('AAPL');
   });
 
-  it('merges cloud and local when both are valid', async () => {
+  it('adopts the cloud copy verbatim even when local has extra trades (server-authoritative)', async () => {
+    // A stale local copy holding a fill the server repaired OUT must not
+    // survive the pull — the cloud copy wins, no union merge.
     const local = {
       ...LEDGER,
-      trades: [...LEDGER.trades, { id: 't2', date: '2026-09-10', personaId: 'contrarian', symbol: 'TSLA', action: 'BUY', qty: 5, price: 180, value: 900, realizedPnl: 0, note: 'local' }],
+      trades: [...LEDGER.trades, { id: 't-stale', date: '2026-09-10', personaId: 'value', symbol: 'MDB', action: 'BUY', qty: 20, price: 453.37, value: 9067.4, realizedPnl: 0, note: 'stale resurrected fill' }],
     };
     localStorage.setItem('stockpulse_trade_ledger', JSON.stringify(local));
     const result = await pullLedger();
     expect(result).not.toBeNull();
-    const symbols = result!.trades.map(t => t.symbol).sort();
-    expect(symbols).toContain('AAPL');
-    expect(symbols).toContain('TSLA');
+    expect(result!.trades.map(t => t.symbol)).not.toContain('MDB');
+    expect(localStorage.getItem('stockpulse_trade_ledger')).not.toContain('MDB');
   });
 
   it('returns null when both local and cloud are absent', async () => {

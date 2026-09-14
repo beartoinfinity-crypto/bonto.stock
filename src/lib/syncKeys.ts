@@ -29,5 +29,9 @@ export const DOCUMENT_KEYS = [
   'stockpulse_alert_config',
   'stockpulse_market_snapshot',
   'stockpulse_master_matrix',
-  'stockpulse_trade_ledger',
+  // NOTE: 'stockpulse_trade_ledger' is deliberately NOT here. The ledger is
+  // SERVER-AUTHORITATIVE: only the simulate-ledger edge fn writes it (daily
+  // cron / rerun). Browsers pull a read-only mirror and never push — a
+  // union-merge from a stale browser copy would resurrect repaired-out
+  // fills (that exact failure happened: a dropped MDB fill came back).
 ] as const;

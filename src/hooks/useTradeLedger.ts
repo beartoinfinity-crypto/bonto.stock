@@ -38,7 +38,7 @@ import {
   tacticalDecision,
   agentDecision,
 } from '@/lib/tradeSimulator';
-import { overwriteLedger, pullLedger, pullFreshCloudPrices } from '@/lib/supabaseDb';
+import { pullLedger, pullFreshCloudPrices } from '@/lib/supabaseDb';
 import { replayAccounts } from '@/lib/ledgerMerge';
 
 /** Symbols the heavy engines (Tactical/Agent) are allowed to evaluate per day. */
