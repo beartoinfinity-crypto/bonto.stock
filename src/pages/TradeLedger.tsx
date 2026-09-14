@@ -26,7 +26,7 @@ import {
   sortTrades,
 } from '@/lib/ledgerView';
 import {
-  RotateCcw, RefreshCw, TrendingUp, TrendingDown, Minus, Users, History, Briefcase, ListChecks, CloudDownload, LineChart, Radio,
+  RotateCcw, RefreshCw, TrendingUp, TrendingDown, Minus, Users, History, Briefcase, ListChecks, CloudDownload, LineChart, Radio, CheckCircle2, Clock,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -175,6 +175,26 @@ export default function TradeLedger() {
   const { ledger, syncFromCloud, rerunOnServer, running } = useTradeLedger();
   const [active, setActive] = useState<PersonaId>('value');
 
+  // Run-status probe: distinguishes the three viewer states at a glance —
+  //   caught up (no fills this session) / caught up (N fills) / behind
+  //   (latest synced session not yet simulated — the cron hasn't run or
+  //   failed). Read-only; never triggers a run.
+  const [runStatus, setRunStatus] = useState<{
+    latestSession: string | null;
+    lastRunDate: string | null;
+    caughtUp: boolean;
+    latestSessionFillCount: number;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/ledger/status')
+      .then(r => (r.ok ? r.json() : null))
+      .then(j => { if (!cancelled && j?.ok) setRunStatus(j); })
+      .catch(() => { /* offline — badge simply doesn't render */ });
+    return () => { cancelled = true; };
+  }, [ledger?.lastRunDate, running]);
+
   // Live re-marking: fetch fresh quotes for every open-position symbol so the
   // leaderboard/positions show current prices, not the last simulated day's
   // snapshot. Falls back to the snapshot when live fetch fails (offline/asleep).
@@ -301,7 +321,24 @@ export default function TradeLedger() {
       <main className="container mx-auto px-4 py-6 space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">Simulated Traders</h1>
+            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-3">
+              Simulated Traders
+              {runStatus && (
+                runStatus.caughtUp ? (
+                  <Badge variant="outline" className="text-emerald-500 border-emerald-500/40 text-xs font-normal">
+                    <CheckCircle2 className="h-3 w-3 mr-1" />
+                    {runStatus.latestSessionFillCount > 0
+                      ? `session ${runStatus.latestSession}: ${runStatus.latestSessionFillCount} fills`
+                      : `session ${runStatus.latestSession}: no fills (caught up)`}
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-amber-500 border-amber-500/40 text-xs font-normal">
+                    <Clock className="h-3 w-3 mr-1" />
+                    session {runStatus.latestSession} not simulated yet — waiting for the next run
+                  </Badge>
+                )
+              )}
+            </h1>
             <p className="text-muted-foreground text-sm">
               {PERSONAS.length} personas trade the shared S&amp;P 500 / NASDAQ-100 universe daily; every transaction is recorded.
               <span> Daily simulation runs on a schedule — configure it in Settings.</span>

@@ -724,11 +724,15 @@ async function callLedgerFn(path, body) {
   }
 }
 
-// GET /api/ledger/status — latest session + whether it's simulated.
+// GET /api/ledger/status — read-only probe: latest synced session, whether
+// it's simulated, and its fill count. Distinguishes "caught up (no fills)"
+// from "the scheduled task hasn't run" without triggering anything.
+// (callLedgerFn GETs the fn — the fn answers status on GET without running.)
 app.get('/api/ledger/status', async (req, res) => {
   try {
-    const r = await callLedgerFn('/simulate-ledger', { });
-    if (r.status !== 200) return res.status(502).json({ error: 'simulate-ledger call failed', status: r.status, detail: r.body });
+    const r = await callLedgerFn('/simulate-ledger', null); // null body -> GET
+    if (r.status !== 200) return res.status(502).json({ error: 'simulate-ledger status probe failed', status: r.status, detail: r.body });
+    res.set('Cache-Control', 'no-store');
     res.json(r.body);
   } catch (err) {
     res.status(502).json({ error: 'simulate-ledger unreachable', detail: err instanceof Error ? err.message : String(err) });

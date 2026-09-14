@@ -475,6 +475,30 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   );
 
+  // Read-only status probe (GET, or {"status":true}): reports which session is
+  // newest, whether it's simulated, and when — WITHOUT running anything.
+  // Lets the /ledger page distinguish "caught up (no fills)" from "task
+  // hasn't run" at a glance.
+  const wantsStatus = req.method === 'GET' || (await req.clone().json().catch(() => ({})))?.status === true;
+  if (wantsStatus) {
+    const { data: latestBar } = await supabase.from('stock_historical')
+      .select('date').order('date', { ascending: false }).limit(1);
+    const latestSession = String(latestBar?.[0]?.date ?? '').slice(0, 10);
+    const ledger = await loadLedger(supabase);
+    const simulated = ledger?.lastRunDate != null;
+    return jsonRes({
+      ok: true,
+      latestSession,
+      lastRunDate: ledger?.lastRunDate ?? null,
+      caughtUp: simulated && ledger!.lastRunDate! >= latestSession,
+      // Fills recorded for the ledger's last simulated session (the count
+      // shown when caught up — 0 means "ran, chose not to trade").
+      latestSessionFillCount: simulated
+        ? (ledger!.trades ?? []).filter(t => t.date === ledger!.lastRunDate).length
+        : 0,
+    });
+  }
+
   // Body flags: { "rerun": true } clears the latest simulated session from
   // the CLOUD ledger and re-simulates it in the same request (the server-side
   // replacement for the browser's old Reset-today button — the browser is a

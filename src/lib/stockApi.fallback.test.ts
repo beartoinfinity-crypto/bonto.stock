@@ -42,10 +42,13 @@ vi.mock('@/lib/supabaseHistory', () => cloud);
 
 import { fetchHistoricalData } from './stockApi';
 
-// popularStocks[0] drives the synthetic fallback — find a known symbol
+// popularStocks[0] drives the synthetic fallback — find a known symbol.
+// Fresh bars end yesterday (relative to "now" so the fixture never ages out
+// of the 4-day freshness window); stale bars are fixed months back.
+const d = (offsetDays: number) => new Date(Date.now() - offsetDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 const barsFresh = [
-  { date: '2026-09-08', open: 10, high: 11, low: 9, close: 10.5, volume: 100 },
-  { date: '2026-09-09', open: 10.5, high: 11.5, low: 10, close: 11, volume: 100 },
+  { date: d(2), open: 10, high: 11, low: 9, close: 10.5, volume: 100 },
+  { date: d(1), open: 10.5, high: 11.5, low: 10, close: 11, volume: 100 },
 ];
 const barsStale = [
   { date: '2026-08-27', open: 10, high: 11, low: 9, close: 10.5, volume: 100 },
