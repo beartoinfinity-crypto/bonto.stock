@@ -208,41 +208,56 @@ export default function TradeLedger() {
 
   const [livePrices, setLivePrices] = useState<Record<string, number> | null>(null);
   const [liveLoading, setLiveLoading] = useState(false);
-  const liveFetchedRef = useRef<string>('');
 
   useEffect(() => {
     const key = openSymbols.join(',');
-    if (!key || liveFetchedRef.current === key) return;
-    liveFetchedRef.current = key;
+    if (!key) return;
     let cancelled = false;
-    setLiveLoading(true);
-    (async () => {
-      const out: Record<string, number> = {};
-      await Promise.all(openSymbols.map(async sym => {
-        try {
-          const q = await fetchStockQuote(sym);
-          // Only REAL provider data counts as a live mark — the fallback mock
-          // (curated popularStocks prices, isRealData:false) is a snapshot
-          // from months ago and must never re-mark a position.
-          if (q?.data?.price && q.data.price > 0 && q.isRealData) out[sym] = q.data.price;
-        } catch { /* keep snapshot */ }
-      }));
-      // Cloud quote board (nightly-synced official closes) fills any symbol
-      // the live providers couldn't serve — still real market data, unlike
-      // the curated fallback.
-      const missing = openSymbols.filter(s => !out[s]);
-      if (missing.length) {
-        try {
-          const board = await pullFreshCloudPrices();
-          for (const s of missing) {
-            const p = board.get(s);
-            if (p && p > 0) out[s] = p;
-          }
-        } catch { /* keep snapshot */ }
+    const marks = async () => {
+      setLiveLoading(true);
+      try {
+        const out: Record<string, number> = {};
+        await Promise.all(openSymbols.map(async sym => {
+          try {
+            const q = await fetchStockQuote(sym);
+            // Only REAL provider data counts as a live mark — the fallback mock
+            // (curated popularStocks prices, isRealData:false) is a snapshot
+            // from months ago and must never re-mark a position.
+            if (q?.data?.price && q.data.price > 0 && q.isRealData) out[sym] = q.data.price;
+          } catch { /* keep snapshot */ }
+        }));
+        // Cloud quote board (nightly-synced official closes) fills any symbol
+        // the live providers couldn't serve — still real market data, unlike
+        // the curated fallback.
+        const missing = openSymbols.filter(s => !out[s]);
+        if (missing.length) {
+          try {
+            const board = await pullFreshCloudPrices();
+            for (const s of missing) {
+              const p = board.get(s);
+              if (p && p > 0) out[s] = p;
+            }
+          } catch { /* keep snapshot */ }
+        }
+        if (!cancelled && Object.keys(out).length) setLivePrices(prev => ({ ...(prev ?? {}), ...out }));
+      } finally {
+        if (!cancelled) setLiveLoading(false);
       }
-      if (!cancelled && Object.keys(out).length) setLivePrices(prev => ({ ...(prev ?? {}), ...out }));
-    })().finally(() => { if (!cancelled) setLiveLoading(false); });
-    return () => { cancelled = true; };
+    };
+    marks();
+    // Keep re-marking while the tab is visible: a one-shot fetch that fails
+    // (cold start / provider hiccup) must not freeze positions at the last
+    // snapshot for the whole session.
+    const interval = setInterval(() => {
+      if (!document.hidden && !cancelled) marks();
+    }, 60000);
+    const onVisible = () => { if (!document.hidden && !cancelled) marks(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [openSymbols]);
 
   /** Mark price: live when available, else the snapshot price, else cost. */

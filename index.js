@@ -642,7 +642,17 @@ app.get('/api/diag/opencabinet', async (req, res) => {
   }
 });
 
-app.use(express.static(path.join(__dirname, 'dist')));
+// Hashed build outputs (dist/assets/*) are content-addressed — cache them
+// a year. Everything else (favicon, wasm, robots) revalidates.
+app.use(express.static(path.join(__dirname, 'dist'), {
+  setHeaders: (res, filePath) => {
+    if (/[/\\]assets[/\\]/.test(filePath)) {
+      res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    } else {
+      res.set('Cache-Control', 'no-cache');
+    }
+  },
+}));
 
 // --- Server-managed Supabase cloud-sync config ----------------------
 // Set SUPABASE_URL + SUPABASE_ANON_KEY on Render to configure Cloud Sync ONCE
@@ -771,6 +781,10 @@ app.get('/api/ledger', async (req, res) => {
 });
 
 app.get('*', (req, res) => {
+  // The SPA shell references hashed assets, so it must never be cached by
+  // the browser — a stale shell keeps running an old bundle (with old
+  // behavior) even after a deploy. Hashed /assets/* stay long-cached.
+  res.set('Cache-Control', 'no-store');
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
