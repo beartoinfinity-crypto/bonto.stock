@@ -8,7 +8,7 @@ How to extend this codebase. For the file-by-file architecture, data flow, and d
 src/
   lib/                 domain logic — pure, unit-tested (no React): stockApi, stockData,
                        masterAnalysis, tradingAgents, peadAnalysis, tacticalEngine,
-                       supabaseDb, supabaseHistory, edgeFn, storage, ledgerMerge, ...
+                       supabaseDb, supabaseHistory, edgeFn, storage, ledgerView, ...
   hooks/               state management (React Query): useStockData, useMasterMatrix,
                        useTradeLedger, useTacticalHistory, useScreenerData ...
   components/          presentational components
@@ -73,16 +73,17 @@ Editable engine: `src/lib/masterAnalysis.ts` (`analyzeStock` runs all 12). Add a
 
 ## Editing the ledger / simulator
 
-- Personas + rules: `src/lib/tradeSimulator.ts` + `useTradeLedger.ts` — each persona binds to a distinct engine (12 Masters, inverted Masters, Matrix rank, `runEngine`, `runTradingAgents`).
+- Personas + rules: `src/lib/tradeSimulator.ts` + `useTradeLedger.ts` — each persona binds to a distinct engine (12 Masters, inverted Masters, Matrix rank, `runEngine`, `runTradingAgents`). 7 personas: Eleanor (contrarian), 5 master-strategy personas, Rosalind (`inverted` — trades opposite Eleanor), Jerry (tactical), Ada (agent).
 - Pure math lives in `tradeSimulator.ts` and is unit-tested; keep behavioral thresholds in the hook.
-- **Parallelism rules**: a day simulates ONCE (write-protected + server-side `simulate-ledger` fn). Multi-machine merge: `src/lib/ledgerMerge.ts` (`mergeLedgers`, `healSameDayConflicts`) — pure + unit-tested; wired into both push paths and boot hydration in `supabaseDb.ts`.
+- **Server-authoritative**: `simulate-ledger` (Supabase edge fn) is the ONLY writer of `stockpulse_trade_ledger`. Browsers are cloud viewers — they pull the ledger verbatim on page load and never merge/push it. The `/ledger` page exposes a **Re-run session** button that calls `POST /api/ledger/rerun` (the fn re-simulates atomically) and a status badge via `GET /api/ledger/status`.
+- The fn simulates the **last completed session** at its **official session close** — every fill carries its own session date and a price inside that day's high–low range. Symbols with no fresh market data are untradeable (zero-price gate). The browser's `simulateDay` mirrors these session-date semantics for offline/local testing only.
 
 ## Testing & checks (run before committing)
 
 ```powershell
 $env:Path = "C:\Program Files\nodejs;" + $env:Path
 .\node_modules\.bin\tsc.cmd --noEmit     # type check — 0 errors
-npm.cmd run test                         # 126 tests across 14 files — all pass
+npm.cmd run test                         # 137 tests across 15 files — all pass
 npm.cmd run build                        # rebuild dist/ (committed)
 ```
 

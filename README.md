@@ -1,6 +1,6 @@
 # Dan's StockPulse
 
-Stock analysis dashboard with cloud-first storage. Runs in the browser; deploys to Render.com. (Testing)
+Stock analysis dashboard with cloud-first storage. Runs in the browser; deploys to Vercel + Render.com (Express server). (Testing)
 
 > **Education only. Not financial advice.**
 
@@ -26,7 +26,7 @@ npm start          # serve dist/ via Express
 | Cloud DB | Supabase (PostgreSQL) — primary source of truth |
 | Cron | **Supabase Edge Functions + pg_cron** (server-side, 24/7) for data production; browser scheduler keeps only local maintenance |
 | Server | Express (`index.js`) — serves dist/ + server-side proxy |
-| Deploy | Render.com (auto-deploy on push to main) |
+| Deploy | Vercel + Render.com (auto-deploy on push to main; both serve the same Express app) |
 
 ## Pages
 
@@ -40,7 +40,7 @@ npm start          # serve dist/ via Express
 | `/masters-matrix` | Master Matrix | Rank S&P 500 / NASDAQ-100 / custom stocks into a top-50 matrix by 12-master verdicts |
 | `/masters-matrix/:symbol` | Stock History | Per-stock daily 12-master history, with past-year backfill |
 | `/hedge-fund` | Hedge Fund | PEAD post-earnings-drift alpha model |
-| `/ledger` | Simulated Traders | Six personas trade the shared S&P 500 / NASDAQ-100 universe daily; accumulated Decisions + All Transactions with filter bar, live stats, pagination |
+| `/ledger` | Simulated Traders | Seven personas trade the shared S&P 500 / NASDAQ-100 universe daily (server-simulated at each session's official close); cloud viewer with run-status badge + Re-run session; accumulated Decisions + All Transactions with filter bar, live stats, pagination |
 | `/api-settings` | API Settings | Third-party provider API-key entry |
 | `/settings` | Settings | Auth, watchlist, DB export/import, cloud sync |
 | `/admin` | Admin | Browser cron job management (local maintenance only, password-protected) |

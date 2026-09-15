@@ -3,13 +3,16 @@
 ## Repository
 
 - **GitHub**: https://github.com/beartoinfinity-crypto/bonto.stock
-- **Live**: https://dandanball-stock.onrender.com/
+- **Live (Vercel)**: https://dandanball-stock.vercel.app/
+- **Live (Render)**: https://dandanball-stock.onrender.com/
+
+Either host works — both serve the same Express app (`index.js`) and committed `dist/`. There is an older, dead Vercel deployment at `bonto-stock.vercel.app` (404s — ignore it).
 
 ## How Deploy Works
 
-Push to `main` → Render auto-builds → Express serves `dist/` on port 10000.
+Push to `main` → auto-deploys on Vercel and Render → Express serves `dist/` on port 10000 (Render) / as a serverless fn (Vercel).
 
-The `dist/` folder is committed to git (Render runs `npm install && npm start`, not `npm run build`).
+The `dist/` folder is committed to git (both hosts run `npm install && npm start`, not `npm run build`).
 
 ## Deploy Steps
 
@@ -17,7 +20,7 @@ The `dist/` folder is committed to git (Render runs `npm install && npm start`, 
 npm run build              # rebuild dist/
 git add -A
 git commit -m "feat: ..."
-git push                   # triggers Render auto-deploy
+git push                   # triggers Vercel + Render auto-deploys
 ```
 
 ## Local Testing (Production Build)
@@ -31,13 +34,18 @@ npm start                  # Express on http://localhost:10000
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PORT` | `10000` | Server port (Render sets this automatically) |
+| `PORT` | `10000` | Server port (Render sets this automatically; ignored on Vercel) |
 | `SUPABASE_URL` | *(none)* | **Server-managed Cloud Sync** — when set, every browser/machine picks this up automatically (no per-browser input); served via `GET /api/sync-config` |
 | `SUPABASE_ANON_KEY` | *(none)* | Anon key for the Supabase project above |
 | `SUPABASE_SYNC_ENABLED` | `true` | Set to `false` to disable server-managed sync even when the URL/key are set |
 | `FINNHUB_API_KEY` | *(none)* | Optional: server-side Finnhub key for the quote/sentiment proxies (rotates with any browser-supplied keys) |
 | `FINNHUB_API_KEY_2` | *(none)* | Optional: second Finnhub key — proxy rotates between them on rate-limits |
 | `ADANOS_API_KEY` | *(none)* | Optional: Adanos sentiment API key, served to every browser via `GET /api/api-keys` (enables the Adanos source in Social Sentiment Check). Falls back to per-browser Settings → API Keys → Adanos when unset |
+| `CRON_SECRET` | *(none)* | **Required for the `/api/ledger/*` proxy** — must match the Supabase `CRON_SECRET` secret (`0mv...f1gap`), and must be set as a hosting env var on BOTH Vercel and Render. Without it `/api/ledger/status` and `/api/ledger/rerun` return 502 (the fn 401s since the proxy can't sign its calls) |
+
+## Cache headers on dist
+
+`index.js` sets `Cache-Control: no-store` on the SPA shell (`index.html`) so browsers always fetch the current bundle, and `immutable` (1 year) on `/assets/*` (content-hashed). After a deploy, a hard refresh is generally unnecessary once the shell cache expires.
 
 ## Supabase Setup
 
@@ -83,7 +91,7 @@ All data-production jobs run **server-side on Supabase**, 24/7, no browser neede
 
 ET entries alternate because US close/move between EST (UTC-5) and EDT (UTC-4); HKT has no DST. Batch runtime is ~1-2 min each (first sync of a new symbol backfills 10y of bars and can take ~2 min); **all stock batches finish by ~8:02 AM HKT** — well before a 9 AM HK deadline. Batch 3 runs Tue–Sat because its weekday close lands on the next calendar day.
 
-`simulate-ledger` mirrors the browser's `tradeSimulator` semantics (persona thresholds, 10%-equity buys, -8%/+30% stops) with a Deno port of the tactical engine. Universe input: the cloud `stockpulse_master_matrix` snapshot (browsers still produce it when the Master Matrix page runs — if nobody visits that page, the sim trades the latest snapshot with fresh prices).
+`simulate-ledger` mirrors the browser's `tradeSimulator` semantics (persona thresholds, 10%-equity buys, -8%/+30% stops) with a Deno port of the tactical engine. Universe input: the cloud `stockpulse_master_matrix` snapshot (browsers still produce it when the Master Matrix page runs — if nobody visits that page, the sim trades the latest snapshot with fresh prices). It simulates the **last completed session** at its **official close** (every fill carries its own session date + a price within that day's high–low), not "today" — so a Friday's session appears on Monday's run. It is the **only writer** of the ledger row; browsers pull it and never push/merge (see CODEBASE.md). `GET`/`{"status":true}` answers a read-only status probe; `{"rerun":true}` clears the latest session and re-simulates atomically.
 
 ### Deploying Edge Functions
 
@@ -145,9 +153,12 @@ The four data jobs above were migrated off the browser — do **not** re-add the
 
 ### Ledger Notes
 
-- The server sim is **write-protected**: one run per date. `{"ok":true,"simulated":false,"reason":"already simulated <date>"}` is the success response for a re-fire.
-- **Reset today** on the `/ledger` page overwrites the cloud ledger and rolls `lastRunDate` back — after which the next scheduled (or manually-fired) sim regenerates the day.
-- Browsers see server-written days via boot hydration (`pullAll`) or the page's **Sync from Supabase** button.
+- The server sim is **write-protected**: one run per session. `{"ok":true,"simulated":false,"reason":"already simulated <date>"}` is the success response for a re-fire.
+- The `/ledger` page is a **cloud viewer**: it auto-pulls the server-written ledger on load (no manual "Run today" — running is the server's job) and exposes:
+  - **Re-run session** → `POST /api/ledger/rerun` — asks the fn to clear the latest simulated session and re-simulate it atomically.
+  - **Status badge** → `GET /api/ledger/status` — green "session N: N fills / caught up" vs amber "session not simulated yet — waiting for the next run". Both need `CRON_SECRET` on the hosting env vars.
+- Legacy local **Reset today** was removed from the page — the server owns the ledger; a full restart means deleting the `stockpulse_trade_ledger` KV row.
+- Validation: run `node scripts/validate-ledger.cjs` after a simulated day to confirm every fill is inside its session's high–low and at the official close.
 
 ## Troubleshooting
 
@@ -163,8 +174,10 @@ The four data jobs above were migrated off the browser — do **not** re-add the
 | Render slow to respond | Free tier sleeps after inactivity; first request takes 30-50s |
 | Edge fn 401 `unauthorized` | `x-cron-secret` doesn't match `CRON_SECRET` — reset the secret, update all schedules |
 | Edge fn 401 `UNAUTHORIZED_NO_AUTH_HEADER` | Function deployed without `--no-verify-jwt` — redeploy it |
+| `/api/ledger/status` or `/api/ledger/rerun` → 502 | The hosting env is missing `CRON_SECRET` — add it on Vercel **and** Render (must equal the Supabase secret) and redeploy |
 | `_http_response` shows 5s timeout | Cosmetic — function still completes; verify via data freshness queries |
 | Ledger page "Cloud sync failed" | Server may be cold-starting; retry. Config arrives via `/api/sync-config` |
+| Positions show snapshot prices for the whole session | Live re-marking retries every 60s + on tab focus; check the browser console for provider failures (Finnhub key limit). The cloud quote-board fallback covers most misses |
 | Deploy from wrong folder fails | Run `npx.cmd supabase functions deploy ...` from the repo root, not `system32` |
 
 For Express server architecture and API endpoints, see [`docs/CODEBASE.md`](docs/CODEBASE.md).
