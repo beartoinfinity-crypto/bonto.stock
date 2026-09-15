@@ -49,7 +49,7 @@ Social sentiment aggregates **rule-based keyword scoring — no AI/LLM**. To add
 
 1. Add the fetch + scoring in `src/lib/sentimentAnalysis.ts` alongside the existing 10 sources (Google News, StockTwits, Yahoo, ApeWisdom, SocialTickers, Finnhub, Reddit, MarketWatch, CNBC, Google Trends, + Adanos).
 2. If the source needs an API key, **serve it from the server at runtime**, not from source:
-   - Add it as an env var on Render.
+   - Add it as an env var on Vercel.
    - Expose it in `index.js` — e.g. add to the `/api/api-keys` response (like `ADANOS_API_KEY`).
    - Fetch it in the browser (`fetchAdanosKey` is the pattern) with a per-browser fallback in Settings → API Keys.
    - Never bake a real key into `dist/` — it's committed to git and public.
@@ -59,11 +59,11 @@ Social sentiment aggregates **rule-based keyword scoring — no AI/LLM**. To add
 
 Browser features that need server URLs/keys must fetch them at runtime — never compile secrets into the SPA. Three endpoints on `index.js` serve this:
 
-| Endpoint | Serves | Source (Render env) |
+| Endpoint | Serves | Source (Vercel env) |
 |----------|--------|--------------------|
 | `/api/sync-config` | Supabase URL + anon key (cloud sync, stored history) | `SUPABASE_URL`, `SUPABASE_ANON_KEY` |
 | `/api/edge-config` | Edge function URL + key (`edgeFn.ts` calls) | `EDGE_FN_URL`, `EDGE_FN_KEY` |
-| `/api/api-keys` | Third-party keys (e.g. `ADANOS_API_KEY`) | named Render env vars |
+| `/api/api-keys` | Third-party keys (e.g. `ADANOS_API_KEY`) | named Vercel env vars |
 
 Local dev fallback: `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` in the gitignored `.env` (never committed).
 

@@ -4,7 +4,7 @@
 //
 // Config resolution (secrets must never be baked into the committed dist
 // bundle — GitHub push protection blocks that):
-//   1. GET /api/edge-config — EDGE_FN_URL / EDGE_FN_KEY env vars on Render
+//   1. GET /api/edge-config — EDGE_FN_URL / EDGE_FN_KEY env vars on Vercel
 //      (configure once, every browser gets it; the key is the public anon key)
 //   2. VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY — local dev only
 //      (gitignored .env)
@@ -67,7 +67,7 @@ export async function edgeFn<T = unknown>(
 ): Promise<{ data: T | null; error: string | null }> {
   const cfg = await getConfig();
   if (!cfg) {
-    return { data: null, error: 'Edge functions not configured (set EDGE_FN_URL / EDGE_FN_KEY on Render, or VITE_SUPABASE_* in local .env)' };
+    return { data: null, error: 'Edge functions not configured (set EDGE_FN_URL / EDGE_FN_KEY on Vercel, or VITE_SUPABASE_* in local .env)' };
   }
   try {
     const res = await fetch(`${cfg.url}/functions/v1/${functionName}`, {

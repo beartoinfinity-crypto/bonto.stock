@@ -151,8 +151,8 @@ Pulls real daily bars from the **`stock_historical`** Supabase table (the 80-sym
 ### Supabase config resolution (runtime, secret-free)
 
 No Supabase credentials live in source. Browsers resolve them at runtime:
-- Cloud Sync + stored history ??`GET /api/sync-config` (Render env `SUPABASE_URL` / `SUPABASE_ANON_KEY`)
-- Edge functions (stock-data news, analyze-news-sentiment, social-sentiment, asymmetric-value-screener) ??`GET /api/edge-config` (Render env `EDGE_FN_URL` / `EDGE_FN_KEY` ??public anon key of the current project `aqyaarnpmvvdzasjefje`)
+- Cloud Sync + stored history — `GET /api/sync-config` (Vercel env `SUPABASE_URL` / `SUPABASE_ANON_KEY`)
+- Edge functions (stock-data news, analyze-news-sentiment, social-sentiment, asymmetric-value-screener) — `GET /api/edge-config` (Vercel env `EDGE_FN_URL` / `EDGE_FN_KEY` — public anon key of the current project `aqyaarnpmvvdzasjefje`)
 - Local dev fallback: `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` in the gitignored `.env`
 
 ### `src/hooks/useMasterMatrix.ts` ??Master Matrix Hook (511 lines)
@@ -290,7 +290,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | No AI/ML | Rule-based signals, template narratives |
 | Matrix history localStorage-only | Master Matrix daily snapshots live in `stockpulse_master_matrix` (localStorage), NOT via `storage.ts`/Supabase. Deliberate — past daily snapshots are user-local. Don't "fix" into cloud sync. Supabase feeds them (`stock_historical` bars + backfill), it doesn't store them |
 | Stored-bars universe | The 80-symbol index universe has `stock_historical` bars (10y depth, refreshed nightly in batches); outer-universe rows fall back to live/`supabase`-tagged snapshots |
-| Browser cron | No always-on server (Render free tier sleeps) |
+| Browser cron | Data-production is server-side (Supabase Edge Functions); browsers keep only local-maintenance jobs — the hosted Express server (Vercel) is always on |
 | Three-tier fetch | Server proxy ??direct ??CORS proxies (legacy) |
 | SQLite backup | Survives Supabase outages, offline-capable |
 | PapaParse | Handles unquoted fields with commas (RFC 4180) |

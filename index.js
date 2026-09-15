@@ -655,7 +655,7 @@ app.use(express.static(path.join(__dirname, 'dist'), {
 }));
 
 // --- Server-managed Supabase cloud-sync config ----------------------
-// Set SUPABASE_URL + SUPABASE_ANON_KEY on Render to configure Cloud Sync ONCE
+// Set SUPABASE_URL + SUPABASE_ANON_KEY on Vercel to configure Cloud Sync ONCE
 // for every browser/machine — no per-browser input needed. When unset the API
 // 404s and the app falls back to per-browser Settings.
 const SUPABASE_URL_ENV = process.env.SUPABASE_URL || '';
@@ -675,8 +675,8 @@ app.get('/api/sync-config', (req, res) => {
 // --- Server-managed API-key config (secret-free bundle) --------------
 // The dist bundle is committed to git, so client env vars (VITE_*) would leak
 // secrets into the repo (GitHub push protection blocks them). Instead, keys
-// live ONLY as Render env vars and are served to browsers at runtime.
-// Set ADANOS_API_KEY on Render to enable the Adanos sentiment source for
+// live ONLY as Vercel env vars and are served to browsers at runtime.
+// Set ADANOS_API_KEY on Vercel to enable the Adanos sentiment source for
 // every browser — no per-browser input needed. Unset -> omitted, and the app
 // falls back to per-browser Settings (API Keys -> Adanos).
 const ADANOS_API_KEY_ENV = process.env.ADANOS_API_KEY || '';
@@ -686,7 +686,7 @@ app.get('/api/api-keys', (req, res) => {
 
 // --- Server-managed edge-function endpoint (for the Screener / News
 //     features that call Supabase edge functions directly) -------------
-// EDGE_FN_URL / EDGE_FN_KEY on Render point at the Supabase project hosting
+// EDGE_FN_URL / EDGE_FN_KEY on Vercel point at the Supabase project hosting
 // the compute functions (stock-data, analyze-news-sentiment, social-sentiment,
 // asymmetric-value-screener). The key is the project's PUBLIC anon key, so
 // serving it to browsers is safe. Unset -> 404, and the app falls back to
@@ -796,5 +796,5 @@ if (!process.env.VERCEL) {
 
 // Vercel serverless — @vercel/node invokes the Express app directly.
 // (Bound to /index.js via vercel.json; static dist/ and the SPA fallback
-// are served through Express just like on Render.)
+// are served through Express.)
 export default app;

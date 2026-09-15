@@ -313,7 +313,7 @@ async function fetchFinnhubSentiment(symbol: string): Promise<SourceResult> {
 //
 // Key resolution order (secrets must NEVER be baked into the committed dist
 // bundle — GitHub push protection blocks that):
-//   1. `/api/api-keys` endpoint (ADANOS_API_KEY env var on Render — configure
+//   1. `/api/api-keys` endpoint (ADANOS_API_KEY env var on Vercel — configure
 //      once, every browser gets it)
 //   2. per-browser Settings (localStorage `stockpulse_api_config` .adanos.api_key)
 

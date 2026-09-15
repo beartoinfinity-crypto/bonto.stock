@@ -1,6 +1,6 @@
 # Dan's StockPulse
 
-Stock analysis dashboard with cloud-first storage. Runs in the browser; deploys to Vercel + Render.com (Express server). (Testing)
+Stock analysis dashboard with cloud-first storage. Runs in the browser; deploys to Vercel (Express server). (Testing)
 
 > **Education only. Not financial advice.**
 
@@ -26,7 +26,7 @@ npm start          # serve dist/ via Express
 | Cloud DB | Supabase (PostgreSQL) — primary source of truth |
 | Cron | **Supabase Edge Functions + pg_cron** (server-side, 24/7) for data production; browser scheduler keeps only local maintenance |
 | Server | Express (`index.js`) — serves dist/ + server-side proxy |
-| Deploy | Vercel + Render.com (auto-deploy on push to main; both serve the same Express app) |
+| Deploy | Vercel (auto-deploy on push to main) |
 
 ## Pages
 

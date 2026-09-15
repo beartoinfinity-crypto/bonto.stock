@@ -72,13 +72,13 @@ export function resetClient(): void {
   client = null;
 }
 
-// ─── Server-managed config (configure once on Render) ──────────────
+// ─── Server-managed config (configure once on Vercel) ──────────────
 
 let remoteConfigPromise: Promise<SupabaseConfig | null> | null = null;
 
 /**
  * Fetch the sync config from the server (`/api/sync-config`, backed by the
- * Render env vars SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SYNC_ENABLED).
+ * Vercel env vars SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SYNC_ENABLED).
  * This is the "configure once, every browser obeys" path — when it returns a
  * config it is authoritative and overrides any per-browser Settings values.
  * Resolves null on 404/network failure so the app falls back to local config.

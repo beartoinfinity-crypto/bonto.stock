@@ -104,7 +104,7 @@ export default function Settings() {
   const [sbLoading, setSbLoading] = useState(false);
   const [sbStatus, setSbStatus] = useState<'unknown' | 'ok' | 'error'>('unknown');
   const [showSql, setShowSql] = useState(false);
-  // Server-managed sync (Render env vars) — overrides per-browser inputs.
+  // Server-managed sync (Vercel env vars) — overrides per-browser inputs.
   const [serverManaged, setServerManaged] = useState(false);
 
   useEffect(() => {
@@ -599,7 +599,7 @@ export default function Settings() {
 
             {serverManaged && (
               <p className="text-xs text-muted-foreground rounded-md border border-primary/30 bg-primary/5 px-3 py-2">
-                Managed by the server (SUPABASE_URL / SUPABASE_ANON_KEY Render env vars) —
+                Managed by the server (SUPABASE_URL / SUPABASE_ANON_KEY Vercel env vars) —
                 every browser uses this automatically. Per-browser changes are overridden on the next page load.
               </p>
             )}

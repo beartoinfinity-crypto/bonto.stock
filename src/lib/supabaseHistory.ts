@@ -9,7 +9,7 @@
 //
 // Config resolution (secrets must never be baked into the committed dist
 // bundle): runtime server config first (/api/sync-config — the Supabase
-// project URL + anon key on Render), then VITE_ env vars for local dev.
+// project URL + anon key on Vercel), then VITE_ env vars for local dev.
 
 import { StockData } from './stockData';
 
@@ -77,7 +77,7 @@ export async function fetchStoredHistory(minBars = 100): Promise<StoredHistoryRe
   if (!cfg) {
     return {
       ok: false,
-      error: 'Supabase not configured (set SUPABASE_URL / SUPABASE_ANON_KEY on Render, or VITE_SUPABASE_* in local .env)',
+      error: 'Supabase not configured (set SUPABASE_URL / SUPABASE_ANON_KEY on Vercel, or VITE_SUPABASE_* in local .env)',
       history: new Map(),
       totalBars: 0,
       coveredSymbols: [],

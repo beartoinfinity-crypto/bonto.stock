@@ -29,7 +29,7 @@ startScheduler();
 // Cloud-first hydration: Supabase is the primary store — refresh the local
 // mirror (localStorage + SQLite) from the cloud shortly after boot. Await the
 // server-managed sync config first, so even a browser that never had per-browser
-// Settings input still hydrates once SUPABASE_URL/ANON_KEY are set on Render.
+// Settings input still hydrates once SUPABASE_URL/ANON_KEY are set on Vercel.
 setTimeout(async () => {
   await fetchRemoteSyncConfig();
   if (!getClient()) return;

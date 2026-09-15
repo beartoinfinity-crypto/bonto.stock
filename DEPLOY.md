@@ -3,16 +3,15 @@
 ## Repository
 
 - **GitHub**: https://github.com/beartoinfinity-crypto/bonto.stock
-- **Live (Vercel)**: https://dandanball-stock.vercel.app/
-- **Live (Render)**: https://dandanball-stock.onrender.com/
+- **Live**: https://dandanball-stock.vercel.app/
 
-Either host works — both serve the same Express app (`index.js`) and committed `dist/`. There is an older, dead Vercel deployment at `bonto-stock.vercel.app` (404s — ignore it).
+Vercel is the only deployment. (The old `dandanball-stock.onrender.com` host slept on the free tier and was retired — `bonto-stock.vercel.app` is an abandoned first deploy that 404s — ignore both.)
 
 ## How Deploy Works
 
-Push to `main` → auto-deploys on Vercel and Render → Express serves `dist/` on port 10000 (Render) / as a serverless fn (Vercel).
+Push to `main` → Vercel auto-deploys → the Express serverless function (`index.js`) serves `/api/*` and `dist/`.
 
-The `dist/` folder is committed to git (both hosts run `npm install && npm start`, not `npm run build`).
+The `dist/` folder is committed to git (Vercel runs `npm install && npm start`, not `npm run build`).
 
 ## Deploy Steps
 
@@ -20,7 +19,7 @@ The `dist/` folder is committed to git (both hosts run `npm install && npm start
 npm run build              # rebuild dist/
 git add -A
 git commit -m "feat: ..."
-git push                   # triggers Vercel + Render auto-deploys
+git push                   # triggers Vercel auto-deploy
 ```
 
 ## Local Testing (Production Build)
@@ -34,14 +33,14 @@ npm start                  # Express on http://localhost:10000
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PORT` | `10000` | Server port (Render sets this automatically; ignored on Vercel) |
+| `PORT` | `10000` | Server port (the local Express server; Vercel ignores it) |
 | `SUPABASE_URL` | *(none)* | **Server-managed Cloud Sync** — when set, every browser/machine picks this up automatically (no per-browser input); served via `GET /api/sync-config` |
 | `SUPABASE_ANON_KEY` | *(none)* | Anon key for the Supabase project above |
 | `SUPABASE_SYNC_ENABLED` | `true` | Set to `false` to disable server-managed sync even when the URL/key are set |
 | `FINNHUB_API_KEY` | *(none)* | Optional: server-side Finnhub key for the quote/sentiment proxies (rotates with any browser-supplied keys) |
 | `FINNHUB_API_KEY_2` | *(none)* | Optional: second Finnhub key — proxy rotates between them on rate-limits |
 | `ADANOS_API_KEY` | *(none)* | Optional: Adanos sentiment API key, served to every browser via `GET /api/api-keys` (enables the Adanos source in Social Sentiment Check). Falls back to per-browser Settings → API Keys → Adanos when unset |
-| `CRON_SECRET` | *(none)* | **Required for the `/api/ledger/*` proxy** — must match the Supabase `CRON_SECRET` secret (`0mv...f1gap`), and must be set as a hosting env var on BOTH Vercel and Render. Without it `/api/ledger/status` and `/api/ledger/rerun` return 502 (the fn 401s since the proxy can't sign its calls) |
+| `CRON_SECRET` | *(none)* | **Required for the `/api/ledger/*` proxy** — must match the Supabase `CRON_SECRET` secret (`0mv...f1gap`), and must be set as a hosting env var on Vercel. Without it `/api/ledger/status` and `/api/ledger/rerun` return 502 (the fn 401s since the proxy can't sign its calls) |
 
 ## Cache headers on dist
 
@@ -56,7 +55,7 @@ Project: `aqyaarnpmvvdzasjefje` (linked — `supabase/.temp/linked-project.json`
 1. Create a Supabase project
 2. Go to SQL Editor
 3. Run the setup SQL from Settings page (or from `supabaseDb.ts` `SETUP_SQL` constant)
-4. **Either** set `SUPABASE_URL` + `SUPABASE_ANON_KEY` on Render (server-managed — recommended, configure once for all browsers)
+4. **Either** set `SUPABASE_URL` + `SUPABASE_ANON_KEY` on Vercel (server-managed — recommended, configure once for all browsers)
 5. **Or** (single-machine / dev only) enter the URL and anon key per browser in Settings and enable Cloud Sync
 
 ### Featured Trades Table
@@ -166,15 +165,14 @@ The four data jobs above were migrated off the browser — do **not** re-add the
 |---------|-----|
 | Blank page | Ensure `dist/` is committed and `index.js` serves it |
 | 404 on refresh | Express catch-all should handle client-side routes |
-| "All providers unavailable" | Check Render logs; server proxy may be failing |
+| "All providers unavailable" | Check Vercel logs; server proxy may be failing |
 | Stale data | Data now refreshes server-side on schedule; check the freshness queries above before assuming a browser problem |
 | Chart ends on an old date (e.g. bars frozen weeks back) | The browser's SQLite historical cache self-heals since the bar-currency gate (`be5b2d9`): a series whose newest bar is >4 days old is a cache miss and refetches live, then falls back to Supabase `stock_historical` (nightly server sync) — hard-refresh the page once. If it *still* shows old bars, check the freshness queries above (server sync may have stopped) |
-| Server proxy 502 | Render outbound requests may be blocked |
+| Server proxy 502 | Vercel outbound requests may be blocked |
 | Trump shows no records | Verify the UnusualWhales URL uses `Donald J Trump` (no period) |
-| Render slow to respond | Free tier sleeps after inactivity; first request takes 30-50s |
 | Edge fn 401 `unauthorized` | `x-cron-secret` doesn't match `CRON_SECRET` — reset the secret, update all schedules |
 | Edge fn 401 `UNAUTHORIZED_NO_AUTH_HEADER` | Function deployed without `--no-verify-jwt` — redeploy it |
-| `/api/ledger/status` or `/api/ledger/rerun` → 502 | The hosting env is missing `CRON_SECRET` — add it on Vercel **and** Render (must equal the Supabase secret) and redeploy |
+| `/api/ledger/status` or `/api/ledger/rerun` → 502 | The hosting env is missing `CRON_SECRET` — add it on Vercel (must equal the Supabase secret) and redeploy |
 | `_http_response` shows 5s timeout | Cosmetic — function still completes; verify via data freshness queries |
 | Ledger page "Cloud sync failed" | Server may be cold-starting; retry. Config arrives via `/api/sync-config` |
 | Positions show snapshot prices for the whole session | Live re-marking retries every 60s + on tab focus; check the browser console for provider failures (Finnhub key limit). The cloud quote-board fallback covers most misses |
