@@ -411,14 +411,18 @@ export function KDJIndicator({ data }: KDJIndicatorProps) {
     const kSliced = fullKDJ.k.slice(-126);
     const dSliced = fullKDJ.d.slice(-126);
     const jSliced = fullKDJ.j.slice(-126);
+    const sma20Sliced = sma20.slice(-126);
+    const sma50Sliced = sma50.slice(-126);
 
     return slicedData.map((d, i) => ({
       date: d.date,
       k: kSliced[i],
       d: dSliced[i],
       j: jSliced[i],
+      sma20: sma20Sliced[i],
+      sma50: sma50Sliced[i],
     }));
-  }, [data, fullKDJ]);
+  }, [data, fullKDJ, sma20, sma50]);
 
   const analysis = useMemo(
     () => analyzeKDJ(data, fullKDJ.k, fullKDJ.d, fullKDJ.j, sma20, sma50),
@@ -480,22 +484,28 @@ export function KDJIndicator({ data }: KDJIndicatorProps) {
       </div>
 
       {/* Chart */}
-      <div className="h-[180px]">
+      <div className="h-[220px]">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={chartData} margin={{ top: 5, right: 5, bottom: 5, left: 0 }}>
+          <LineChart data={chartData} margin={{ top: 5, right: 55, bottom: 5, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="hsl(222, 30%, 16%)" vertical={false} />
             <XAxis dataKey="date" hide />
-            <YAxis domain={[-20, 120]} axisLine={false} tickLine={false} tick={{ fill: 'hsl(215, 20%, 55%)', fontSize: 10 }} ticks={[0, 20, 50, 80, 100]} width={30} />
+            <YAxis yAxisId="kdj" domain={[-20, 120]} axisLine={false} tickLine={false} tick={{ fill: 'hsl(215, 20%, 55%)', fontSize: 10 }} ticks={[0, 20, 50, 80, 100]} width={30} />
+            <YAxis yAxisId="price" orientation="right" axisLine={false} tickLine={false} tick={{ fill: 'hsl(215, 20%, 55%)', fontSize: 10 }} width={50} tickFormatter={(v) => `$${v.toFixed(0)}`} />
             <Tooltip
               contentStyle={{ backgroundColor: 'hsl(222, 47%, 10%)', border: '1px solid hsl(222, 30%, 16%)', borderRadius: '8px' }}
-              formatter={(value: number, name: string) => [value?.toFixed(2), name.toUpperCase()]}
+              formatter={(value: number, name: string) => {
+                if (name === 'sma20' || name === 'sma50') return [`$${value?.toFixed(2)}`, name === 'sma20' ? 'SMA20' : 'SMA50'];
+                return [value?.toFixed(2), name.toUpperCase()];
+              }}
             />
-            <ReferenceLine y={80} stroke="hsl(0, 72%, 51%)" strokeDasharray="3 3" opacity={0.5} />
-            <ReferenceLine y={20} stroke="hsl(160, 84%, 39%)" strokeDasharray="3 3" opacity={0.5} />
-            <ReferenceLine y={50} stroke="hsl(222, 30%, 30%)" strokeDasharray="2 2" opacity={0.3} />
-            <Line type="monotone" dataKey="k" stroke="hsl(173, 80%, 50%)" strokeWidth={2} dot={false} connectNulls name="K" />
-            <Line type="monotone" dataKey="d" stroke="hsl(280, 70%, 60%)" strokeWidth={2} dot={false} connectNulls name="D" />
-            <Line type="monotone" dataKey="j" stroke="hsl(45, 93%, 50%)" strokeWidth={1.5} dot={false} connectNulls opacity={0.7} name="J" />
+            <ReferenceLine yAxisId="kdj" y={80} stroke="hsl(0, 72%, 51%)" strokeDasharray="3 3" opacity={0.5} />
+            <ReferenceLine yAxisId="kdj" y={20} stroke="hsl(160, 84%, 39%)" strokeDasharray="3 3" opacity={0.5} />
+            <ReferenceLine yAxisId="kdj" y={50} stroke="hsl(222, 30%, 30%)" strokeDasharray="2 2" opacity={0.3} />
+            <Line yAxisId="kdj" type="monotone" dataKey="k" stroke="hsl(173, 80%, 50%)" strokeWidth={2} dot={false} connectNulls name="K" />
+            <Line yAxisId="kdj" type="monotone" dataKey="d" stroke="hsl(280, 70%, 60%)" strokeWidth={2} dot={false} connectNulls name="D" />
+            <Line yAxisId="kdj" type="monotone" dataKey="j" stroke="hsl(45, 93%, 50%)" strokeWidth={1.5} dot={false} connectNulls opacity={0.7} name="J" />
+            <Line yAxisId="price" type="monotone" dataKey="sma20" stroke="hsl(210, 80%, 50%)" strokeWidth={1.5} dot={false} connectNulls strokeDasharray="4 2" name="SMA20" />
+            <Line yAxisId="price" type="monotone" dataKey="sma50" stroke="hsl(350, 70%, 55%)" strokeWidth={1.5} dot={false} connectNulls strokeDasharray="4 2" name="SMA50" />
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -518,6 +528,14 @@ export function KDJIndicator({ data }: KDJIndicatorProps) {
           <div className="flex items-center gap-1">
             <div className="w-2 h-0.5 bg-yellow-400 rounded" />
             <span>J</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-2 h-0.5 bg-[hsl(210,80%,50%)] rounded" style={{ borderTop: '1px dashed' }} />
+            <span>SMA20</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-2 h-0.5 bg-[hsl(350,70%,55%)] rounded" style={{ borderTop: '1px dashed' }} />
+            <span>SMA50</span>
           </div>
         </div>
         <span className="text-bearish">Overbought &gt;80</span>
