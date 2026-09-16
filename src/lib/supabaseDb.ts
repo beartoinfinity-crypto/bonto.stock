@@ -23,7 +23,7 @@ import {
 } from './localDb';
 import { LEDGER_KEY } from './tradeSimulator';
 import type { LedgerStore } from './tradeSimulator';
-import { mergeLedgers } from './ledgerMerge';
+import { mergeLedgers, replayAccounts, healSameDayConflicts } from './ledgerMerge';
 
 export const SUPABASE_CONFIG_KEY = 'stockpulse_supabase_config';
 export const TABLE = 'stockpulse_kv';
@@ -261,8 +261,13 @@ export async function pullLedger(): Promise<LedgerStore | null> {
     // must never resurrect repaired-out fills or overwrite server state).
     const cloud = safeParse<LedgerStore>(remoteValue);
     if (!cloud) return safeParse<LedgerStore>(local);
-    writeLocal(LEDGER_KEY, remoteValue);
-    return cloud;
+    // Rebuild accounts from trades — the cloud snapshot may contain stale
+    // null-cash / null-qty ghost positions from earlier edge-fn bugs.
+    // Heal legacy same-day conflicts first (pre-write-protection re-runs).
+    const healedTrades = healSameDayConflicts(cloud.trades ?? []);
+    const rebuilt = { ...cloud, accounts: replayAccounts(healedTrades, cloud.initialCash ?? 100000), trades: healedTrades };
+    writeLocal(LEDGER_KEY, JSON.stringify(rebuilt));
+    return rebuilt;
   } catch (e) {
     console.warn('[SupabaseSync] pre-run ledger pull failed:', e);
     return null;

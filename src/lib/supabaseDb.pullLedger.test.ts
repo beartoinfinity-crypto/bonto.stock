@@ -54,7 +54,10 @@ describe('pullLedger edge cases', () => {
   it('adopts the cloud copy when local storage is empty (fresh browser)', async () => {
     const result = await pullLedger();
     expect(result).not.toBeNull();
-    expect(result!.accounts.value.cash).toBe(100000);
+    // Accounts are rebuilt from trades — cash = 100000 - 2000 (AAPL buy) = 98000
+    expect(result!.accounts.value.cash).toBe(98000);
+    expect(result!.accounts.value.positions).toHaveLength(1);
+    expect(result!.accounts.value.positions[0].symbol).toBe('AAPL');
     expect(result!.trades[0].symbol).toBe('AAPL');
     expect(localStorage.getItem('stockpulse_trade_ledger')).toContain('AAPL');
   });
