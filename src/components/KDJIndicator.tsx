@@ -2,11 +2,12 @@ import { useMemo } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
-import { StockData, calculateKDJ } from '@/lib/stockData';
+import { StockData, calculateKDJ, calculateSMA } from '@/lib/stockData';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import {
-  TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle2, Zap, ArrowUpCircle, ArrowDownCircle,
+  TrendingUp, TrendingDown, Minus, AlertTriangle, CheckCircle2, ArrowUpCircle, ArrowDownCircle,
+  Activity, BarChart3,
 } from 'lucide-react';
 
 interface KDJIndicatorProps {
@@ -18,6 +19,19 @@ interface KDJSignal {
   strength: 'strong' | 'moderate' | 'weak';
   name: string;
   reason: string;
+  category: 'kdj' | 'sma' | 'combined';
+}
+
+interface SMAState {
+  sma20: number | null;
+  sma50: number | null;
+  prevSma20: number | null;
+  prevSma50: number | null;
+  price: number;
+  prevPrice: number;
+  priceAboveSma20: boolean;
+  priceAboveSma50: boolean;
+  sma20AboveSma50: boolean;
 }
 
 interface KDJAnalysis {
@@ -27,9 +41,104 @@ interface KDJAnalysis {
   zoneDescription: string;
   momentum: string;
   momentumDescription: string;
+  smaState: SMAState;
+  trendConfirmation: string;
 }
 
-function detectKDJSignals(k: (number | null)[], d: (number | null)[], j: (number | null)[]): KDJSignal[] {
+function getSMAState(data: StockData[], sma20: (number | null)[], sma50: (number | null)[]): SMAState | null {
+  const len = data.length;
+  if (len < 50) return null;
+
+  const latest = data[len - 1];
+  const prev = data[len - 2];
+  const latestSma20 = sma20[len - 1];
+  const latestSma50 = sma50[len - 1];
+  const prevSma20 = sma20[len - 2];
+  const prevSma50 = sma50[len - 2];
+
+  if (latestSma20 === null || latestSma50 === null) return null;
+
+  return {
+    sma20: latestSma20,
+    sma50: latestSma50,
+    prevSma20,
+    prevSma50,
+    price: latest.close,
+    prevPrice: prev.close,
+    priceAboveSma20: latest.close > latestSma20,
+    priceAboveSma50: latest.close > latestSma50,
+    sma20AboveSma50: latestSma20 > latestSma50,
+  };
+}
+
+function detectSMASignals(smaState: SMAState | null): KDJSignal[] {
+  if (!smaState) return [];
+  const signals: KDJSignal[] = [];
+  const { sma20, sma50, prevSma20, prevSma50, price, prevPrice, priceAboveSma20, priceAboveSma50, sma20AboveSma50 } = smaState;
+
+  if (sma20 === null || sma50 === null || prevSma20 === null || prevSma50 === null) return signals;
+
+  // Price crossing SMA20
+  if (prevPrice <= prevSma20! && price > sma20!) {
+    signals.push({
+      type: 'buy',
+      strength: 'moderate',
+      name: 'Price Crosses Above SMA20',
+      reason: `Price ($${price.toFixed(2)}) crossed above SMA20 ($${sma20.toFixed(2)}) — short-term trend turning bullish`,
+      category: 'sma',
+    });
+  } else if (prevPrice >= prevSma20! && price < sma20!) {
+    signals.push({
+      type: 'sell',
+      strength: 'moderate',
+      name: 'Price Crosses Below SMA20',
+      reason: `Price ($${price.toFixed(2)}) crossed below SMA20 ($${sma20.toFixed(2)}) — short-term trend turning bearish`,
+      category: 'sma',
+    });
+  }
+
+  // Price crossing SMA50
+  if (prevPrice <= prevSma50! && price > sma50!) {
+    signals.push({
+      type: 'buy',
+      strength: 'strong',
+      name: 'Price Crosses Above SMA50',
+      reason: `Price ($${price.toFixed(2)}) crossed above SMA50 ($${sma50.toFixed(2)}) — medium-term trend turning bullish`,
+      category: 'sma',
+    });
+  } else if (prevPrice >= prevSma50! && price < sma50!) {
+    signals.push({
+      type: 'sell',
+      strength: 'strong',
+      name: 'Price Crosses Below SMA50',
+      reason: `Price ($${price.toFixed(2)}) crossed below SMA50 ($${sma50.toFixed(2)}) — medium-term trend turning bearish`,
+      category: 'sma',
+    });
+  }
+
+  // SMA20 / SMA50 Golden Cross / Death Cross
+  if (prevSma20! <= prevSma50! && sma20! > sma50!) {
+    signals.push({
+      type: 'buy',
+      strength: 'strong',
+      name: 'Golden Cross (SMA20 > SMA50)',
+      reason: `SMA20 ($${sma20.toFixed(2)}) crossed above SMA50 ($${sma50.toFixed(2)}) — classic bullish trend confirmation`,
+      category: 'sma',
+    });
+  } else if (prevSma20! >= prevSma50! && sma20! < sma50!) {
+    signals.push({
+      type: 'sell',
+      strength: 'strong',
+      name: 'Death Cross (SMA20 < SMA50)',
+      reason: `SMA20 ($${sma20.toFixed(2)}) crossed below SMA50 ($${sma50.toFixed(2)}) — classic bearish trend confirmation`,
+      category: 'sma',
+    });
+  }
+
+  return signals;
+}
+
+function detectKDJSignals(k: (number | null)[], d: (number | null)[], j: (number | null)[], smaState: SMAState | null): KDJSignal[] {
   const signals: KDJSignal[] = [];
   const len = k.length;
 
@@ -40,7 +149,6 @@ function detectKDJSignals(k: (number | null)[], d: (number | null)[], j: (number
   const latestJ = j[len - 1];
   const prevK = k[len - 2];
   const prevD = d[len - 2];
-  const prevJ = j[len - 3];
 
   if (latestK === null || latestD === null || latestJ === null) return signals;
   if (prevK === null || prevD === null) return signals;
@@ -48,26 +156,36 @@ function detectKDJSignals(k: (number | null)[], d: (number | null)[], j: (number
   // Golden Cross: K crosses above D
   if (prevK <= prevD && latestK > latestD) {
     const inOversold = latestK < 30;
+    const trendAligned = smaState?.priceAboveSma20;
+    const strength = inOversold ? 'strong' : trendAligned ? 'moderate' : 'weak';
     signals.push({
       type: 'buy',
-      strength: inOversold ? 'strong' : 'moderate',
-      name: inOversold ? 'Golden Cross (Oversold)' : 'Golden Cross',
+      strength,
+      name: inOversold ? 'KDJ Golden Cross (Oversold)' : trendAligned ? 'KDJ Golden Cross (Trend Confirmed)' : 'KDJ Golden Cross',
       reason: inOversold
-        ? `K (${latestK.toFixed(1)}) crossed above D (${latestD.toFixed(1)}) in oversold territory — high-probability reversal signal`
+        ? `K (${latestK.toFixed(1)}) crossed above D (${latestD.toFixed(1)}) in oversold territory — high-probability reversal`
+        : trendAligned
+        ? `K (${latestK.toFixed(1)}) crossed above D (${latestD.toFixed(1)}) with price above SMA20 — bullish momentum confirmed by trend`
         : `K (${latestK.toFixed(1)}) crossed above D (${latestD.toFixed(1)}) — bullish momentum building`,
+      category: 'kdj',
     });
   }
 
   // Death Cross: K crosses below D
   if (prevK >= prevD && latestK < latestD) {
     const inOverbought = latestK > 70;
+    const trendAligned = smaState && !smaState.priceAboveSma20;
+    const strength = inOverbought ? 'strong' : trendAligned ? 'moderate' : 'weak';
     signals.push({
       type: 'sell',
-      strength: inOverbought ? 'strong' : 'moderate',
-      name: inOverbought ? 'Death Cross (Overbought)' : 'Death Cross',
+      strength,
+      name: inOverbought ? 'KDJ Death Cross (Overbought)' : trendAligned ? 'KDJ Death Cross (Trend Confirmed)' : 'KDJ Death Cross',
       reason: inOverbought
-        ? `K (${latestK.toFixed(1)}) crossed below D (${latestD.toFixed(1)}) in overbought territory — high-probability reversal signal`
+        ? `K (${latestK.toFixed(1)}) crossed below D (${latestD.toFixed(1)}) in overbought territory — high-probability reversal`
+        : trendAligned
+        ? `K (${latestK.toFixed(1)}) crossed below D (${latestD.toFixed(1)}) with price below SMA20 — bearish momentum confirmed by trend`
         : `K (${latestK.toFixed(1)}) crossed below D (${latestD.toFixed(1)}) — bearish momentum building`,
+      category: 'kdj',
     });
   }
 
@@ -77,14 +195,16 @@ function detectKDJSignals(k: (number | null)[], d: (number | null)[], j: (number
       type: 'sell',
       strength: latestJ > 110 ? 'strong' : 'moderate',
       name: 'J-Line Overbought',
-      reason: `J at ${latestJ.toFixed(1)} (>100) — price is significantly extended above the K/D range, often precedes a pullback`,
+      reason: `J at ${latestJ.toFixed(1)} (>100) — price significantly extended, often precedes a pullback`,
+      category: 'kdj',
     });
   } else if (latestJ < 0) {
     signals.push({
       type: 'buy',
       strength: latestJ < -10 ? 'strong' : 'moderate',
       name: 'J-Line Oversold',
-      reason: `J at ${latestJ.toFixed(1)} (<0) — price is significantly below the K/D range, often precedes a bounce`,
+      reason: `J at ${latestJ.toFixed(1)} (<0) — price significantly oversold, often precedes a bounce`,
+      category: 'kdj',
     });
   }
 
@@ -95,17 +215,19 @@ function detectKDJSignals(k: (number | null)[], d: (number | null)[], j: (number
       type: latestK > latestD ? 'buy' : 'sell',
       strength: 'moderate',
       name: 'Strong K/D Divergence',
-      reason: `K-D spread at ${spread.toFixed(1)} — ${latestK > latestD ? 'bullish' : 'bearish'} momentum is unusually strong`,
+      reason: `K-D spread at ${spread.toFixed(1)} — ${latestK > latestD ? 'bullish' : 'bearish'} momentum unusually strong`,
+      category: 'kdj',
     });
   }
 
-  // K in extreme zones (standalone, not crossover)
+  // K in extreme zones
   if (latestK > 80 && latestD > 80) {
     signals.push({
       type: 'sell',
       strength: 'weak',
       name: 'Both K & D Overbought',
-      reason: `K=${latestK.toFixed(1)}, D=${latestD.toFixed(1)} both above 80 — the rally may be overextended`,
+      reason: `K=${latestK.toFixed(1)}, D=${latestD.toFixed(1)} both above 80 — rally may be overextended`,
+      category: 'kdj',
     });
   } else if (latestK < 20 && latestD < 20) {
     signals.push({
@@ -113,14 +235,71 @@ function detectKDJSignals(k: (number | null)[], d: (number | null)[], j: (number
       strength: 'weak',
       name: 'Both K & D Oversold',
       reason: `K=${latestK.toFixed(1)}, D=${latestD.toFixed(1)} both below 20 — selling pressure may be exhausted`,
+      category: 'kdj',
     });
   }
 
   return signals;
 }
 
-function analyzeKDJ(data: StockData[], k: (number | null)[], d: (number | null)[], j: (number | null)[]): KDJAnalysis | null {
-  if (data.length < 20) return null;
+function detectCombinedSignals(kdjSignals: KDJSignal[], smaSignals: KDJSignal[], smaState: SMAState | null): KDJSignal[] {
+  const combined: KDJSignal[] = [];
+  if (!smaState) return combined;
+
+  const kdjBuys = kdjSignals.filter(s => s.type === 'buy');
+  const kdjSells = kdjSignals.filter(s => s.type === 'sell');
+  const smaBuys = smaSignals.filter(s => s.type === 'buy');
+  const smaSells = smaSignals.filter(s => s.type === 'sell');
+
+  // KDJ + SMA both bullish
+  if (kdjBuys.length > 0 && smaBuys.length > 0) {
+    combined.push({
+      type: 'buy',
+      strength: 'strong',
+      name: 'KDJ + SMA Bullish Alignment',
+      reason: `Both KDJ and SMA signals agree on bullish direction — high-conviction buy setup`,
+      category: 'combined',
+    });
+  }
+
+  // KDJ + SMA both bearish
+  if (kdjSells.length > 0 && smaSells.length > 0) {
+    combined.push({
+      type: 'sell',
+      strength: 'strong',
+      name: 'KDJ + SMA Bearish Alignment',
+      reason: `Both KDJ and SMA signals agree on bearish direction — high-conviction sell setup`,
+      category: 'combined',
+    });
+  }
+
+  // KDJ buy but SMA bearish (counter-trend)
+  if (kdjBuys.length > 0 && smaSells.length > 0) {
+    combined.push({
+      type: 'buy',
+      strength: 'weak',
+      name: 'KDJ Buy vs SMA Bearish (Counter-Trend)',
+      reason: `KDJ suggests buying but SMA trend is bearish — this is a counter-trend trade, higher risk`,
+      category: 'combined',
+    });
+  }
+
+  // KDJ sell but SMA bullish (counter-trend)
+  if (kdjSells.length > 0 && smaBuys.length > 0) {
+    combined.push({
+      type: 'sell',
+      strength: 'weak',
+      name: 'KDJ Sell vs SMA Bullish (Counter-Trend)',
+      reason: `KDJ suggests selling but SMA trend is bullish — this is a counter-trend trade, higher risk`,
+      category: 'combined',
+    });
+  }
+
+  return combined;
+}
+
+function analyzeKDJ(data: StockData[], k: (number | null)[], d: (number | null)[], j: (number | null)[], sma20: (number | null)[], sma50: (number | null)[]): KDJAnalysis | null {
+  if (data.length < 50) return null;
 
   const len = k.length;
   const latestK = k[len - 1];
@@ -129,26 +308,30 @@ function analyzeKDJ(data: StockData[], k: (number | null)[], d: (number | null)[
 
   if (latestK === null || latestD === null || latestJ === null) return null;
 
-  const signals = detectKDJSignals(k, d, j);
+  const smaState = getSMAState(data, sma20, sma50);
+  const kdjSignals = detectKDJSignals(k, d, j, smaState);
+  const smaSignals = detectSMASignals(smaState);
+  const combinedSignals = detectCombinedSignals(kdjSignals, smaSignals, smaState);
+  const signals = [...combinedSignals, ...kdjSignals, ...smaSignals];
 
   // Zone analysis
   let zone = '';
   let zoneDescription = '';
   if (latestJ > 100) {
     zone = 'Overbought';
-    zoneDescription = 'J-line is above 100, indicating the price has moved too far, too fast. Historically, J > 100 often precedes a correction or consolidation. Consider taking profits or tightening stops.';
+    zoneDescription = 'J-line above 100 — price extended too far, too fast. Often precedes a correction.';
   } else if (latestJ > 80) {
     zone = 'Upper Zone';
-    zoneDescription = 'K, D, and J are all in the upper range (80-100). The stock is showing strong upward momentum but may be approaching exhaustion. Watch for K/D crossover as an exit signal.';
+    zoneDescription = 'K, D, J in upper range (80-100). Strong momentum but approaching exhaustion.';
   } else if (latestJ < 0) {
     zone = 'Oversold';
-    zoneDescription = 'J-line is below 0, indicating the price has fallen too far, too fast. Historically, J < 0 often precedes a bounce or relief rally. This can be a high-probability entry zone.';
+    zoneDescription = 'J-line below 0 — price fallen too far, too fast. Often precedes a bounce.';
   } else if (latestJ < 20) {
     zone = 'Lower Zone';
-    zoneDescription = 'K, D, and J are all in the lower range (0-20). The stock is under selling pressure but may be approaching a turning point. Watch for K/D golden cross as an entry signal.';
+    zoneDescription = 'K, D, J in lower range (0-20). Selling pressure but approaching a turning point.';
   } else {
     zone = 'Neutral';
-    zoneDescription = 'K, D, and J are in the middle range (20-80). No extreme conditions — the stock is in a normal trading range. Rely on K/D crossovers and trend context for directional bias.';
+    zoneDescription = 'K, D, J in middle range (20-80). Normal trading — rely on crossovers and trend.';
   }
 
   // Momentum analysis
@@ -156,19 +339,36 @@ function analyzeKDJ(data: StockData[], k: (number | null)[], d: (number | null)[
   let momentumDescription = '';
   if (latestK > latestD && latestJ > latestK) {
     momentum = 'Bullish Acceleration';
-    momentumDescription = 'K is above D and J is above K — all three lines are fanning upward. This is the strongest bullish configuration in the KDJ system. Momentum is accelerating to the upside.';
+    momentumDescription = 'K above D, J above K — all three fanning upward. Strongest bullish configuration.';
   } else if (latestK > latestD) {
     momentum = 'Bullish';
-    momentumDescription = 'K is above D, indicating bullish momentum. However, J is not leading — the uptrend may be maturing. Watch for J crossing below K as an early warning of deceleration.';
+    momentumDescription = 'K above D — bullish momentum. J not leading may indicate maturing uptrend.';
   } else if (latestK < latestD && latestJ < latestK) {
     momentum = 'Bearish Acceleration';
-    momentumDescription = 'K is below D and J is below K — all three lines are fanning downward. This is the strongest bearish configuration. Momentum is accelerating to the downside.';
+    momentumDescription = 'K below D, J below K — all three fanning downward. Strongest bearish configuration.';
   } else if (latestK < latestD) {
     momentum = 'Bearish';
-    momentumDescription = 'K is below D, indicating bearish momentum. However, J is not leading lower — the downtrend may be maturing. Watch for J crossing above K as an early warning of deceleration.';
+    momentumDescription = 'K below D — bearish momentum. J not leading lower may indicate maturing downtrend.';
   } else {
     momentum = 'Neutral';
-    momentumDescription = 'K and D are intertwined with no clear spread. The market lacks directional momentum — wait for a clear crossover to establish bias.';
+    momentumDescription = 'K and D intertwined — no directional momentum. Wait for a clear crossover.';
+  }
+
+  // Trend confirmation
+  let trendConfirmation = '';
+  if (smaState) {
+    const { priceAboveSma20, priceAboveSma50, sma20AboveSma50 } = smaState;
+    if (priceAboveSma20 && priceAboveSma50 && sma20AboveSma50) {
+      trendConfirmation = 'Strong uptrend: price above both SMA20 and SMA50, with SMA20 above SMA50. KDJ buy signals are trend-aligned.';
+    } else if (!priceAboveSma20 && !priceAboveSma50 && !sma20AboveSma50) {
+      trendConfirmation = 'Strong downtrend: price below both SMA20 and SMA50, with SMA20 below SMA50. KDJ sell signals are trend-aligned.';
+    } else if (priceAboveSma20 && !priceAboveSma50) {
+      trendConfirmation = 'Mixed: price above SMA20 but below SMA50. Short-term bullish, medium-term bearish. Wait for alignment.';
+    } else if (!priceAboveSma20 && priceAboveSma50) {
+      trendConfirmation = 'Mixed: price below SMA20 but above SMA50. Short-term bearish, medium-term bullish. Pullback in uptrend.';
+    } else {
+      trendConfirmation = 'Trend context: price and SMAs are in transition. Watch for clear directional alignment.';
+    }
   }
 
   // Generate explanation
@@ -180,29 +380,37 @@ function analyzeKDJ(data: StockData[], k: (number | null)[], d: (number | null)[
   let explanation = '';
   if (strongBuy > 0 || strongSell > 0) {
     const dir = strongBuy > 0 ? 'buying' : 'selling';
-    explanation = `Strong ${dir} signals detected. ${signals[0]?.reason || ''}. `;
+    explanation = `Strong ${dir} signals detected. `;
   } else if (hasBuy && !hasSell) {
-    explanation = 'Buy signals are present. ';
+    explanation = 'Buy signals present. ';
   } else if (hasSell && !hasBuy) {
-    explanation = 'Sell signals are present. ';
+    explanation = 'Sell signals present. ';
   } else if (hasBuy && hasSell) {
-    explanation = 'Conflicting signals — the market is at a decision point. ';
+    explanation = 'Conflicting signals — market at a decision point. ';
   } else {
-    explanation = 'No strong KDJ signals at this time. ';
+    explanation = 'No strong signals at this time. ';
+  }
+
+  if (smaState) {
+    const trendWord = smaState.priceAboveSma20 ? 'above' : 'below';
+    explanation += `Price is ${trendWord} SMA20. `;
   }
 
   explanation += `${zoneDescription.split('.')[0]}. ${momentumDescription.split('.')[0]}.`;
 
-  return { signals, explanation, zone, zoneDescription, momentum, momentumDescription };
+  return { signals, explanation, zone, zoneDescription, momentum, momentumDescription, smaState: smaState!, trendConfirmation };
 }
 
 export function KDJIndicator({ data }: KDJIndicatorProps) {
+  const fullKDJ = useMemo(() => calculateKDJ(data), [data]);
+  const sma20 = useMemo(() => calculateSMA(data, 20), [data]);
+  const sma50 = useMemo(() => calculateSMA(data, 50), [data]);
+
   const chartData = useMemo(() => {
     const slicedData = data.slice(-126);
-    const { k, d, j } = calculateKDJ(data);
-    const kSliced = k.slice(-126);
-    const dSliced = d.slice(-126);
-    const jSliced = j.slice(-126);
+    const kSliced = fullKDJ.k.slice(-126);
+    const dSliced = fullKDJ.d.slice(-126);
+    const jSliced = fullKDJ.j.slice(-126);
 
     return slicedData.map((d, i) => ({
       date: d.date,
@@ -210,11 +418,12 @@ export function KDJIndicator({ data }: KDJIndicatorProps) {
       d: dSliced[i],
       j: jSliced[i],
     }));
-  }, [data]);
+  }, [data, fullKDJ]);
 
-  const fullKDJ = useMemo(() => calculateKDJ(data), [data]);
-
-  const analysis = useMemo(() => analyzeKDJ(data, fullKDJ.k, fullKDJ.d, fullKDJ.j), [data, fullKDJ]);
+  const analysis = useMemo(
+    () => analyzeKDJ(data, fullKDJ.k, fullKDJ.d, fullKDJ.j, sma20, sma50),
+    [data, fullKDJ, sma20, sma50],
+  );
 
   const latest = chartData[chartData.length - 1];
   const latestK = latest?.k;
@@ -237,11 +446,18 @@ export function KDJIndicator({ data }: KDJIndicatorProps) {
     return <Minus className="h-4 w-4 text-muted-foreground" />;
   };
 
-  const getSignalBadge = (type: string, strength: string) => {
+  const getSignalBadge = (type: string, strength: string, category: string) => {
+    const catLabel = category === 'combined' ? 'combo' : category;
     if (strength === 'strong') {
       return <Badge variant={type === 'buy' ? 'default' : 'destructive'} className="text-[10px] px-1.5 py-0">{strength}</Badge>;
     }
     return <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{strength}</Badge>;
+  };
+
+  const getCategoryBadge = (category: string) => {
+    if (category === 'combined') return <Badge variant="outline" className="text-[9px] px-1 py-0 border-primary/50 text-primary">KDJ+SMA</Badge>;
+    if (category === 'sma') return <Badge variant="outline" className="text-[9px] px-1 py-0 border-chart-maFast/50 text-chart-maFast">SMA</Badge>;
+    return <Badge variant="outline" className="text-[9px] px-1 py-0 border-primary/50 text-primary">KDJ</Badge>;
   };
 
   return (
@@ -249,8 +465,8 @@ export function KDJIndicator({ data }: KDJIndicatorProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h4 className="font-semibold">KDJ Indicator</h4>
-          <p className="text-xs text-muted-foreground">Stochastic Oscillator with J-line</p>
+          <h4 className="font-semibold">KDJ + SMA Indicator</h4>
+          <p className="text-xs text-muted-foreground">Stochastic Oscillator with SMA trend confirmation</p>
         </div>
         <div className="text-right">
           <div className="font-mono font-bold text-lg">
@@ -307,6 +523,30 @@ export function KDJIndicator({ data }: KDJIndicatorProps) {
         <span className="text-bearish">Overbought &gt;80</span>
       </div>
 
+      {/* SMA Trend Context */}
+      {analysis?.smaState && (
+        <div className="flex gap-2">
+          <div className={cn("flex-1 rounded-lg p-2.5 border", analysis.smaState.priceAboveSma20 ? "bg-bullish/10 border-bullish/20" : "bg-bearish/10 border-bearish/20")}>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Price vs SMA20</div>
+            <div className={cn("text-xs font-medium", analysis.smaState.priceAboveSma20 ? 'text-bullish' : 'text-bearish')}>
+              {analysis.smaState.priceAboveSma20 ? 'Above' : 'Below'} (${analysis.smaState.sma20?.toFixed(2)})
+            </div>
+          </div>
+          <div className={cn("flex-1 rounded-lg p-2.5 border", analysis.smaState.priceAboveSma50 ? "bg-bullish/10 border-bullish/20" : "bg-bearish/10 border-bearish/20")}>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Price vs SMA50</div>
+            <div className={cn("text-xs font-medium", analysis.smaState.priceAboveSma50 ? 'text-bullish' : 'text-bearish')}>
+              {analysis.smaState.priceAboveSma50 ? 'Above' : 'Below'} (${analysis.smaState.sma50?.toFixed(2)})
+            </div>
+          </div>
+          <div className={cn("flex-1 rounded-lg p-2.5 border", analysis.smaState.sma20AboveSma50 ? "bg-bullish/10 border-bullish/20" : "bg-bearish/10 border-bearish/20")}>
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">SMA20 vs SMA50</div>
+            <div className={cn("text-xs font-medium", analysis.smaState.sma20AboveSma50 ? 'text-bullish' : 'text-bearish')}>
+              {analysis.smaState.sma20AboveSma50 ? 'Golden' : 'Death'} Cross
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Signals Section */}
       {analysis && analysis.signals.length > 0 && (
         <div className="space-y-2">
@@ -316,9 +556,10 @@ export function KDJIndicator({ data }: KDJIndicatorProps) {
               <div key={i} className="flex items-start gap-2 text-xs">
                 {getSignalIcon(sig.type)}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="font-medium">{sig.name}</span>
-                    {getSignalBadge(sig.type, sig.strength)}
+                    {getCategoryBadge(sig.category)}
+                    {getSignalBadge(sig.type, sig.strength, sig.category)}
                   </div>
                   <p className="text-muted-foreground mt-0.5 leading-relaxed">{sig.reason}</p>
                 </div>
@@ -328,7 +569,7 @@ export function KDJIndicator({ data }: KDJIndicatorProps) {
         </div>
       )}
 
-      {/* Zone & Momentum Analysis */}
+      {/* Zone & Momentum */}
       {analysis && (
         <div className="space-y-3">
           <div className="flex gap-2">
@@ -345,6 +586,17 @@ export function KDJIndicator({ data }: KDJIndicatorProps) {
               </div>
             </div>
           </div>
+
+          {/* Trend Confirmation */}
+          {analysis.trendConfirmation && (
+            <div className="rounded-lg bg-muted/30 p-3">
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <BarChart3 className="h-3.5 w-3.5 text-primary" />
+                <h5 className="text-xs font-semibold">Trend Context</h5>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">{analysis.trendConfirmation}</p>
+            </div>
+          )}
 
           {/* Human Explanation */}
           <div className="rounded-lg bg-muted/30 p-3">
