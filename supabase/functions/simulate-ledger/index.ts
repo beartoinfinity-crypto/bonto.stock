@@ -105,6 +105,8 @@ function accountEquity(acct: PersonAccount, prices: Record<string, number>): num
 }
 
 function shouldSell(pos: Position, s: SymbolSignal): string | null {
+  // Zero-price gate: never fire stop/target when the price is unverifiable.
+  if (!(s.price > 0)) return null;
   if (pos.stop != null && s.price <= pos.stop) return 'stop-loss hit';
   if (pos.target != null && s.price >= pos.target) return 'take-profit hit';
   if (s.action === 'SELL') return 'signal flipped to sell';
