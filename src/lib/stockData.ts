@@ -264,6 +264,43 @@ export function calculateMACD(data: StockData[]): { macd: (number | null)[], sig
   return { macd, signal, histogram };
 }
 
+export function calculateKDJ(data: StockData[], period: number = 9): { k: (number | null)[], d: (number | null)[], j: (number | null)[] } {
+  const k: (number | null)[] = [];
+  const d: (number | null)[] = [];
+  const j: (number | null)[] = [];
+  
+  let prevK = 50;
+  let prevD = 50;
+  
+  data.forEach((_, i) => {
+    if (i < period - 1) {
+      k.push(null);
+      d.push(null);
+      j.push(null);
+      return;
+    }
+    
+    const slice = data.slice(i - period + 1, i + 1);
+    const high = Math.max(...slice.map(d => d.high));
+    const low = Math.min(...slice.map(d => d.low));
+    
+    const rsv = high === low ? 50 : ((data[i].close - low) / (high - low)) * 100;
+    
+    const curK = (2 / 3) * prevK + (1 / 3) * rsv;
+    const curD = (2 / 3) * prevD + (1 / 3) * curK;
+    const curJ = 3 * curK - 2 * curD;
+    
+    k.push(parseFloat(curK.toFixed(2)));
+    d.push(parseFloat(curD.toFixed(2)));
+    j.push(parseFloat(curJ.toFixed(2)));
+    
+    prevK = curK;
+    prevD = curD;
+  });
+  
+  return { k, d, j };
+}
+
 export function calculateBollingerBands(data: StockData[], period: number = 20, stdDev: number = 2): { upper: (number | null)[], middle: (number | null)[], lower: (number | null)[] } {
   const sma = calculateSMA(data, period);
   const upper: (number | null)[] = [];

@@ -9,6 +9,7 @@ import { MarketStructure } from '@/components/MarketStructure';
 import { ChartAnalyst } from '@/components/ChartAnalyst';
 import { TechnicalIndicators } from '@/components/TechnicalIndicators';
 import { MultiTimeframeRSI } from '@/components/MultiTimeframeRSI';
+import { KDJIndicator } from '@/components/KDJIndicator';
 import { SignalPanel } from '@/components/SignalPanel';
 import { ForecastSimulator } from '@/components/ForecastSimulator';
 import { OptionsWheel } from '@/components/OptionsWheel';
@@ -200,6 +201,11 @@ const Index = () => {
               {/* Multi-Timeframe RSI */}
               <div className="animate-fade-in" style={{ animationDelay: '0.25s' }}>
                 <MultiTimeframeRSI data={historicalData} />
+              </div>
+
+              {/* KDJ Indicator */}
+              <div className="animate-fade-in" style={{ animationDelay: '0.27s' }}>
+                <KDJIndicator data={historicalData} />
               </div>
 
               {/* Forecast Simulator */}
