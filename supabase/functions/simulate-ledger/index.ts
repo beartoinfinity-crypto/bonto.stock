@@ -159,6 +159,7 @@ function runDayForPerson(acct: PersonAccount, day: PersonaDaySignals): { account
   const positionsBySymbol = new Map(account.positions.map(p => [p.symbol.toUpperCase(), p]));
 
   // 1. Exits first (sells) — stop / target / signal flip.
+  const soldToday = new Set<string>(); // prevent same-day re-entry after exit
   for (const s of day.watch) {
     const pos = positionsBySymbol.get(s.symbol.toUpperCase());
     if (!pos) continue;
@@ -170,6 +171,7 @@ function runDayForPerson(acct: PersonAccount, day: PersonaDaySignals): { account
       account.cash = round2(account.cash + value);
       account.positions = account.positions.filter(p => p.symbol.toUpperCase() !== s.symbol.toUpperCase());
       positionsBySymbol.delete(s.symbol.toUpperCase());
+      soldToday.add(s.symbol.toUpperCase());
       trades.push({
         id: nextTradeId(), date: day.date, personaId: day.personaId, symbol: s.symbol,
         action: 'SELL', qty, price: s.price, value, realizedPnl: round2(value - cost), note: `exit (${why})`,
@@ -177,9 +179,10 @@ function runDayForPerson(acct: PersonAccount, day: PersonaDaySignals): { account
     }
   }
 
-  // 2. Buys — never double up a held symbol.
+  // 2. Buys — never double up a held symbol, never re-enter a symbol sold today.
   for (const s of day.buySignals) {
     if (positionsBySymbol.has(s.symbol.toUpperCase())) continue;
+    if (soldToday.has(s.symbol.toUpperCase())) continue;
     if (s.action !== 'BUY') continue;
     const equity = accountEquity(account, prices);
     const budget = equity * (s.sizeFraction ?? POSITION_FRACTION);

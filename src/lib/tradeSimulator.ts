@@ -249,6 +249,7 @@ export function runDayForPerson(
   const positionsBySymbol = new Map(account.positions.map(p => [p.symbol.toUpperCase(), p]));
 
   // 1. Evaluate exits for existing positions (signal flip / stop / target).
+  const soldToday = new Set<string>(); // prevent same-day re-entry after exit
   for (const s of day.watch) {
     const pos = positionsBySymbol.get(s.symbol.toUpperCase());
     if (!pos) continue;
@@ -260,6 +261,7 @@ export function runDayForPerson(
       const realizedPnl = round2(value - cost);
       account.cash = round2(account.cash + value);
       account.positions = account.positions.filter(p => p.symbol.toUpperCase() !== s.symbol.toUpperCase());
+      soldToday.add(s.symbol.toUpperCase());
       trades.push({
         id: nextTradeId(),
         date: day.date,
@@ -278,6 +280,7 @@ export function runDayForPerson(
   // 2. Evaluate buys.
   for (const s of day.buySignals) {
     if (positionsBySymbol.has(s.symbol.toUpperCase())) continue; // already holding — no doubling up
+    if (soldToday.has(s.symbol.toUpperCase())) continue; // don't re-enter a symbol sold today
     if (s.action !== 'BUY') continue;
     const equity = accountEquity(account, prices);
     const budget = equity * (s.sizeFraction ?? POSITION_FRACTION);
