@@ -67,6 +67,33 @@ interface SymbolSignal {
 
 function round2(n: number): number { return Math.round(n * 100) / 100; }
 
+/** Rebuild per-persona accounts from the canonical trade list.
+ *  Ensures positions are always consistent with fills — prevents ghost
+ *  positions / wrong cash from accumulating across re-runs. */
+function replayAccounts(trades: Trade[]): Record<PersonaId, PersonAccount> {
+  const accounts = freshAccounts();
+  const sorted = [...trades].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  for (const t of sorted) {
+    const acct = accounts[t.personaId as PersonaId];
+    if (!acct) continue;
+    acct.lastRunDate = t.date;
+    const pos = acct.positions.find(x => x.symbol.toUpperCase() === t.symbol.toUpperCase());
+    if (t.action === 'BUY') {
+      if (pos) continue; // no doubling up
+      acct.cash = round2(acct.cash - t.value);
+      acct.positions.push({
+        symbol: t.symbol, qty: t.qty, avgCost: t.price,
+        stop: round2(t.price * (1 + STOP_LOSS)),
+        target: round2(t.price * (1 + TAKE_PROFIT)),
+      });
+    } else {
+      acct.cash = round2(acct.cash + t.value);
+      if (pos) acct.positions = acct.positions.filter(x => x !== pos);
+    }
+  }
+  return accounts;
+}
+
 function freshAccounts(): Record<PersonaId, PersonAccount> {
   const accounts = {} as Record<PersonaId, PersonAccount>;
   for (const p of PERSONA_IDS) accounts[p] = { personaId: p, cash: STARTING_CASH, positions: [], lastRunDate: null };
@@ -137,7 +164,7 @@ function runDayForPerson(acct: PersonAccount, day: PersonaDaySignals): { account
     if (!pos) continue;
     const why = shouldSell(pos, s);
     if (why) {
-      const qty = pos.qty;
+      const qty = Math.min(pos.qty, pos.qty); // clamp to held (defensive)
       const value = round2(qty * s.price);
       const cost = round2(qty * pos.avgCost);
       account.cash = round2(account.cash + value);
@@ -522,6 +549,9 @@ Deno.serve(async (req) => {
 
   // 1. Load ledger (or start fresh) — write-protect check.
   const ledger = (await loadLedger(supabase)) ?? createLedger();
+  // Always rebuild accounts from trades — ensures positions are consistent
+  // with fills even if prior runs left corrupt state in the KV snapshot.
+  ledger.accounts = replayAccounts(ledger.trades ?? []);
   if (ledger.lastRunDate === date && !rerun) {
     return jsonRes({ ok: true, simulated: false, reason: `already simulated session ${date}`, date });
   }
@@ -536,6 +566,9 @@ Deno.serve(async (req) => {
     ledger.history = (ledger.history ?? []).filter(h => h.date !== strip);
     const remaining = ledger.trades.map(t => t.date).sort();
     ledger.lastRunDate = remaining.length ? remaining[remaining.length - 1] : null;
+    // Rebuild accounts from surviving trades — prevents ghost positions from
+    // prior corrupt runs carrying forward into the re-simulation.
+    ledger.accounts = replayAccounts(ledger.trades ?? []);
   }
 
   // 2. Universe + day prices (cloud snapshot).
