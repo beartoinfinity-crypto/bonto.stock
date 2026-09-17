@@ -25,6 +25,19 @@ export function StockMetrics({ stock, historicalData = [] }: StockMetricsProps) 
   const isPositive = (stock.change ?? 0) >= 0;
   const latestDailyVolume = historicalData.length > 0 ? historicalData[historicalData.length - 1].volume : 0;
 
+  // 52-week high/low and 10-day average volume are derived from the daily bar
+  // series. The quote providers leave these 0 for curated symbols (Finnhub and
+  // Stooq skip the quoteSummary call when localFundamentals already covers the
+  // symbol), so the bar series is the authoritative source — it is already
+  // fetched for the charts and costs nothing extra.
+  const last252 = historicalData.slice(-252);
+  const week52High = last252.length ? Math.max(...last252.map(d => d.high)) : (stock.week52High ?? 0);
+  const week52Low = last252.length ? Math.min(...last252.map(d => d.low)) : (stock.week52Low ?? 0);
+  const last10 = historicalData.slice(-10);
+  const avgVolume = last10.length
+    ? last10.reduce((sum, d) => sum + (d.volume ?? 0), 0) / last10.length
+    : (stock.volume ?? 0);
+
   // Graham intrinsic value: IV = EPS × (8.5 + 2g)
   // "Actual" uses no-growth assumption (g=0) → EPS × 8.5 (conservative / current earnings power)
   // "Estimated" uses modeled growth (g=7.5%) → EPS × 23.5 (forward-looking fair value)
@@ -36,9 +49,9 @@ export function StockMetrics({ stock, historicalData = [] }: StockMetricsProps) 
     { label: t('marketCap'), value: stock.marketCap || 'N/A', icon: DollarSign },
     { label: t('peRatio'), value: formatNumber(stock.pe), icon: BarChart3 },
     { label: t('dailyVolume'), value: formatVolume(latestDailyVolume), icon: Activity },
-    { label: t('avgVolume'), value: formatVolume(stock.volume ?? 0), icon: Activity },
-    { label: t('week52High'), value: '$' + formatNumber(stock.week52High), icon: TrendingUp },
-    { label: t('week52Low'), value: '$' + formatNumber(stock.week52Low), icon: TrendingDown },
+    { label: t('avgVolume'), value: formatVolume(avgVolume), icon: Activity },
+    { label: t('week52High'), value: '$' + formatNumber(week52High), icon: TrendingUp },
+    { label: t('week52Low'), value: '$' + formatNumber(week52Low), icon: TrendingDown },
     { label: 'Intrinsic (Actual)', value: ivActual > 0 ? '$' + formatNumber(ivActual) : 'N/A', icon: Gem },
     { label: 'Intrinsic (Est.)', value: ivEstimated > 0 ? '$' + formatNumber(ivEstimated) : 'N/A', icon: Sparkles },
     { label: t('sector'), value: stock.sector || 'Unknown', icon: Calendar },
