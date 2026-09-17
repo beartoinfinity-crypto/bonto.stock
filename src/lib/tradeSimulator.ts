@@ -286,8 +286,9 @@ export function runDayForPerson(
     const budget = equity * (s.sizeFraction ?? POSITION_FRACTION);
     if (budget <= 0) continue;
     const available = budget < account.cash ? budget : account.cash;
+    if (!(available > 0) || !(s.price > 0)) continue;
     const qty = Math.floor(available / s.price);
-    if (qty <= 0) continue;
+    if (!Number.isFinite(qty) || qty <= 0) continue;
     const value = round2(qty * s.price);
     const stop = s.stopLoss ?? round2(s.price * (1 + STOP_LOSS));
     const target = s.takeProfit ?? round2(s.price * (1 + TAKE_PROFIT));
