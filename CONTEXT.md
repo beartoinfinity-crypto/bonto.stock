@@ -30,6 +30,14 @@
 
 **TradingAgents rating**: The final 5-tier decision produced by `runTradingAgents()` — `Buy`, `Overweight`, `Hold`, `Underweight`, or `Sell`. Derived entirely by rule from the multi-agent pipeline (analyst team → research manager → bull/bear debate → trader → risk committee → portfolio manager). No AI/ML.
 
+**KDJ indicator**: A stochastic oscillator variant with three lines — K (fast), D (slow), J (divergence). J crossing above D from oversold (<20) is bullish; J crossing below D from overbought (>80) is bearish. Combined with SMA crossovers for stronger signals.
+
+**Ledger round-trip**: A same-day SELL + BUY of the same symbol by the same persona — selling and re-entering on the same session. Prevented by the `soldToday` set in `runDayForPerson`. If present in cloud ledger, indicates a corrupted or stale edge fn.
+
+**Ledger integrity**: The invariant that all trades have valid qty/price/value, all positions are reconstructible from trades, and no impossible states exist (e.g. selling more than held, null qty). Validated by `scripts/validate-ledger.cjs`.
+
+**Edge fn**: A Supabase Edge Function — a Deno serverless function deployed to the Supabase project. The `simulate-ledger` fn is the server-authoritative ledger writer. Must be deployed from repo root with `--no-verify-jwt`; auth via `x-cron-secret` header.
+
 ## Storage & Data Sources
 
 See [`docs/CODEBASE.md`](docs/CODEBASE.md) for storage hierarchy (Supabase → SQLite → localStorage), Supabase table schemas, and all external data source details.

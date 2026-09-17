@@ -189,6 +189,10 @@ New `/ledger` page ("Simulated Traders"). A cast of seven named personas, each b
 - **History / price chain**: per-symbol history asks the live API first, then falls back to stored Supabase bars (`fetchStoredHistoryForSymbol` from `stock_historical`, the same RLS-public source the Master Matrix uses; the 80-symbol index universe has bars), then synthetic `generateHistoricalData` (which produces no tactical entry signals). So with the network down the ledger still trades off real stored bars.
 - **Persistence**: `stockpulse_trade_ledger` (a `DOCUMENT_KEY`; NOT in the browser sync keys — the server is the only writer), shape `LedgerStore { accounts, trades, decisions, lastRunDate, prices }`.
 - **Server-authoritative**: `simulate-ledger` (Supabase edge fn, pg_cron `0 12 * * 1-5` UTC) is the **only writer** of the ledger row. Browsers never push or merge the ledger (`ledgerMerge` union logic was removed); they **pull the cloud copy verbatim** (`pullLedger` adopts it when local is missing/stale). The `/ledger` page is a cloud viewer: auto-pulls on mount, shows a run-status badge (green "session N: fills/no fills — caught up" vs amber "session not simulated yet"), and re-runs via the **Re-run session** button → `POST /api/ledger/rerun` → the fn clears the latest simulated session and re-simulates atomically (goal: no manual local run buttons; reset lives on the server).
+- **Zero-price gate (shouldSell)**: `shouldSell` returns `null` when `!(s.price > 0)` — prevents stop-loss/take-profit/signal-flip sells on unverifiable symbols. Applied to both `tradeSimulator.ts` and `simulate-ledger/index.ts`.
+- **NaN/Infinity buy guard**: buy loop skips when `!(available > 0) || !(s.price > 0) || !Number.isFinite(qty)` — prevents `Math.floor(Infinity/0)` → `Infinity` → serialized as `null` in JSON. Applied to both files.
+- **Same-day round-trip prevention**: `soldToday` set in `runDayForPerson` tracks symbols sold during current session; buy loop skips them. Applied to both files.
+- **Account rebuild from trades**: `pullLedger` in `supabaseDb.ts` runs `replayAccounts(healSameDayConflicts(trades))` before returning — cloud's stale account snapshot (null cash, ghost positions) no longer poisons the leaderboard. Edge fn also rebuilds accounts from trades before sim (line ~554) and after re-run strip (line ~568).
 - **Decision log**: every symbol each persona evaluates each day is persisted in `decisions` (a `DailyDecisionLog` per persona+date), including **HOLDs** — recording action, price, strength/confidence, buy/sell vote counts, stop/target and a human-readable reason. Logs accumulate across days (a re-run replaces the same persona+date's entry, keeping older days).
 - **View layer** (`src/lib/ledgerView.ts`, pure + unit-tested): `flatDecisions`/`distinctDates`, `filterTrades`/`filterDecisions` (persona, action, symbol, date, free-text search) and `sortTrades`/`sortDecisions`. The page renders a **global Decisions panel** (accumulated signals incl. HOLDs) and an **All Transactions table** (accumulated fills), each with a filter bar, live summary stats (BUY/SELL/HOLD counts; buys/sells, notional, realized P/L), and pagination (100/page) — making any day/persona/symbol auditable as history grows.
 - **Trigger**: the server's `simulate-ledger` fn runs on schedule (Mon–Fri 12:00 UTC) — **write-protected**, one simulation per session (`{"ok":true,"simulated":false,"reason":"already simulated <date>"}` on re-fire). The browser's `simulateDay` mirrors the same semantics for offline/local use only. A `GET /api/ledger/status` probe reports `{ latestSession, lastRunDate, caughtUp, latestSessionFillCount }` without side effects (the old status endpoint used to fire a run — deprecated).
@@ -206,13 +210,19 @@ New `/ledger` page ("Simulated Traders"). A cast of seven named personas, each b
 
 8 strategies in `generateSignals()`: MA Crossover, RSI Momentum, MACD Momentum, Bollinger Position, Volume, Candle Patterns, S/R Break, Multi-TF RSI. Each returns `Signal` with direction, strength, confidence (0-100), entry/stop/target.
 
+Additional technical indicators exported from `stockData.ts`:
+- `calculateKDJ(rows, period, signalPeriod)` → `{ K[], D[], J[] }` — Stochastic Oscillator with K/D/J lines
+- `calculateSMA(rows, period)` → `{ date, value }[]` — Simple Moving Average
+- `calculateRSI(rows, period)` → `{ date, value }[]` — Relative Strength Index
+- `calculateMACD(rows, fast, slow, signal)` → `{ date, macd, signal, histogram }[]` — MACD
+
 Forecasting: `generateForecast()` (trend + confidence bands), `generateMonteCarloPaths()` (GBM simulation, p10-p90).
 
 ### `src/lib/supabaseDb.ts` ??Supabase Cloud (597 lines)
 
 Tables: `stockpulse_kv`, `stock_quotes`, `stock_historical` (real OHLCV bars, read via `supabaseHistory.ts`), `politician_featured_trades`, `avs_results`, `social_sentiment_cache`, `api_usage_log`.
 
-Key: `maybeSyncToSupabase(key)` debounced 3s push. `pullAll()` paginated 500/page. `pushFeaturedTrades()` chunked 100/batch. `pullFreshCloudPrices()` fetches the current cloud quote board for live marks. Removed ledger paths (ledger is server-authoritative): no `overwriteLedger`, no merge; `pullLedger` adopts the cloud copy verbatim.
+Key: `maybeSyncToSupabase(key)` debounced 3s push. `pullAll()` paginated 500/page. `pushFeaturedTrades()` chunked 100/batch. `pullFreshCloudPrices()` fetches the current cloud quote board for live marks. Removed ledger paths (ledger is server-authoritative): no `overwriteLedger`, no merge; `pullLedger` adopts the cloud copy verbatim and rebuilds accounts from trades via `replayAccounts(healSameDayConflicts(trades))`.
 
 ### `src/lib/storage.ts` ??Unified Write Layer (70 lines)
 
@@ -233,7 +243,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 
 | Route | Page | Key Hook/Component |
 |-------|------|--------------------|
-| `/` | Index ??Dashboard (891 lines) | `useStockData` |
+| `/` | Index ??Dashboard (891 lines) | `useStockData`; includes KDJIndicator with SMA crossover signals |
 | `/masters` | TradingMasters ??12-investor analyzer (281 lines) | `analyzeStock` + `summarizeMasterResult`; verdict summary boxes (BUY/HOLD/WATCH/SELL-AVOID), per-master cards |
 | `/trading-agents` | TradingAgentsPage ??multi-agent report (391 lines) | `runTradingAgents`; analyst team, bull/bear debate, trader plan, risk committee, portfolio decision, final 5-tier rating |
 | `/hedge-fund` | HedgeFundPage ??PEAD alpha model (291 lines) | `fetchEarningsSurprises` + `computePEAD`; quarterly EPS surprise ??drift conviction |
@@ -258,6 +268,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | `ChartAnalyst.tsx` | 589 | Pattern recognition: S/R, trendlines, candle patterns. |
 | `AlertPanel.tsx` | 280 | Price alert manager. |
 | `MultiTimeframeRSI.tsx` | 138 | RSI(7/14/21) confluence display. |
+| `KDJIndicator.tsx` | — | KDJ indicator with SMA20/SMA50 dual-axis chart, KDJ + SMA crossover signal detection, Golden/Death Cross detection, zone analysis (overbought/oversold), and combined KDJ+SMA alignment signals. |
 | `LiquidityMonitor.tsx` | 183 | Bid/ask depth via `deriveOrderBook()`. |
 | `StockSearch.tsx` | 88 | Autocomplete search, 300ms debounce. |
 | `StockMetrics.tsx` | 131 | P/E, market cap, 52-week range, volume. |
@@ -278,7 +289,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | `stockScreener.ts` | ??| `screenerStocks` list, filter types. |
 | `useScreenerData.ts` | 361 | Fetches all screener stocks, runs recommendations, caches results. |
 | `useTacticalHistory.ts` | 48 | In-browser tactical engine replay. No server calls. |
-| `edgeFn.ts` | ??| Supabase Edge Function client. |
+| `edgeFn.ts` | ?? | Supabase Edge Function client. The `simulate-ledger` fn is the server-authoritative ledger writer — shares core logic with `tradeSimulator.ts`. |
 | `localDb.ts` | ?? | sql.js WASM wrapper, IndexedDB persistence. Historical cache has a bar-currency gate (`isDailyBarSeriesFresh`): newest bar must be ??4 days old or the series is a miss. |
 
 ## Design Decisions
@@ -294,3 +305,6 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | Three-tier fetch | Server proxy ??direct ??CORS proxies (legacy) |
 | SQLite backup | Survives Supabase outages, offline-capable |
 | PapaParse | Handles unquoted fields with commas (RFC 4180) |
+| Ledger server-authoritative | `simulate-ledger` edge fn is the ONLY writer; browsers pull verbatim — prevents forked/corrupted cloud ledger from multiple writers |
+| Account rebuild from trades | `pullLedger` + edge fn both run `replayAccounts()` to rebuild accounts from trades — prevents stale/null accounts from poisoning the leaderboard |
+| Edge fn builds sync | `tradeSimulator.ts` (browser) and `simulate-ledger/index.ts` (edge fn) share core buy/sell logic; fixes must be applied to both files and both must be deployed |

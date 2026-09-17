@@ -77,6 +77,10 @@ Editable engine: `src/lib/masterAnalysis.ts` (`analyzeStock` runs all 12). Add a
 - Pure math lives in `tradeSimulator.ts` and is unit-tested; keep behavioral thresholds in the hook.
 - **Server-authoritative**: `simulate-ledger` (Supabase edge fn) is the ONLY writer of `stockpulse_trade_ledger`. Browsers are cloud viewers — they pull the ledger verbatim on page load and never merge/push it. The `/ledger` page exposes a **Re-run session** button that calls `POST /api/ledger/rerun` (the fn re-simulates atomically) and a status badge via `GET /api/ledger/status`.
 - The fn simulates the **last completed session** at its **official session close** — every fill carries its own session date and a price inside that day's high–low range. Symbols with no fresh market data are untradeable (zero-price gate). The browser's `simulateDay` mirrors these session-date semantics for offline/local testing only.
+- **Edge fn shares core logic with browser**: when fixing buy/sell logic (e.g. stop-loss, `shouldSell`, buy guard), apply the fix to BOTH `tradeSimulator.ts` and `simulate-ledger/index.ts` and deploy both. Edge fn deploys may cache — verify source is present after deploy.
+- **Ledger integrity gotchas**: corrupted cloud ledger (null-qty, ghost positions, impossible sells) poisons browser state. Troubleshooting steps: (1) clean bad trades via `supabase-cli delete`, (2) re-deploy edge fn from repo root, (3) re-run via Re-run session button. Always run `node scripts/validate-ledger.cjs` after fixes.
+- **NaN propagation**: `Math.floor(Infinity / 0)` produces `Infinity` which serializes as `null` in JSON. Both files guard against this with `!(available > 0)`, `!(s.price > 0)`, and `Number.isFinite(qty)` checks before computing buy qty.
+- **Same-day round-trips**: `soldToday` set in `runDayForPerson` prevents buy-after-sell same-day. Edge fn deploys may cache — verify source is present after deploy.
 
 ## Testing & checks (run before committing)
 

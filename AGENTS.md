@@ -32,6 +32,10 @@
 - **Storage write path**: Supabase first → SQLite → localStorage (all via `storage.ts`)
 - **Runtime config pattern** (new features): browser fetches config from the server (`/api/sync-config`, `/api/api-keys`, `/api/edge-config`) — never bake VITE_ vars holding secrets; the dist bundle is committed
 - **Ledger day semantics**: a day simulates ONCE (`simulateDay` write-protect + server `simulate-ledger` fn). Re-run via the page's Re-run session (server), or delete the KV row for a full restart
+- **Ledger integrity gotchas**: corrupted cloud ledger (null-qty, ghost positions, impossible sells) poisons browser state. When troubleshooting: (1) clean bad trades via `supabase-cli delete`, (2) re-deploy edge fn from repo root, (3) re-run via Re-run session button. Always run `node scripts/validate-ledger.cjs` after fixes
+- **NaN propagation**: `Math.floor(Infinity / 0)` produces `Infinity` which serializes as `null` in JSON. Both `tradeSimulator.ts` and `simulate-ledger/index.ts` guard against this: `!(available > 0)`, `!(s.price > 0)`, and `Number.isFinite(qty)` checks before computing buy qty
+- **Same-day round-trips**: `soldToday` set in `runDayForPerson` tracks symbols sold during current session to prevent buy-after-sell same-day. Edge fn deploys may cache — verify source is present after deploy
+- **Edge fn builds sync**: the edge fn (`simulate-ledger/index.ts`) shares core logic with browser (`tradeSimulator.ts`). When fixing buy/sell logic, apply the fix to BOTH files and deploy both
 
 ## Context pointers
 

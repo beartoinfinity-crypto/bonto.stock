@@ -157,6 +157,8 @@ The four data jobs above were migrated off the browser — do **not** re-add the
   - **Re-run session** → `POST /api/ledger/rerun` — asks the fn to clear the latest simulated session and re-simulate it atomically.
   - **Status badge** → `GET /api/ledger/status` — green "session N: N fills / caught up" vs amber "session not simulated yet — waiting for the next run". Both need `CRON_SECRET` on the hosting env vars.
 - Legacy local **Reset today** was removed from the page — the server owns the ledger; a full restart means deleting the `stockpulse_trade_ledger` KV row.
+- **Ledger integrity**: corrupted cloud ledger (null-qty, ghost positions, impossible sells) poisons browser state. Both `tradeSimulator.ts` and the edge fn have guards against this: zero-price gate in `shouldSell`, NaN/Infinity buy guard, `soldToday` set, and account rebuild from trades. Always run `node scripts/validate-ledger.cjs` after fixes.
+- **Edge fn builds sync**: the edge fn (`simulate-ledger/index.ts`) shares core logic with browser (`tradeSimulator.ts`). When fixing buy/sell logic, apply the fix to BOTH files and deploy both. Edge fn deploys may cache — verify source is present after deploy.
 - Validation: run `node scripts/validate-ledger.cjs` after a simulated day to confirm every fill is inside its session's high–low and at the official close.
 
 ## Troubleshooting
@@ -177,5 +179,10 @@ The four data jobs above were migrated off the browser — do **not** re-add the
 | Ledger page "Cloud sync failed" | Server may be cold-starting; retry. Config arrives via `/api/sync-config` |
 | Positions show snapshot prices for the whole session | Live re-marking retries every 60s + on tab focus; check the browser console for provider failures (Finnhub key limit). The cloud quote-board fallback covers most misses |
 | Deploy from wrong folder fails | Run `npx.cmd supabase functions deploy ...` from the repo root, not `system32` |
+| Ledger shows Nancy at $0 or ghost positions | Corrupted cloud ledger (null-qty trades, impossible sells). Fix: (1) clean bad trades via `supabase-cli delete`, (2) re-deploy edge fn from repo root, (3) re-run via Re-run session button. Run `node scripts/validate-ledger.cjs` after |
+| Ledger shows impossible sells (selling more than held) | Stale edge fn or corrupted account snapshot. Both `tradeSimulator.ts` and edge fn have a zero-price gate in `shouldSell` — if `!(s.price > 0)`, returns null. Edge fn also rebuilds accounts from trades before sim |
+| Null-qty trades in cloud ledger | `Math.floor(Infinity/0)` bug — both files now guard with `!(available > 0)`, `!(s.price > 0)`, and `Number.isFinite(qty)` checks. Clean existing null-qty trades and re-run |
+| Same-day SELL+BUY round-trips | `soldToday` set in `runDayForPerson` prevents this — verify edge fn source is deployed (not cached). If present in cloud ledger, clean the conflicting trades and re-run |
+| Edge fn deploy doesn't take effect | Supabase caches edge fn builds — re-deploy from repo root with `npx.cmd supabase functions deploy simulate-ledger --no-verify-jwt` and verify source file content matches |
 
 For Express server architecture and API endpoints, see [`docs/CODEBASE.md`](docs/CODEBASE.md).
