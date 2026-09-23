@@ -71,8 +71,10 @@ All data-production jobs run **server-side on Supabase**, 24/7, no browser neede
 | `sync-stock-data?batch=1` | `0 22 * * 1-5` | Yahoo quotes + 10y bars, index-universe batch 1/3 (~27 symbols) | `stock_quotes`, `stock_historical` |
 | `sync-stock-data?batch=2` | `0 23 * * 1-5` | Batch 2/3 (~27 symbols) | `stock_quotes`, `stock_historical` |
 | `sync-stock-data?batch=3` | `0 0 * * 2-6` | Batch 3/3 (~26 symbols) | `stock_quotes`, `stock_historical` |
-| `sync-politician-trades` | `0 7 * * 1-5` | CapitolExposed + CongressInvests congressional trades | `stockpulse_kv` (`stockpulse_politician_trades`) |
-| `sync-featured-trades` | `30 7 * * *` | Trump (OpenCabinet + UnusualWhales) + Pelosi (StockSpill + UnusualWhales) | `politician_featured_trades` |
+| `sync-politician-trades` | `0 7 * * *` | Kadoa incremental into `politician_trades` + CapitolExposed + CongressInvests congressional trades | `politician_trades` (source=`kadoa`), `stockpulse_kv` (`stockpulse_politician_trades`) |
+| `sync-featured-trades` | `30 7 * * *` | Trump (OpenCabinet + UnusualWhales + Kadoa) + Pelosi (StockSpill + UnusualWhales + Kadoa) | `politician_featured_trades` |
+| `upsert-kadoa-trades` | manual / local script | One-time full Kadoa history backfill sink (`node scripts/backfill-kadoa.cjs`) | `politician_trades` (source=`kadoa`) |
+| `run-sql` | manual / local script | SQL runner while `supabase db push` is blocked by the CLI login-role bug (`node scripts/run-sql.cjs file.sql`) | arbitrary (auth: `x-cron-secret`) |
 | `simulate-ledger` | `0 12 * * 1-5` | Simulated-traders day, ONCE per day (write-protected; heals legacy conflicts) | `stockpulse_kv` (`stockpulse_trade_ledger`) |
 
 **Stock-data universe** = the app's index universe (S&P 500 ∪ NASDAQ-100 curated constituents, 80 symbols — mirrors `src/lib/masterAnalysis.ts` `INDEX_UNIVERSE_TICKERS`). The 3 batches are staggered across the 3 hours after the US close (22:00/23:00/00:00 UTC) to stay under Yahoo rate limits; each batch paces its fetches ~1.2s apart. By pre-open US time (12:00 UTC sim), all 80 symbols carry the latest close.
@@ -84,7 +86,7 @@ All data-production jobs run **server-side on Supabase**, 24/7, no browser neede
 | Stock batch 1 | 22:00 Mon–Fri | 06:00 Tue–Sat | 5/6 PM Mon–Fri (post-close) |
 | Stock batch 2 | 23:00 Mon–Fri | 07:00 Tue–Sat | 6/7 PM Mon–Fri |
 | Stock batch 3 | 00:00 Tue–Sat | 08:00 Tue–Sat | 7/8 PM Mon–Fri |
-| Politician trades | 07:00 Mon–Fri | 15:00 Mon–Fri | 2/3 AM Mon–Fri |
+| Politician trades | 07:00 daily | 15:00 daily | 2/3 AM daily |
 | Featured trades | 07:30 daily | 15:30 daily | 2:30/3:30 AM daily |
 | Simulate ledger | 12:00 Mon–Fri | 20:00 Mon–Fri | 7/8 AM Mon–Fri (pre-open) |
 
@@ -99,7 +101,15 @@ ET entries alternate because US close/move between EST (UTC-5) and EDT (UTC-4); 
 npx.cmd supabase functions deploy sync-stock-data --no-verify-jwt
 npx.cmd supabase functions deploy sync-politician-trades --no-verify-jwt
 npx.cmd supabase functions deploy sync-featured-trades --no-verify-jwt
+npx.cmd supabase functions deploy upsert-kadoa-trades --no-verify-jwt
+npx.cmd supabase functions deploy run-sql --no-verify-jwt
 npx.cmd supabase functions deploy simulate-ledger --no-verify-jwt
+
+# One-time full Kadoa backfill (local orchestrator -> upsert-kadoa-trades):
+node scripts/backfill-kadoa.cjs
+
+# SQL while `supabase db push` is blocked by the CLI login-role bug:
+# node scripts/run-sql.cjs path/to.sql   (calls the run-sql edge fn; needs CRON_SECRET)
 ```
 
 If the CLI says "Cannot find project ref": `npx.cmd supabase link --project-ref aqyaarnpmvvdzasjefje` first.
@@ -133,7 +143,8 @@ select id, status_code, content from net._http_response where id = <id>;
 
 ```sql
 select symbol, updated_at from stock_quotes order by updated_at desc limit 3;          -- 06:00 job
-select updated_at from stockpulse_kv where key = 'stockpulse_politician_trades';        -- 07:00 job
+select source, count(*), max(updated_at) from politician_trades group by source;  -- 07:00 job (kadoa)
+select updated_at from stockpulse_kv where key = 'stockpulse_politician_trades';        -- 07:00 job (legacy KV)
 select count(*), max(updated_at) from politician_featured_trades;                       -- 07:30 job
 select updated_at, value::jsonb ->> 'lastRunDate' from stockpulse_kv
   where key = 'stockpulse_trade_ledger';                                                -- 12:00 job

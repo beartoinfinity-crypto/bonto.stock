@@ -25,5 +25,11 @@ verify_jwt = false
 [functions.sync-featured-trades]
 verify_jwt = false
 
+[functions.upsert-kadoa-trades]
+verify_jwt = false
+
+[functions.run-sql]
+verify_jwt = false
+
 [functions.simulate-ledger]
 verify_jwt = false

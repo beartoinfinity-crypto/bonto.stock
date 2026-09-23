@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
 
 type Side = 'BUY' | 'SELL' | 'EXCHANGE' | 'OTHER';
 type SideFilter = 'ALL' | 'BUY' | 'SELL';
-type SourceId = 'capitol' | 'congress' | 'unusualwhales' | 'stockspill' | 'opencabinet';
+type SourceId = 'capitol' | 'congress' | 'unusualwhales' | 'stockspill' | 'opencabinet' | 'kadoa';
 
 interface TradeRow {
   id: string;
@@ -34,8 +34,8 @@ interface TradeRow {
 const PAGE_SIZE = 20;
 
 const FEATURED_POLITICIANS = [
-  { name: 'Donald J Trump', uwSlug: 'Donald J Trump', slug: 'donald-trump', sources: ['opencabinet', 'unusualwhales'] as SourceId[], description: 'President — OGE Form 278T filings' },
-  { name: 'Nancy Pelosi', uwSlug: 'Nancy Pelosi', slug: 'nancy-pelosi', sources: ['stockspill', 'unusualwhales'] as SourceId[], description: 'House (D-CA) — STOCK Act disclosures' },
+  { name: 'Donald J Trump', uwSlug: 'Donald J Trump', slug: 'donald-trump', sources: ['opencabinet', 'unusualwhales', 'kadoa'] as SourceId[], description: 'President — OGE Form 278T filings' },
+  { name: 'Nancy Pelosi', uwSlug: 'Nancy Pelosi', slug: 'nancy-pelosi', sources: ['stockspill', 'unusualwhales', 'kadoa'] as SourceId[], description: 'House (D-CA) — STOCK Act disclosures' },
 ];
 
 function formatAmount(from: number | null, to: number | null): string {
@@ -235,6 +235,40 @@ function mapOpenCabinetRows(json: any): TradeRow[] {
   });
 }
 
+function mapKadoaRows(json: unknown): TradeRow[] {
+  const root = json as { trades?: unknown } | null;
+  const trades: Record<string, unknown>[] = Array.isArray(root)
+    ? (root as Record<string, unknown>[])
+    : Array.isArray(root?.trades)
+      ? (root.trades as Record<string, unknown>[])
+      : [];
+  if (!Array.isArray(trades)) return [];
+  return trades
+    .filter((r) => r.ticker)
+    .map((r) => {
+      const tt = String(r.transaction_type ?? '').toLowerCase();
+      let side: Side = 'OTHER';
+      if (tt.includes('purchase') || tt.includes('buy')) side = 'BUY';
+      else if (tt.includes('sale') || tt.includes('sell')) side = 'SELL';
+      else if (tt.includes('exchange')) side = 'EXCHANGE';
+      return {
+        id: `kd-${r.id ?? Math.random().toString(36).slice(2)}`,
+        symbol: String(r.ticker ?? ''),
+        politician: String(r.filer_name ?? ''),
+        transaction_date: String(r.transaction_date ?? '').slice(0, 10),
+        filing_date: r.filing_date ? String(r.filing_date).slice(0, 10) : null,
+        transaction_type: side,
+        amount_from: typeof r.amount_range_low === 'number' ? r.amount_range_low : null,
+        amount_to: typeof r.amount_range_high === 'number' ? r.amount_range_high : null,
+        asset_name: r.asset_name ? String(r.asset_name) : null,
+        position_held: r.office ? String(r.office) : (r.agency ? String(r.agency) : null),
+        sources: new Set(['kadoa'] as SourceId[]),
+        source_url: r.doc_url ? String(r.doc_url) : undefined,
+        source_name: 'kadoa' as SourceId,
+      };
+    });
+}
+
 // ─── Merge / dedup helper ──────────────────────────────────────────
 
 function mergeTrade(existing: TradeRow, incoming: TradeRow): TradeRow {
@@ -285,7 +319,8 @@ export const PoliticianTrades = () => {
   // API pagination state
   const [capitolPage, setCapitolPage] = useState(2);
   const [congressOffset, setCongressOffset] = useState(0);
-  const [source, setSource] = useState<'capitol' | 'congress' | 'done'>('capitol');
+  const [kadoaOffset, setKadoaOffset] = useState(0);
+  const [source, setSource] = useState<'kadoa' | 'capitol' | 'congress' | 'done'>('kadoa');
   const [hasMore, setHasMore] = useState(true);
 
   // Featured politician state
@@ -365,6 +400,12 @@ export const PoliticianTrades = () => {
             const json = await res.json();
             allTrades.push(...mapOpenCabinetRows(json));
           }
+        } else if (src === 'kadoa') {
+          const res = await fetch(`/api/politician-trades/kadoa?politician=${encodeURIComponent(politician.name)}&limit=500`);
+          if (res.ok) {
+            const json = await res.json();
+            allTrades.push(...mapKadoaRows(json));
+          }
         }
       } catch { /* skip failed source */ }
     }
@@ -416,6 +457,12 @@ export const PoliticianTrades = () => {
               const json = await res.json();
               allTrades.push(...mapOpenCabinetRows(json));
             }
+          } else if (src === 'kadoa') {
+            const res = await fetch(`/api/politician-trades/kadoa?politician=${encodeURIComponent(politician.name)}&limit=500`);
+            if (res.ok) {
+              const json = await res.json();
+              allTrades.push(...mapKadoaRows(json));
+            }
           }
         } catch { /* skip */ }
       }
@@ -457,12 +504,30 @@ export const PoliticianTrades = () => {
     setLoading(true);
     setError(false);
     setHasMore(true);
-    setCapitolPage(2);
+    setCapitolPage(1);
     setCongressOffset(0);
-    setSource('capitol');
+    setKadoaOffset(0);
+    setSource('kadoa');
     setFeaturedActive(null);
 
-    // Try CapitolExposed first (most recent ~30 days)
+    // 1) Kadoa first — Supabase-backed full history (fallback: GitHub static JSON)
+    try {
+      const res = await fetch(`/api/politician-trades/kadoa?limit=${PAGE_SIZE}`);
+      if (res.ok) {
+        const json = await res.json();
+        const rows = mapKadoaRows(json);
+        if (rows.length > 0) {
+          setTrades(rows);
+          setFetchedAt(Date.now());
+          setSource('kadoa');
+          setKadoaOffset(rows.length);
+          setLoading(false);
+          return;
+        }
+      }
+    } catch { /* fall through */ }
+
+    // 2) Fallback: CapitolExposed (most recent ~30 days)
     try {
       const res = await proxyFetch(`https://www.capitolexposed.com/api/v1/trades?page=1&per_page=${PAGE_SIZE}`);
       const json = await res.json();
@@ -470,12 +535,14 @@ export const PoliticianTrades = () => {
       if (rows.length > 0) {
         setTrades(rows);
         setFetchedAt(Date.now());
+        setSource('capitol');
+        setCapitolPage(2);
         setLoading(false);
         return;
       }
     } catch { /* fall through */ }
 
-    // Fallback: CongressInvests first page
+    // 3) Fallback: CongressInvests first page
     try {
       const res = await proxyFetch(`https://congressinvests.com/trades?limit=${PAGE_SIZE}&offset=0`);
       const json = await res.json();
@@ -511,7 +578,24 @@ export const PoliticianTrades = () => {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
     try {
-      if (source === 'capitol') {
+      if (source === 'kadoa') {
+        const res = await fetch(`/api/politician-trades/kadoa?limit=${PAGE_SIZE}&offset=${kadoaOffset}`);
+        if (res.ok) {
+          const json = await res.json();
+          const rows = mapKadoaRows(json);
+          if (rows.length > 0) {
+            setTrades(prev => mergeInto(prev, rows));
+            setKadoaOffset(o => o + rows.length);
+            setFetchedAt(Date.now());
+          } else {
+            setSource('capitol');
+            setCapitolPage(1);
+          }
+        } else {
+          setSource('capitol');
+          setCapitolPage(1);
+        }
+      } else if (source === 'capitol') {
         const res = await proxyFetch(`https://www.capitolexposed.com/api/v1/trades?page=${capitolPage}&per_page=${PAGE_SIZE}`);
         const json = await res.json();
         const rows = mapCapitolRows(json);
@@ -579,6 +663,7 @@ export const PoliticianTrades = () => {
     unusualwhales: 'UnusualWhales',
     stockspill: 'StockSpill',
     opencabinet: 'OpenCabinet',
+    kadoa: 'Kadoa',
   };
 
   const SOURCE_COLORS: Record<SourceId, string> = {
@@ -587,6 +672,7 @@ export const PoliticianTrades = () => {
     unusualwhales: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
     stockspill: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
     opencabinet: 'bg-green-500/15 text-green-400 border-green-500/30',
+    kadoa: 'bg-rose-500/15 text-rose-400 border-rose-500/30',
   };
 
   return (
@@ -613,7 +699,7 @@ export const PoliticianTrades = () => {
         </div>
         <p className="text-xs text-muted-foreground">
           US Congressional STOCK Act disclosures (House Clerk &amp; Senate eFD) plus
-          President Donald J. Trump's OGE Form 278T filings. Data from CongressInvests, CapitolExposed, UnusualWhales, and StockSpill.
+          President Donald J. Trump's OGE Form 278T filings. Data from Kadoa, CongressInvests, CapitolExposed, UnusualWhales, and StockSpill.
         </p>
 
         {/* ── Featured Politicians ────────────────────────────── */}

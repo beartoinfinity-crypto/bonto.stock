@@ -47,6 +47,7 @@ Serves `dist/` SPA and provides server-side API endpoints.
 | `GET /api/politician-trades/unusualwhales?politician=X` | UW profile scrape, `__NEXT_DATA__` JSON parse. |
 | `GET /api/politician-trades/stockspill?member_name=X` | StockSpill Supabase `congress_trades` (read-only). |
 | `GET /api/politician-trades/opencabinet?politician=X` | OpenCabinet CSV parse (PapaParse), name + ticker filter. |
+| `GET /api/politician-trades/kadoa?politician=X&limit=N` | Kadoa Congress Trading Monitor — **Supabase `politician_trades` first** (full backfilled history, `source='kadoa'`), GitHub static JSON fallback (`filers.json` → `filer/<id>.json` envelope `{filer,trades}`, or recent `trades.json` feed). 6h GitHub cache. |
 | `GET /api/diag/opencabinet` | Diagnostic: Trump trade counts. |
 
 ### Cron architecture ??server-side (primary) + browser (local only)
@@ -58,8 +59,10 @@ Serves `dist/` SPA and provides server-side API endpoints.
 | `sync-stock-data?batch=1` | Weekdays 22:00 UTC (6 AM HKT) | Yahoo quotes + 10y bars, index-universe batch 1/3 (~27 symbols) ??`stock_quotes` / `stock_historical` |
 | `sync-stock-data?batch=2` | Weekdays 23:00 UTC (7 AM HKT) | Batch 2/3 (~27 symbols) |
 | `sync-stock-data?batch=3` | Tue?at 00:00 UTC (8 AM HKT) | Batch 3/3 (~26 symbols) |
-| `sync-politician-trades` | Weekdays 07:00 UTC | CapitolExposed + CongressInvests ??`stockpulse_kv` |
-| `sync-featured-trades` | Daily 07:30 UTC | Trump (OpenCabinet + UW) + Pelosi (StockSpill + UW) ??`politician_featured_trades` |
+| `sync-politician-trades` | Daily 07:00 UTC | Kadoa incremental → `politician_trades` (source=`kadoa`, meta-diff `stockpulse_kadoa_meta`) + CapitolExposed + CongressInvests → `stockpulse_kv` |
+| `sync-featured-trades` | Daily 07:30 UTC | Trump (OpenCabinet + UW + Kadoa) + Pelosi (StockSpill + UW + Kadoa) → `politician_featured_trades` |
+| `upsert-kadoa-trades` | Manual / local `scripts/backfill-kadoa.cjs` | One-time full Kadoa history backfill sink → `politician_trades` |
+| `run-sql` | Manual / local `scripts/run-sql.cjs` | SQL runner while `supabase db push` is blocked by the CLI login-role bug |
 | `simulate-ledger` | Weekdays 12:00 UTC | Simulated-traders day ONCE from cloud data (master matrix snapshot + cloud quotes) ??`stockpulse_kv` ledger row. Write-protected per day; heals legacy conflicts. |
 
 Stock sync covers the full 80-symbol index universe (S&P 500 ??NASDAQ-100, mirroring `masterAnalysis.ts` `INDEX_UNIVERSE_TICKERS`) split into 3 batches staggered across the 3 post-close hours to stay under Yahoo rate limits; batches pace fetches ~1.2s apart and finish by ~8:02 AM HKT. `simulate-ledger` mirrors the browser's `tradeSimulator` semantics (persona thresholds, 10% equity buys, -8%/+30% stops) with a Deno port of the tactical engine (`simulate-ledger/engine.ts`); the agent persona uses the bounded matrix-rating path (the browser's non-holding path). Universe input is the cloud `stockpulse_master_matrix` snapshot ??which browser sessions still produce and push; if a browser hasn't pushed a fresh matrix, the sim uses the latest snapshot present.
@@ -220,7 +223,7 @@ Forecasting: `generateForecast()` (trend + confidence bands), `generateMonteCarl
 
 ### `src/lib/supabaseDb.ts` ??Supabase Cloud (597 lines)
 
-Tables: `stockpulse_kv`, `stock_quotes`, `stock_historical` (real OHLCV bars, read via `supabaseHistory.ts`), `politician_featured_trades`, `avs_results`, `social_sentiment_cache`, `api_usage_log`.
+Tables: `stockpulse_kv`, `stock_quotes`, `stock_historical` (real OHLCV bars, read via `supabaseHistory.ts`), `politician_featured_trades`, `politician_trades` (Kadoa full history, `source='kadoa'`), `avs_results`, `social_sentiment_cache`, `api_usage_log`.
 
 Key: `maybeSyncToSupabase(key)` debounced 3s push. `pullAll()` paginated 500/page. `pushFeaturedTrades()` chunked 100/batch. `pullFreshCloudPrices()` fetches the current cloud quote board for live marks. Removed ledger paths (ledger is server-authoritative): no `overwriteLedger`, no merge; `pullLedger` adopts the cloud copy verbatim and rebuilds accounts from trades via `replayAccounts(healSameDayConflicts(trades))`.
 
@@ -261,7 +264,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 
 | Component | Lines | Purpose |
 |-----------|-------|---------|
-| `PoliticianTrades.tsx` | 809 | 5-source politician trades (UW, StockSpill, OpenCabinet, CapitolExposed, CongressInvests). Featured: Trump + Pelosi. Supabase cache. |
+| `PoliticianTrades.tsx` | 893 | 6-source politician trades — **Kadoa first** (Supabase `politician_trades` full history), then CapitolExposed, CongressInvests. Featured: Trump + Pelosi. Supabase cache. |
 | `SocialSentimentCheck.tsx` | 210 | 10-source sentiment (Google News, StockTwits, Yahoo, ApeWisdom, SocialTickers, Finnhub, Adanos, MarketWatch, CNBC, Google Trends). Keyword scoring, no AI. |
 | `AsymmetricValueScreener.tsx` | 326 | Risk/reward scoring. Inside Screener. |
 | `SectorHeatmap.tsx` | 262 | Sector performance heatmap. Inside Screener. |

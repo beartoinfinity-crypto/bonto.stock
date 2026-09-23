@@ -607,6 +607,221 @@ app.get('/api/politician-trades/opencabinet', async (req, res) => {
   }
 });
 
+// --- Kadoa Congress Trading Monitor (static JSON, MIT) ---------------
+// GET /api/politician-trades/kadoa?politician=Nancy%20Pelosi&limit=200
+// GET /api/politician-trades/kadoa?limit=20&offset=0   (recent feed)
+// Data: https://github.com/kadoa-org/congress-trading-monitor
+//   filers.json (447 filers) -> filer/<id>.json (full history per person)
+//   trades.json (recent window, all filers). In-memory cache 6h.
+
+const KADOA_BASE = 'https://raw.githubusercontent.com/kadoa-org/congress-trading-monitor/main/public/data';
+const KADOA_TTL_MS = 6 * 60 * 60 * 1000;
+const kadoaCache = { trades: null, tradesAt: 0, filers: null, filersAt: 0, byFiler: new Map() };
+
+async function fetchKadoaJson(url, timeoutMs = 30000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      signal: ctrl.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (StockPulse)' },
+    });
+    if (!response.ok) throw new Error(`Kadoa returned ${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function matchKadoaFiler(filers, politician) {
+  const q = String(politician || '').toLowerCase().trim();
+  if (!q) return null;
+  const tokens = q.split(/\s+/).filter(Boolean);
+  return filers.find((f) => {
+    const name = String(f.full_name || '').toLowerCase();
+    if (name === q) return true;
+    if (name.includes(q)) return true;
+    return tokens.every((t) => name.includes(t));
+  }) || null;
+}
+
+function sortKadoaRows(rows) {
+  return [...rows].sort((a, b) => {
+    const d = String(b.transaction_date || '').localeCompare(String(a.transaction_date || ''));
+    if (d !== 0) return d;
+    return String(b.filing_date || '').localeCompare(String(a.filing_date || ''));
+  });
+}
+
+function unwrapKadoaTrades(body) {
+  if (Array.isArray(body)) return body;
+  const trades = body && typeof body === 'object' ? body.trades : null;
+  return Array.isArray(trades) ? trades : [];
+}
+
+// Map public.politician_trades (source='kadoa') row -> Kadoa API row shape
+function mapKadoaTableRow(r) {
+  const tt = String(r.transaction_type ?? '').toLowerCase();
+  let apiType = 'Other';
+  if (tt === 'buy') apiType = 'Purchase';
+  else if (tt === 'sell') apiType = 'Sale (Full)';
+  else if (tt === 'exchange') apiType = 'Exchange';
+  const meta = r.metadata && typeof r.metadata === 'object' ? r.metadata : {};
+  return {
+    id: r.external_id,
+    ticker: r.symbol,
+    filer_name: r.politician,
+    transaction_date: r.transaction_date,
+    filing_date: r.filing_date,
+    transaction_type: apiType,
+    amount_range_low: r.amount_from,
+    amount_range_high: r.amount_to,
+    asset_name: r.asset_name,
+    owner: r.owner_type,
+    doc_url: meta.doc_url ?? null,
+    office: meta.office ?? r.position_held ?? null,
+    agency: meta.agency ?? null,
+    branch: meta.branch ?? null,
+  };
+}
+
+// Prefer the Supabase politician_trades table (full Kadoa history, backfilled);
+// returns null when the table is empty/unreachable so callers fall back to GitHub.
+async function fetchKadoaFromTable({ politician = '', limit = 20, offset = 0 } = {}) {
+  const supaUrl = process.env.SUPABASE_URL || 'https://aqyaarnpmvvdzasjefje.supabase.co';
+  const key = process.env.SUPABASE_ANON_KEY || '';
+  if (!key) return null;
+  const params = new URLSearchParams({
+    source: 'eq.kadoa',
+    select: '*',
+    order: 'coalesce(filing_date,transaction_date).desc,transaction_date.desc',
+    limit: String(limit),
+    offset: String(offset),
+  });
+  if (politician) {
+    const q = politician.replace(/[%_]/g, ' ').trim();
+    params.set('politician', `ilike.*${q}*`);
+  }
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const res = await fetch(`${supaUrl}/rest/v1/politician_trades?${params}`, {
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        Accept: 'application/json',
+      },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    return rows.map(mapKadoaTableRow);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchKadoaCountFromTable(politician = '') {
+  const supaUrl = process.env.SUPABASE_URL || 'https://aqyaarnpmvvdzasjefje.supabase.co';
+  const key = process.env.SUPABASE_ANON_KEY || '';
+  if (!key) return null;
+  const params = new URLSearchParams({ source: 'eq.kadoa', select: 'id' });
+  if (politician) {
+    const q = politician.replace(/[%_]/g, ' ').trim();
+    params.set('politician', `ilike.*${q}*`);
+  }
+  try {
+    const res = await fetch(`${supaUrl}/rest/v1/politician_trades?${params}&limit=1`, {
+      headers: { apikey: key, Authorization: `Bearer ${key}`, Prefer: 'count=exact', Range: '0-0' },
+    });
+    if (!res.ok) return null;
+    const header = res.headers.get('content-range') || '';
+    const total = header.split('/')[1];
+    return total ? parseInt(total, 10) : null;
+  } catch {
+    return null;
+  }
+}
+
+app.get('/api/politician-trades/kadoa', async (req, res) => {
+  try {
+    const politician = typeof req.query.politician === 'string' ? req.query.politician : '';
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const now = Date.now();
+
+    // 1) Supabase table first (full history after backfill)
+    try {
+      const fromTable = await fetchKadoaFromTable({ politician, limit, offset });
+      if (fromTable) {
+        const total = (await fetchKadoaCountFromTable(politician)) ?? fromTable.length;
+        res.set('Access-Control-Allow-Origin', '*');
+        res.set('Cache-Control', 'public, max-age=600');
+        return res.json({
+          trades: fromTable,
+          count: fromTable.length,
+          total,
+          source: 'supabase',
+          ...(politician ? { filer: { full_name: politician } } : {}),
+        });
+      }
+    } catch { /* fall through to GitHub */ }
+
+    // 2) Fallback: GitHub static JSON (6h cache)
+    if (politician) {
+      if (!kadoaCache.filers || now - kadoaCache.filersAt > KADOA_TTL_MS) {
+        kadoaCache.filers = await fetchKadoaJson(`${KADOA_BASE}/filers.json`);
+        kadoaCache.filersAt = Date.now();
+      }
+      const filer = matchKadoaFiler(kadoaCache.filers, politician);
+      if (!filer) {
+        res.set('Access-Control-Allow-Origin', '*');
+        return res.json({ trades: [], count: 0, filer: null, source: 'github' });
+      }
+      let rows = kadoaCache.byFiler.get(filer.id);
+      if (!rows || now - rows.at > KADOA_TTL_MS) {
+        const raw = await fetchKadoaJson(`${KADOA_BASE}/filer/${filer.id}.json`);
+        rows = { data: unwrapKadoaTrades(raw), at: Date.now() };
+        kadoaCache.byFiler.set(filer.id, rows);
+      }
+      const enriched = rows.data.map((r) => ({
+        ...r,
+        filer_name: r.filer_name || filer.full_name,
+        office: r.office ?? filer.office,
+        agency: r.agency ?? filer.agency,
+        branch: r.branch ?? filer.branch,
+      }));
+      const sorted = sortKadoaRows(enriched);
+      const page = sorted.slice(offset, offset + limit);
+      res.set('Access-Control-Allow-Origin', '*');
+      res.set('Cache-Control', 'public, max-age=3600');
+      return res.json({
+        trades: page,
+        count: page.length,
+        total: sorted.length,
+        source: 'github',
+        filer: { id: filer.id, full_name: filer.full_name, trade_count: filer.trade_count },
+      });
+    }
+
+    if (!kadoaCache.trades || now - kadoaCache.tradesAt > KADOA_TTL_MS) {
+      kadoaCache.trades = await fetchKadoaJson(`${KADOA_BASE}/trades.json`);
+      kadoaCache.tradesAt = Date.now();
+    }
+    const sorted = sortKadoaRows(unwrapKadoaTrades(kadoaCache.trades));
+    const page = sorted.slice(offset, offset + limit);
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Cache-Control', 'public, max-age=3600');
+    res.json({ trades: page, count: page.length, total: sorted.length, source: 'github' });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    res.status(502).json({ error: 'Failed to fetch from Kadoa', detail: msg });
+  }
+});
+
 // --- Diagnostic: check Open Cabinet Trump trade count ----------
 app.get('/api/diag/opencabinet', async (req, res) => {
   try {

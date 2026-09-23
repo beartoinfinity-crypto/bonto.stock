@@ -3,17 +3,18 @@
 //
 // Fetches featured politician trades (Trump + Pelosi) from their sources and
 // upserts into public.politician_featured_trades:
-//   Trump  <- Open Cabinet (OGE disclosures CSV) + UnusualWhales SSG scrape
-//   Pelosi <- StockSpill Supabase (congress_trades) + UnusualWhales SSG scrape
+//   Trump  <- Open Cabinet (OGE disclosures CSV) + UnusualWhales SSG scrape + Kadoa
+//   Pelosi <- StockSpill Supabase (congress_trades) + UnusualWhales SSG scrape + Kadoa
 // Mirrors the browser cron job's fetchUnusualWhalesTrades / fetchStockSpillTrades
-// / fetchOpenCabinetTrades + pushFeaturedTrades + normalizeFeaturedTradeNames.
+// / fetchOpenCabinetTrades / fetchKadoaTrades + pushFeaturedTrades +
+// normalizeFeaturedTradeNames.
 // Scheduled via pg_cron (see supabase/schedules.sql).
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const FEATURED_POLITICIANS = [
-  { name: 'Donald J Trump', sources: ['opencabinet', 'unusualwhales'] as const },
-  { name: 'Nancy Pelosi', sources: ['stockspill', 'unusualwhales'] as const },
+  { name: 'Donald J Trump', sources: ['opencabinet', 'unusualwhales', 'kadoa'] as const },
+  { name: 'Nancy Pelosi', sources: ['stockspill', 'unusualwhales', 'kadoa'] as const },
 ];
 
 // StockSpill is a third-party public dataset in its own Supabase project
@@ -248,6 +249,74 @@ async function fetchOpenCabinetTrades(politician: string): Promise<FeaturedTrade
   }
 }
 
+// ─── Source: Kadoa Congress Trading Monitor (static JSON, MIT) ─────
+
+const KADOA_BASE = 'https://raw.githubusercontent.com/kadoa-org/congress-trading-monitor/main/public/data';
+
+function matchKadoaFiler(filers: Array<Record<string, unknown>>, politician: string): Record<string, unknown> | null {
+  const q = politician.toLowerCase().trim();
+  if (!q) return null;
+  const tokens = q.split(/\s+/).filter(Boolean);
+  return filers.find((f) => {
+    const name = String(f.full_name || '').toLowerCase();
+    if (name === q || name.includes(q)) return true;
+    return tokens.every((t) => name.includes(t));
+  }) || null;
+}
+
+async function fetchKadoaTrades(politician: string): Promise<FeaturedTrade[]> {
+  try {
+    const filersRes = await fetch(`${KADOA_BASE}/filers.json`, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (StockPulse edge sync)' },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!filersRes.ok) return [];
+    const filers: Array<Record<string, unknown>> = await filersRes.json();
+    const filer = matchKadoaFiler(filers, politician);
+    if (!filer) return [];
+
+    const tradesRes = await fetch(`${KADOA_BASE}/filer/${filer.id}.json`, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (StockPulse edge sync)' },
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!tradesRes.ok) return [];
+    const body: unknown = await tradesRes.json();
+    const rows: Array<Record<string, unknown>> = Array.isArray(body)
+      ? (body as Array<Record<string, unknown>>)
+      : Array.isArray((body as { trades?: unknown })?.trades)
+        ? ((body as { trades: Array<Record<string, unknown>> }).trades)
+        : [];
+    if (rows.length === 0) return [];
+
+    const fullName = String(filer.full_name || politician);
+    return rows
+      .filter((r) => r.ticker)
+      .map((r) => {
+        const tt = String(r.transaction_type ?? '').toLowerCase();
+        let side = 'OTHER';
+        if (tt.includes('purchase') || tt.includes('buy')) side = 'BUY';
+        else if (tt.includes('sale') || tt.includes('sell')) side = 'SELL';
+        else if (tt.includes('exchange')) side = 'EXCHANGE';
+        return {
+          id: `kd-${r.id ?? Math.random().toString(36).slice(2)}`,
+          politician: String(r.filer_name || fullName),
+          symbol: String(r.ticker ?? ''),
+          transaction_type: side,
+          transaction_date: r.transaction_date ? String(r.transaction_date).slice(0, 10) : null,
+          filing_date: r.filing_date ? String(r.filing_date).slice(0, 10) : null,
+          amount_from: typeof r.amount_range_low === 'number' ? r.amount_range_low : null,
+          amount_to: typeof r.amount_range_high === 'number' ? r.amount_range_high : null,
+          asset_name: r.asset_name ? String(r.asset_name) : null,
+          source_name: 'kadoa',
+          source_url: r.doc_url ? String(r.doc_url) : null,
+          metadata: { office: r.office ?? filer.office, agency: r.agency ?? filer.agency, branch: r.branch ?? filer.branch },
+        } as FeaturedTrade;
+      });
+  } catch {
+    return [];
+  }
+}
+
 // ─── Main ───────────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
@@ -268,6 +337,7 @@ Deno.serve(async (req) => {
         if (src === 'unusualwhales') trades = await fetchUnusualWhalesTrades(pol.name);
         else if (src === 'stockspill') trades = await fetchStockSpillTrades(pol.name);
         else if (src === 'opencabinet') trades = await fetchOpenCabinetTrades(pol.name);
+        else if (src === 'kadoa') trades = await fetchKadoaTrades(pol.name);
       } catch { /* skip failed source */ }
       perSource[src] = (perSource[src] ?? 0) + trades.length;
       allTrades.push(...trades);

@@ -67,10 +67,12 @@ select cron.schedule(
   $$
 );
 
--- ── Politician trades: 07:00 UTC Mon-Fri ───────────────────────────────────
+-- ── Politician trades: 07:00 UTC daily ─────────────────────────────────────
+-- Kadoa table incremental + CapitolExposed/CongressInvests KV merge.
+select cron.unschedule('stockpulse-sync-politician-trades');
 select cron.schedule(
   'stockpulse-sync-politician-trades',
-  '0 7 * * 1-5',
+  '0 7 * * *',
   $$
   select net.http_post(
     url     := 'https://aqyaarnpmvvdzasjefje.supabase.co/functions/v1/sync-politician-trades',
@@ -136,7 +138,8 @@ select jobname, schedule, active from cron.job;   -- expect 6 active jobs
 -- Data-freshness verification (ground truth, immune to the 5s pg_net timeout):
 --   Stock batches (22/23/00 UTC): select symbol, updated_at from stock_quotes order by updated_at desc limit 3;
 --     — after all 3 batches: select count(*) from stock_quotes;  -- expect ~80
---   07:00 job: select updated_at from stockpulse_kv where key = 'stockpulse_politician_trades';
+--   07:00 job: select source, count(*), max(updated_at) from politician_trades group by source;
+--              select updated_at from stockpulse_kv where key = 'stockpulse_politician_trades';
 --   07:30 job: select count(*), max(updated_at) from politician_featured_trades;
 --   12:00 job: select updated_at, value::jsonb ->> 'lastRunDate' from stockpulse_kv
 --                where key = 'stockpulse_trade_ledger';
