@@ -6,7 +6,6 @@ export interface StockData { date: string; open: number; high: number; low: numb
 
 export interface EngineParams {
   atrLength: number;          // ATR_Length
-  volatilityFactor: number;   // Volatility_Factor
   maxRiskPerTrade: number;    // Max_Risk_Per_Trade (fraction)
   icebergSlices: number;      // Iceberg_Slices
   timeStopMinutes: number;    // Time_Stop_Minutes
@@ -21,7 +20,6 @@ export interface EngineParams {
 
 export const DEFAULT_PARAMS: EngineParams = {
   atrLength: 14,
-  volatilityFactor: 1.2,
   maxRiskPerTrade: 0.02,
   icebergSlices: 5,
   timeStopMinutes: 30,

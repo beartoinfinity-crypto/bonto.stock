@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   ArrowLeft, Activity, Gauge, Crosshair, Scale, LogOut, Layers,
   ShieldAlert, CheckCircle2, XCircle, TrendingUp, TrendingDown, Minus,
-  History as HistoryIcon, RefreshCw, Database, Cpu,
+  History as HistoryIcon, RefreshCw, Cpu, Wifi, WifiOff, AlertCircle,
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -41,7 +41,10 @@ function Metric({ label, value, hint }: { label: string; value: string; hint?: s
 }
 
 const Tactical = () => {
-  const { selectedStock, historicalData, isLoading, setSelectedStock } = useStockData();
+  const {
+    selectedStock, historicalData, isLoading, isInitialLoading,
+    isRealData, error, setSelectedStock,
+  } = useStockData();
   const [params, setParams] = useState<EngineParams>(DEFAULT_PARAMS);
 
   const set = <K extends keyof EngineParams>(key: K, value: EngineParams[K]) =>
@@ -50,8 +53,7 @@ const Tactical = () => {
   const [lookback, setLookback] = useState(30);
   const result = useMemo(() => runEngine(historicalData, params), [historicalData, params]);
   const {
-    replay, source: historySource, computedAt, lastBarDate,
-    isLoading: historyLoading, isDefaultParams, refreshing, refresh: refreshHistory,
+    replay, isLoading: historyLoading, isDefaultParams, refreshing, refresh: refreshHistory,
   } = useTacticalHistory(selectedStock.symbol, historicalData, params, lookback);
 
   const actionIcon = result?.entry.action === 'BUY' ? TrendingUp : result?.entry.action === 'SELL' ? TrendingDown : Minus;
@@ -106,11 +108,29 @@ const Tactical = () => {
       </header>
 
       <main className="container mx-auto space-y-6 px-4 py-6">
-        <div className="max-w-md">
-          <StockSearch selectedStock={selectedStock} onSelectStock={setSelectedStock} />
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="max-w-md flex-1">
+            <StockSearch selectedStock={selectedStock} onSelectStock={setSelectedStock} />
+          </div>
+          <Badge
+            variant={isRealData ? 'default' : 'secondary'}
+            className="flex items-center gap-1.5"
+          >
+            {isRealData ? (
+              <><Wifi className="h-3 w-3" /> Live Data</>
+            ) : (
+              <><WifiOff className="h-3 w-3" /> Simulated</>
+            )}
+          </Badge>
+          {error && (
+            <Badge variant="destructive" className="flex items-center gap-1.5">
+              <AlertCircle className="h-3 w-3" />
+              {error}
+            </Badge>
+          )}
         </div>
 
-        {isLoading || !result ? (
+        {isInitialLoading || (!result && isLoading) ? (
           <div className="space-y-4">
             <Skeleton className="h-32 w-full" />
             <Skeleton className="h-64 w-full" />
@@ -516,17 +536,15 @@ const Tactical = () => {
                   ))}
                   <div className="ml-auto flex flex-wrap items-center gap-2">
                     <Badge variant="outline" className="gap-1.5 text-xs">
-                      {historySource === 'cache'
-                        ? <><Database className="h-3 w-3 text-primary" /> Cached · {computedAt ? new Date(computedAt).toLocaleString() : '—'}{lastBarDate ? ` · bar ${lastBarDate}` : ''}</>
-                        : <><Cpu className="h-3 w-3 text-warning" /> {isDefaultParams ? 'Computed in browser' : 'Custom params — live compute'}</>}
+                      <Cpu className="h-3 w-3 text-warning" /> {isDefaultParams ? 'Computed in browser' : 'Custom params — live compute'}
                     </Badge>
-                    <Button size="sm" variant="outline" className="gap-1.5" disabled={refreshing} onClick={() => refreshHistory()}>
-                      <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} /> Recompute
+                    <Button size="sm" variant="outline" className="gap-1.5" disabled={refreshing || isLoading} onClick={() => refreshHistory()}>
+                      <RefreshCw className={cn('h-3.5 w-3.5', (refreshing || isLoading) && 'animate-spin')} /> Refresh data
                     </Button>
                   </div>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  A backend job replays the engine for every tracked symbol on weekdays at 21:45 UTC (~15 min after the close) and stores the result, so revisits read the cache instead of recomputing. Changing the parameters above switches to a live in-browser replay.
+                  The engine replays fully in your browser from the latest daily bars — there is no backend cache or after-close job. Refresh data pulls fresh bars; changing the parameters above recomputes immediately.
                 </p>
 
                 <Alert className="border-warning/40 bg-warning/5">

@@ -6,7 +6,6 @@ import { StockData } from './stockData';
 
 export interface EngineParams {
   atrLength: number;          // ATR_Length
-  volatilityFactor: number;   // Volatility_Factor
   maxRiskPerTrade: number;    // Max_Risk_Per_Trade (fraction)
   icebergSlices: number;      // Iceberg_Slices
   timeStopMinutes: number;    // Time_Stop_Minutes
@@ -21,7 +20,6 @@ export interface EngineParams {
 
 export const DEFAULT_PARAMS: EngineParams = {
   atrLength: 14,
-  volatilityFactor: 1.2,
   maxRiskPerTrade: 0.02,
   icebergSlices: 5,
   timeStopMinutes: 30,
@@ -538,11 +536,6 @@ export function replayEngine(data: StockData[], p: EngineParams, lookback = 30):
   if (!data || data.length < 40) return null;
   const start = Math.max(30, data.length - lookback);
 
-  // ── Pre-compute indicator series once ──────────────────────────
-  const atrSeries = precomputeAtr(data, p.atrLength);
-  const adxSeries = precomputeAdx(data, 14);
-  const rsiSeries = precomputeRsi(data, 14);
-
   const rows: DayAction[] = [];
   const trades: ReplayTrade[] = [];
 
@@ -579,18 +572,7 @@ export function replayEngine(data: StockData[], p: EngineParams, lookback = 30):
     if (open) {
       const dir = open.side === 'LONG' ? 1 : -1;
       const barsHeld = i - open.entryIdx;
-      const currentAtrVal = atrSeries[i] || res.atr;
-      const accel = p.accelerator + (barsHeld / 60) * 0.01;
-
-      // Compute trailing stop from pre-computed ATR
-      const window = slice.slice(-5);
-      const extremePrice = open.side === 'LONG'
-        ? Math.max(bar.close, ...window.map(d => d.high))
-        : Math.min(bar.close, ...window.map(d => d.low));
-      const trailingStopPrice = open.side === 'LONG'
-        ? extremePrice - accel * currentAtrVal * 10
-        : extremePrice + accel * currentAtrVal * 10;
-
+      const exitPlan = manageExit(open.side, bar.close, open.entryPrice, slice, { ...p, minutesHeld: barsHeld * 390 }, open.stop);
       const hitTarget = dir === 1 ? bar.high >= open.target : bar.low <= open.target;
       const hitStop = dir === 1 ? bar.low <= open.stop : bar.high >= open.stop;
       const flat = Math.abs((bar.close - open.entryPrice) / (open.entryPrice || 1)) < 0.005;
@@ -601,14 +583,14 @@ export function replayEngine(data: StockData[], p: EngineParams, lookback = 30):
       } else if (hitStop) {
         closeTrade(i, open.stop, 'Hard_Stop');
         event = 'EXIT'; eventDetail = 'Hard stop hit intrabar';
-      } else if (dir === 1 ? bar.close < trailingStopPrice : bar.close > trailingStopPrice) {
+      } else if (dir === 1 ? bar.close < exitPlan.trailingStopPrice : bar.close > exitPlan.trailingStopPrice) {
         closeTrade(i, bar.close, 'Trailing_Stop');
-        event = 'EXIT'; eventDetail = `Trailing stop ${trailingStopPrice.toFixed(2)}`;
+        event = 'EXIT'; eventDetail = `Trailing stop ${exitPlan.trailingStopPrice.toFixed(2)}`;
       } else if (barsHeld >= 5 && flat) {
         closeTrade(i, bar.close, 'Time_Stop');
         event = 'EXIT'; eventDetail = 'Time stop — position went nowhere';
       } else {
-        event = 'HOLD'; eventDetail = `Held ${barsHeld} session(s), trail ${trailingStopPrice.toFixed(2)}`;
+        event = 'HOLD'; eventDetail = `Held ${barsHeld} session(s), trail ${exitPlan.trailingStopPrice.toFixed(2)}`;
       }
     }
 
@@ -678,78 +660,4 @@ export function replayEngine(data: StockData[], p: EngineParams, lookback = 30):
     openTrade,
     },
   };
-}
-
-/* ------------------------------------------------------------------ */
-/* Pre-computed indicator series (for replay optimisation)             */
-/* ------------------------------------------------------------------ */
-
-function precomputeAtr(data: StockData[], period: number): number[] {
-  const tr = trueRanges(data);
-  const result: number[] = [];
-  let sum = 0;
-  for (let i = 0; i < tr.length; i++) {
-    if (i < period - 1) { result.push(NaN); continue; }
-    if (i === period - 1) {
-      sum = tr.slice(0, period).reduce((s, v) => s + v, 0);
-    } else {
-      sum = sum - sum / period + tr[i];
-    }
-    result.push(sum / period);
-  }
-  // Pad the front (tr is data.length-1 long, result is too)
-  return [NaN, ...result];
-}
-
-function precomputeAdx(data: StockData[], period: number): number[] {
-  if (data.length < period + 2) return data.map(() => 0);
-  const plusDM: number[] = [], minusDM: number[] = [], tr: number[] = [];
-  for (let i = 1; i < data.length; i++) {
-    const up = data[i].high - data[i - 1].high;
-    const down = data[i - 1].low - data[i].low;
-    plusDM.push(up > down && up > 0 ? up : 0);
-    minusDM.push(down > up && down > 0 ? down : 0);
-    const h = data[i].high, l = data[i].low, pc = data[i - 1].close;
-    tr.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
-  }
-  const smooth = (arr: number[]) => {
-    const seed = arr.slice(0, period).reduce((s, v) => s + v, 0);
-    const out = [seed];
-    for (let i = period; i < arr.length; i++) {
-      out.push(out[out.length - 1] - out[out.length - 1] / period + arr[i]);
-    }
-    return out;
-  };
-  const strS = smooth(tr), pdmS = smooth(plusDM), mdmS = smooth(minusDM);
-  const dx: number[] = [];
-  let plusDI = 0, minusDI = 0;
-  for (let i = 0; i < strS.length; i++) {
-    const trs = strS[i] || 1e-9;
-    plusDI = (pdmS[i] / trs) * 100;
-    minusDI = (mdmS[i] / trs) * 100;
-    dx.push((Math.abs(plusDI - minusDI) / (plusDI + minusDI + 1e-9)) * 100);
-  }
-  const result: number[] = [];
-  for (let i = 0; i < data.length; i++) {
-    if (i < period + 1) { result.push(0); continue; }
-    const dxIdx = i - 1;
-    const window = dx.slice(Math.max(0, dxIdx - period + 1), dxIdx + 1);
-    result.push(window.reduce((s, v) => s + v, 0) / (window.length || 1));
-  }
-  return result;
-}
-
-function precomputeRsi(data: StockData[], period: number): number[] {
-  const result: number[] = [];
-  for (let i = 0; i < data.length; i++) {
-    if (i < period) { result.push(50); continue; }
-    let gains = 0, losses = 0;
-    for (let j = i - period + 1; j <= i; j++) {
-      const diff = data[j].close - data[j - 1].close;
-      if (diff >= 0) gains += diff; else losses -= diff;
-    }
-    const avgGain = gains / period, avgLoss = losses / period;
-    result.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
-  }
-  return result;
 }

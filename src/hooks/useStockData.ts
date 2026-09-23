@@ -9,6 +9,8 @@ interface UseStockDataResult {
   historicalData: StockData[];
   signals: Signal[];
   isLoading: boolean;
+  /** True only on the first load for a symbol — background refetches do not set this. */
+  isInitialLoading: boolean;
   isRealData: boolean;
   error: string | null;
   lastUpdated: string | null;
@@ -112,11 +114,15 @@ export function useStockData(initialStock: Stock = popularStocks[0]): UseStockDa
     historicalQuery.refetch();
   }, [quoteQuery, historicalQuery]);
 
+  const isInitialLoading = historicalData.length === 0
+    && (historicalQuery.isLoading || historicalQuery.isFetching || quoteQuery.isLoading);
+
   return {
     selectedStock: currentStock,
     historicalData,
     signals,
     isLoading: quoteQuery.isLoading || historicalQuery.isLoading || quoteQuery.isFetching || historicalQuery.isFetching,
+    isInitialLoading,
     isRealData,
     error: quoteQuery.data?.error || historicalQuery.data?.error || null,
     lastUpdated,
