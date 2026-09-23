@@ -563,9 +563,10 @@ export const PoliticianTrades = () => {
 
   useEffect(() => { fetchInitial(); }, []);
 
-  // ── Server-side search when politician/symbol filters change (debounced) ──
-  // The initial page is only ~20 rows; client-side filter alone cannot find
+  // ── Server-side search: page through ALL matching rows ────────
+  // The default feed is only ~20 rows; client-side filter alone cannot find
   // older matches (e.g. AMZN has 497 rows but 0 in the first page).
+  // Loop offsets until every row matching the criteria is loaded.
   useEffect(() => {
     const pq = politicianQ.trim();
     const sq = symbolQ.trim();
@@ -578,21 +579,36 @@ export const PoliticianTrades = () => {
       setError(false);
       setFeaturedActive(null);
       try {
-        const params = new URLSearchParams({ limit: '200' });
-        if (pq) params.set('politician', pq);
-        if (sq) params.set('symbol', sq);
-        const res = await fetch(`/api/politician-trades/kadoa?${params}`);
-        if (cancelled) return;
-        if (res.ok) {
+        const FETCH_ALL_PAGE = 500;
+        const FETCH_ALL_MAX = 20000;
+        const all: TradeRow[] = [];
+        let total = 0;
+        let offset = 0;
+        do {
+          const params = new URLSearchParams({
+            limit: String(FETCH_ALL_PAGE),
+            offset: String(offset),
+          });
+          if (pq) params.set('politician', pq);
+          if (sq) params.set('symbol', sq);
+          const res = await fetch(`/api/politician-trades/kadoa?${params}`);
+          if (cancelled) return;
+          if (!res.ok) throw new Error(`search failed: ${res.status}`);
           const json = await res.json();
           const rows = mapKadoaRows(json);
-          setTrades(rows);
-          setFetchedAt(Date.now());
-          setHasMore((json.total ?? 0) > rows.length);
-          setSource('kadoa');
-          setKadoaOffset(rows.length);
-          didServerSearchRef.current = true;
-        }
+          if (rows.length === 0) break;
+          all.push(...rows);
+          total = typeof json.total === 'number' ? json.total : all.length;
+          offset += rows.length;
+          // Progressive render so long result sets appear as they arrive
+          if (!cancelled) setTrades([...all]);
+        } while (offset < total && offset < FETCH_ALL_MAX);
+        if (cancelled) return;
+        setFetchedAt(Date.now());
+        setHasMore(all.length < total && all.length < FETCH_ALL_MAX);
+        setSource('kadoa');
+        setKadoaOffset(all.length);
+        didServerSearchRef.current = true;
       } catch {
         if (!cancelled) setError(true);
       }

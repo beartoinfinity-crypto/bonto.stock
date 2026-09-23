@@ -759,7 +759,7 @@ app.get('/api/politician-trades/kadoa', async (req, res) => {
   try {
     const politician = typeof req.query.politician === 'string' ? req.query.politician : '';
     const symbol = typeof req.query.symbol === 'string' ? req.query.symbol : '';
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 5000);
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
     const now = Date.now();
 
