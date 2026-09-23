@@ -687,21 +687,30 @@ function mapKadoaTableRow(r) {
 
 // Prefer the Supabase politician_trades table (full Kadoa history, backfilled);
 // returns null when the table is empty/unreachable so callers fall back to GitHub.
-async function fetchKadoaFromTable({ politician = '', limit = 20, offset = 0 } = {}) {
-  const supaUrl = process.env.SUPABASE_URL || 'https://aqyaarnpmvvdzasjefje.supabase.co';
-  const key = process.env.SUPABASE_ANON_KEY || '';
-  if (!key) return null;
+function kadoaTableFilters({ politician = '', symbol = '' } = {}) {
   const params = new URLSearchParams({
     source: 'eq.kadoa',
     select: '*',
     order: 'coalesce(filing_date,transaction_date).desc,transaction_date.desc',
-    limit: String(limit),
-    offset: String(offset),
   });
   if (politician) {
     const q = politician.replace(/[%_]/g, ' ').trim();
-    params.set('politician', `ilike.*${q}*`);
+    if (q) params.set('politician', `ilike.*${q}*`);
   }
+  if (symbol) {
+    const s = symbol.replace(/[%_]/g, '').trim().toUpperCase();
+    if (s) params.set('symbol', `ilike.*${s}*`);
+  }
+  return params;
+}
+
+async function fetchKadoaFromTable({ politician = '', symbol = '', limit = 20, offset = 0 } = {}) {
+  const supaUrl = process.env.SUPABASE_URL || 'https://aqyaarnpmvvdzasjefje.supabase.co';
+  const key = process.env.SUPABASE_ANON_KEY || '';
+  if (!key) return null;
+  const params = kadoaTableFilters({ politician, symbol });
+  params.set('limit', String(limit));
+  params.set('offset', String(offset));
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 15000);
   try {
@@ -715,7 +724,9 @@ async function fetchKadoaFromTable({ politician = '', limit = 20, offset = 0 } =
     });
     if (!res.ok) return null;
     const rows = await res.json();
-    if (!Array.isArray(rows) || rows.length === 0) return null;
+    // Empty array is a valid filtered result (e.g. symbol with no matches).
+    // Only null means "table unreachable — fall back to GitHub".
+    if (!Array.isArray(rows)) return null;
     return rows.map(mapKadoaTableRow);
   } catch {
     return null;
@@ -724,15 +735,13 @@ async function fetchKadoaFromTable({ politician = '', limit = 20, offset = 0 } =
   }
 }
 
-async function fetchKadoaCountFromTable(politician = '') {
+async function fetchKadoaCountFromTable(politician = '', symbol = '') {
   const supaUrl = process.env.SUPABASE_URL || 'https://aqyaarnpmvvdzasjefje.supabase.co';
   const key = process.env.SUPABASE_ANON_KEY || '';
   if (!key) return null;
-  const params = new URLSearchParams({ source: 'eq.kadoa', select: 'id' });
-  if (politician) {
-    const q = politician.replace(/[%_]/g, ' ').trim();
-    params.set('politician', `ilike.*${q}*`);
-  }
+  const params = kadoaTableFilters({ politician, symbol });
+  params.set('select', 'id');
+  params.delete('order');
   try {
     const res = await fetch(`${supaUrl}/rest/v1/politician_trades?${params}&limit=1`, {
       headers: { apikey: key, Authorization: `Bearer ${key}`, Prefer: 'count=exact', Range: '0-0' },
@@ -749,15 +758,16 @@ async function fetchKadoaCountFromTable(politician = '') {
 app.get('/api/politician-trades/kadoa', async (req, res) => {
   try {
     const politician = typeof req.query.politician === 'string' ? req.query.politician : '';
+    const symbol = typeof req.query.symbol === 'string' ? req.query.symbol : '';
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
     const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
     const now = Date.now();
 
     // 1) Supabase table first (full history after backfill)
     try {
-      const fromTable = await fetchKadoaFromTable({ politician, limit, offset });
+      const fromTable = await fetchKadoaFromTable({ politician, symbol, limit, offset });
       if (fromTable) {
-        const total = (await fetchKadoaCountFromTable(politician)) ?? fromTable.length;
+        const total = (await fetchKadoaCountFromTable(politician, symbol)) ?? fromTable.length;
         res.set('Access-Control-Allow-Origin', '*');
         res.set('Cache-Control', 'public, max-age=600');
         return res.json({
@@ -766,11 +776,18 @@ app.get('/api/politician-trades/kadoa', async (req, res) => {
           total,
           source: 'supabase',
           ...(politician ? { filer: { full_name: politician } } : {}),
+          ...(symbol ? { symbol } : {}),
         });
       }
     } catch { /* fall through to GitHub */ }
 
-    // 2) Fallback: GitHub static JSON (6h cache)
+    // 2) Fallback: GitHub static JSON (6h cache) — politician path only;
+    //    symbol search requires the table (skip GitHub so we don't return an unfiltered page).
+    if (symbol && !politician) {
+      res.set('Access-Control-Allow-Origin', '*');
+      return res.json({ trades: [], count: 0, total: 0, source: 'none', symbol });
+    }
+
     if (politician) {
       if (!kadoaCache.filers || now - kadoaCache.filersAt > KADOA_TTL_MS) {
         kadoaCache.filers = await fetchKadoaJson(`${KADOA_BASE}/filers.json`);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -326,6 +326,9 @@ export const PoliticianTrades = () => {
   // Featured politician state
   const [featuredActive, setFeaturedActive] = useState<string | null>(null);
   const [featuredLoading, setFeaturedLoading] = useState(false);
+  // True after a debounced server search replaced the default feed —
+  // used so clearing filters restores the unfiltered page (not on mount).
+  const didServerSearchRef = useRef(false);
 
   // ── Load featured trades from Supabase (fast) ──────────────────
   const loadFeaturedFromCloud = async (politician: typeof FEATURED_POLITICIANS[0]): Promise<TradeRow[]> => {
@@ -560,6 +563,52 @@ export const PoliticianTrades = () => {
 
   useEffect(() => { fetchInitial(); }, []);
 
+  // ── Server-side search when politician/symbol filters change (debounced) ──
+  // The initial page is only ~20 rows; client-side filter alone cannot find
+  // older matches (e.g. AMZN has 497 rows but 0 in the first page).
+  useEffect(() => {
+    const pq = politicianQ.trim();
+    const sq = symbolQ.trim();
+    if (!pq && !sq) return;
+    if (pq.length < 2 && sq.length < 1) return;
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setLoading(true);
+      setError(false);
+      setFeaturedActive(null);
+      try {
+        const params = new URLSearchParams({ limit: '200' });
+        if (pq) params.set('politician', pq);
+        if (sq) params.set('symbol', sq);
+        const res = await fetch(`/api/politician-trades/kadoa?${params}`);
+        if (cancelled) return;
+        if (res.ok) {
+          const json = await res.json();
+          const rows = mapKadoaRows(json);
+          setTrades(rows);
+          setFetchedAt(Date.now());
+          setHasMore((json.total ?? 0) > rows.length);
+          setSource('kadoa');
+          setKadoaOffset(rows.length);
+          didServerSearchRef.current = true;
+        }
+      } catch {
+        if (!cancelled) setError(true);
+      }
+      if (!cancelled) setLoading(false);
+    }, 350);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [politicianQ, symbolQ]);
+
+  // Restore default feed when both filters clear after a server search
+  useEffect(() => {
+    if (politicianQ.trim() || symbolQ.trim() || featuredActive) return;
+    if (!didServerSearchRef.current) return;
+    didServerSearchRef.current = false;
+    fetchInitial();
+  }, [politicianQ, symbolQ, featuredActive]);
+
   // ── Auto-fetch featured when filter matches a known name (debounced) ──
   useEffect(() => {
     const q = politicianQ.trim().toLowerCase();
@@ -579,7 +628,12 @@ export const PoliticianTrades = () => {
     setLoadingMore(true);
     try {
       if (source === 'kadoa') {
-        const res = await fetch(`/api/politician-trades/kadoa?limit=${PAGE_SIZE}&offset=${kadoaOffset}`);
+        const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(kadoaOffset) });
+        const pq = politicianQ.trim();
+        const sq = symbolQ.trim();
+        if (pq) params.set('politician', pq);
+        if (sq) params.set('symbol', sq);
+        const res = await fetch(`/api/politician-trades/kadoa?${params}`);
         if (res.ok) {
           const json = await res.json();
           const rows = mapKadoaRows(json);
