@@ -688,10 +688,11 @@ function mapKadoaTableRow(r) {
 // Prefer the Supabase politician_trades table (full Kadoa history, backfilled);
 // returns null when the table is empty/unreachable so callers fall back to GitHub.
 function kadoaTableFilters({ politician = '', symbol = '' } = {}) {
+  // PostgREST cannot parse coalesce() in order= — use plain columns instead.
   const params = new URLSearchParams({
     source: 'eq.kadoa',
     select: '*',
-    order: 'coalesce(filing_date,transaction_date).desc,transaction_date.desc',
+    order: 'transaction_date.desc,filing_date.desc.nullslast',
   });
   if (politician) {
     const q = politician.replace(/[%_]/g, ' ').trim();
