@@ -591,7 +591,7 @@ export const PoliticianTrades = () => {
           });
           if (pq) params.set('politician', pq);
           if (sq) params.set('symbol', sq);
-          const res = await fetch(`/api/politician-trades/kadoa?${params}`);
+          const res = await fetch(`/api/politician-trades/kadoa?${params}`, { cache: 'no-store' });
           if (cancelled) return;
           if (!res.ok) throw new Error(`search failed: ${res.status}`);
           const json = await res.json();
@@ -649,7 +649,7 @@ export const PoliticianTrades = () => {
         const sq = symbolQ.trim();
         if (pq) params.set('politician', pq);
         if (sq) params.set('symbol', sq);
-        const res = await fetch(`/api/politician-trades/kadoa?${params}`);
+        const res = await fetch(`/api/politician-trades/kadoa?${params}`, { cache: 'no-store' });
         if (res.ok) {
           const json = await res.json();
           const rows = mapKadoaRows(json);
@@ -828,8 +828,10 @@ export const PoliticianTrades = () => {
           <Input
             placeholder="Filter by symbol (e.g. NVDA)"
             value={symbolQ}
-            onChange={(e) => setSymbolQ(e.target.value)}
+            onChange={(e) => setSymbolQ(e.target.value.toUpperCase())}
             className="h-8 text-sm"
+            autoComplete="off"
+            spellCheck={false}
           />
         </div>
       </CardHeader>

@@ -770,7 +770,10 @@ app.get('/api/politician-trades/kadoa', async (req, res) => {
       if (fromTable) {
         const total = (await fetchKadoaCountFromTable(politician, symbol)) ?? fromTable.length;
         res.set('Access-Control-Allow-Origin', '*');
-        res.set('Cache-Control', 'public, max-age=600');
+        // Filtered searches must not stick for 10 min — earlier broken
+        // responses (empty symbol results) were cached and hid the fix.
+        if (politician || symbol) res.set('Cache-Control', 'no-store');
+        else res.set('Cache-Control', 'public, max-age=600');
         return res.json({
           trades: fromTable,
           count: fromTable.length,
@@ -786,6 +789,7 @@ app.get('/api/politician-trades/kadoa', async (req, res) => {
     //    symbol search requires the table (skip GitHub so we don't return an unfiltered page).
     if (symbol && !politician) {
       res.set('Access-Control-Allow-Origin', '*');
+      res.set('Cache-Control', 'no-store');
       return res.json({ trades: [], count: 0, total: 0, source: 'none', symbol });
     }
 
