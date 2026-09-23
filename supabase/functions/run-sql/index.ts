@@ -3,7 +3,11 @@
 // by the CLI login-role bug. Invoke with x-cron-secret. Body: { sql: string }
 
 function jsonRes(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  // pg count()/bigint come back as BigInt — JSON.stringify throws on them.
+  return new Response(JSON.stringify(body, (_k, v) => (typeof v === 'bigint' ? Number(v) : v)), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
 }
 
 async function authorized(req: Request): Promise<boolean> {
