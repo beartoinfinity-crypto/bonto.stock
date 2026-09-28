@@ -2,7 +2,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { BrowserRouter, Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import Index from "./pages/Index";
 import Screener from "./pages/Screener";
 import Tactical from "./pages/Tactical";
@@ -19,6 +20,7 @@ import MobileStock from "./pages/MobileStock";
 import { purgeExpired } from "@/lib/localDb";
 import { startScheduler } from "@/lib/localCron";
 import { fetchRemoteSyncConfig, getClient, pullAll } from "@/lib/supabaseDb";
+import { mobileRedirectTarget } from "@/lib/siteMode";
 import { LanguageProvider } from "@/lib/i18n";
 
 // Purge expired SQLite entries on startup
@@ -49,6 +51,24 @@ setTimeout(async () => {
 
 const queryClient = new QueryClient();
 
+// On phones (viewport < 768px) the dashboard root bounces to the mobile view.
+// The full-site choice is remembered (see siteMode.ts), so users who opted for
+// the full dashboard are left alone.
+const IndexRoute = () => {
+  const { search } = useLocation();
+  const navigate = useNavigate();
+  const [checked, setChecked] = useState(false);
+
+  useEffect(() => {
+    const target = mobileRedirectTarget(search);
+    if (target) navigate(target, { replace: true });
+    else setChecked(true);
+  }, [search, navigate]);
+
+  if (!checked) return null;
+  return <Index />;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <LanguageProvider>
@@ -57,7 +77,7 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <Routes>
-            <Route path="/" element={<Index />} />
+            <Route path="/" element={<IndexRoute />} />
             <Route path="/screener" element={<Screener />} />
             <Route path="/tactical" element={<Tactical />} />
             <Route path="/masters" element={<TradingMasters />} />

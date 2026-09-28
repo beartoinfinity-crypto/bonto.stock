@@ -17,7 +17,7 @@ import {
 import type { TooltipProps } from 'recharts';
 import {
   ArrowLeft, Star, TrendingUp, TrendingDown, Info, Newspaper,
-  Wifi, WifiOff, AlertCircle, Smartphone, Search,
+  Wifi, WifiOff, AlertCircle, Smartphone, Search, Monitor,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -26,6 +26,7 @@ import { StockSearch } from '@/components/StockSearch';
 import { StockNews } from '@/components/StockNews';
 import { useStockData } from '@/hooks/useStockData';
 import { useHapticFeedback } from '@/hooks/useHapticFeedback';
+import { allowFullSite } from '@/lib/siteMode';
 import { Stock, popularStocks } from '@/lib/stockData';
 import { useLanguage } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -115,7 +116,7 @@ function MobileHub() {
     <div className="min-h-screen bg-background text-foreground">
       <header className="sticky top-0 z-50 border-b border-border bg-card/90 backdrop-blur-sm px-4 py-3">
         <div className="flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2.5 min-h-[44px]" aria-label="Back to dashboard">
+          <Link to="/m" className="flex items-center gap-2.5 min-h-[44px]" aria-label="Mobile home">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary/60">
               <Smartphone className="h-[18px] w-[18px] text-primary-foreground" />
             </div>
@@ -124,12 +125,16 @@ function MobileHub() {
               <p className="text-[11px] text-muted-foreground">{t('appSubtitle')}</p>
             </div>
           </Link>
-          <Link to="/" aria-label="Full dashboard">
-            <Button variant="ghost" size="sm" className="gap-1.5 text-muted-foreground min-h-[44px] px-3">
-              <Search className="h-4 w-4" />
-              <span className="hidden sm:inline text-xs">Dashboard</span>
-            </Button>
-          </Link>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => { allowFullSite(); navigate('/'); }}
+            className="gap-1.5 text-muted-foreground min-h-[44px] px-3"
+            aria-label="Open full dashboard"
+          >
+            <Monitor className="h-4 w-4" />
+            <span className="text-xs font-medium">Full site</span>
+          </Button>
         </div>
       </header>
 
@@ -489,7 +494,7 @@ function MobileDetail({ symbol }: { symbol: string }) {
             </Link>
           </Button>
           <Button asChild className="h-12 rounded-xl text-sm font-bold shadow-lg">
-            <Link to={`/?symbol=${selectedStock.symbol}`}>
+            <Link to={`/?symbol=${selectedStock.symbol}`} onClick={allowFullSite}>
               Full analysis
             </Link>
           </Button>
