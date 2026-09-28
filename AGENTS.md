@@ -4,7 +4,7 @@
 
 1. Set Node on PATH: `$env:Path = "C:\Program Files\nodejs;" + $env:Path`
 2. Run `npm run build` before committing — `dist/` is committed to git (Vercel serves it via `index.js`)
-3. Run `npm run test` after changes — 137 tests across 15 files, must pass
+3. Run `npm run test` after changes — 171 tests across 17 files, must pass
 4. Use `npm.cmd` (not `npm`) in PowerShell commands
 5. Supabase CLI deploy runs from the **repo root** (`supabase/config.toml` is resolved relative to cwd). If the link is lost: `npx.cmd supabase link --project-ref aqyaarnpmvvdzasjefje`
 
@@ -23,6 +23,7 @@
 - **pg_net 5s timeout** — Supabase SQL `net.http_post` records "timeout" for any edge fn running >5s (sync-stock-data ~60s). The fn still completes; verify by data freshness, not `_http_response` status
 - **Edge fn auth** — functions are deployed `--no-verify-jwt`; the `x-cron-secret` header (CRON_SECRET secret) is the only auth. The secret is write-only (`secrets list` shows a digest)
 - **Supabase schedules** — 6 pg_cron jobs live on the project (see `supabase/schedules.sql`); data jobs are server-side, browser cron keeps only local maintenance (`archive-sqlite`, `pull-stock-data`)
+- **Mobile view** — `/m` (hub) + `/m/:symbol` (detail) is the phone-optimized page. Phones auto-bounce `/` → `/m` at <768px (`src/lib/siteMode.ts`); opting into the full site sets localStorage `stockpulse_use_full_site`. `IndexRoute` in `App.tsx` renders `null` for one frame while checking — intentional, not a blank-page bug
 
 ## Conventions
 

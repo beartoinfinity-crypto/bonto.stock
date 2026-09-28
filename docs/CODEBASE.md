@@ -246,14 +246,15 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 
 | Route | Page | Key Hook/Component |
 |-------|------|--------------------|
-| `/` | Index ??Dashboard (891 lines) | `useStockData`; includes KDJIndicator with SMA crossover signals |
+| `/` | Index ??Dashboard (278 lines) | `useStockData`; includes KDJIndicator with SMA crossover signals. Small viewports (<768px) auto-redirect to `/m` via `siteMode.mobileRedirectTarget()` (opt-out remembered in `stockpulse_use_full_site`) |
 | `/masters` | TradingMasters ??12-investor analyzer (281 lines) | `analyzeStock` + `summarizeMasterResult`; verdict summary boxes (BUY/HOLD/WATCH/SELL-AVOID), per-master cards |
 | `/trading-agents` | TradingAgentsPage ??multi-agent report (391 lines) | `runTradingAgents`; analyst team, bull/bear debate, trader plan, risk committee, portfolio decision, final 5-tier rating |
 | `/hedge-fund` | HedgeFundPage ??PEAD alpha model (291 lines) | `fetchEarningsSurprises` + `computePEAD`; quarterly EPS surprise ??drift conviction |
 | `/masters-matrix` | MasterMatrix ??Top-50 matrix (521 lines) | `useMasterMatrix`; universe/custom-stock picker, rank, rows link to history |
 | `/masters-matrix/:symbol` | StockHistory ??Per-stock history (275 lines) | `useMasterMatrix`; 12-master verdicts per day, stats, "Backfill past year" |
 | `/ledger` | TradeLedger ??Simulated traders (729 lines) | `useTradeLedger` + `tradeSimulator` + `ledgerView`; 7-persona leaderboard (cash/positions split), positions, per-person trades, global accumulated Decisions panel + All Transactions table with filter bar, stats, pagination, run-status badge; cloud viewer — auto-pulls the server-simulated ledger, Re-run session button |
-| `/tactical` | Tactical ??Trade planner (662 lines) | `useTacticalHistory`, `tacticalEngine` |
+| `/tactical` | Tactical ??Trade planner (681 lines) | `useTacticalHistory`, `tacticalEngine` |
+| `/m` + `/m/:symbol` | MobileStock ??Mobile view (517 lines) | Hub = `StockSearch` + popular list; detail = sticky price summary with Live/Simulated badge, Recharts touch chart (`touch-pan-y`, drag-to-scrub syncs header price + haptic via `useHapticFeedback`), timeframe pills (`?tf=`, 1M…5Y/All daily bars), key stats, `StockNews`, fixed action bar. Sets the full-site opt-out flag when leaving for `/` |
 | `/screener` | Screener ??Batch screen (604 lines) | `useScreenerData` |
 | `/settings` | Settings ??Config (767 lines) | Auth, watchlist, Supabase, DB ops |
 | `/admin` | Admin ??Cron mgmt (255 lines) | `localCron` jobs, run history |
@@ -279,7 +280,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | `PriceChart.tsx` | 259 | Candlestick + volume, canvas rendering. |
 | `ForecastSimulator.tsx` | 270 | Monte Carlo paths + percentile bands. |
 | `StockNews.tsx` | 276 | Aggregated news headlines. |
-| `Header.tsx` | 142 | Nav bar with links + search + dark mode (Market Open/10Y Data/5 Strategies labels removed). |
+| `Header.tsx` | 151 | Nav bar with links + search + dark mode (Market Open/10Y Data/5 Strategies labels removed). Includes the **Mobile** link to `/m` (icon-only below `sm`). |
 
 ## Remaining Lib Files
 
@@ -292,6 +293,8 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | `stockScreener.ts` | ??| `screenerStocks` list, filter types. |
 | `useScreenerData.ts` | 361 | Fetches all screener stocks, runs recommendations, caches results. |
 | `useTacticalHistory.ts` | 48 | In-browser tactical engine replay. No server calls. |
+| `siteMode.ts` | 36 | Mobile auto-redirect decision: `<768px` viewport + no `stockpulse_use_full_site` flag → bounce `/` to `/m` (keeps `?symbol=`). Unit-tested in `siteMode.test.ts`. |
+| `useHapticFeedback.ts` | 16 | `navigator.vibrate` wrapper for chart scrub feedback (no-ops where unsupported, e.g. iOS). |
 | `edgeFn.ts` | ?? | Supabase Edge Function client. The `simulate-ledger` fn is the server-authoritative ledger writer — shares core logic with `tradeSimulator.ts`. |
 | `localDb.ts` | ?? | sql.js WASM wrapper, IndexedDB persistence. Historical cache has a bar-currency gate (`isDailyBarSeriesFresh`): newest bar must be ??4 days old or the series is a miss. |
 
@@ -311,3 +314,4 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | Ledger server-authoritative | `simulate-ledger` edge fn is the ONLY writer; browsers pull verbatim — prevents forked/corrupted cloud ledger from multiple writers |
 | Account rebuild from trades | `pullLedger` + edge fn both run `replayAccounts()` to rebuild accounts from trades — prevents stale/null accounts from poisoning the leaderboard |
 | Edge fn builds sync | `tradeSimulator.ts` (browser) and `simulate-ledger/index.ts` (edge fn) share core buy/sell logic; fixes must be applied to both files and both must be deployed |
+| Mobile auto-redirect | Phones open the dedicated `/m` view instead of the desktop dashboard (`/` redirects at <768px). Opting into the full site ("Full site" button / "Full analysis") sets `stockpulse_use_full_site` in localStorage so the user isn't bounced back; the choice is per-device and only reset by clearing site data |

@@ -32,7 +32,8 @@ npm start          # serve dist/ via Express
 
 | Route | Page | Description |
 |-------|------|-------------|
-| `/` | Dashboard | Price charts, signals, sentiment, action plan |
+| `/` | Dashboard | Price charts, signals, sentiment, action plan. **Phones (<768px viewport) auto-redirect to `/m`** unless the user chose the full site (remembered flag) |
+| `/m` | Mobile hub | Touch-optimized entry: symbol search + popular list. Detail at `/m/:symbol` (sticky price summary, scrub-to-inspect chart, key stats, news) |
 | `/tactical` | Tactical | Per-stock trade planner with regime state machine and position sizing |
 | `/screener` | Screener | Batch-screen all stocks (incl. Sector Heatmap + Asymmetric Value Screener) by signal confidence |
 | `/masters` | Trading Masters | 12 legendary investors analyze any stock |
