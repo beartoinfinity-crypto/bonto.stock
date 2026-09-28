@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { TrendingUp, Search, Globe, Crosshair, Settings, User, Grid3X3, SearchCode, Wallet } from 'lucide-react';
+import { TrendingUp, Search, Globe, Crosshair, Settings, User, Grid3X3, SearchCode, Wallet, Smartphone } from 'lucide-react';
 import { AlertPanel } from './AlertPanel';
 import { Alert, AlertConfig } from '@/lib/alertTypes';
 import { Button } from '@/components/ui/button';
@@ -94,6 +94,14 @@ export function Header({
               <Button variant="outline" size="sm" className="gap-2">
                 <Wallet className="h-4 w-4" />
                 <span className="hidden sm:inline">Ledger</span>
+              </Button>
+            </Link>
+
+            {/* Mobile View Link */}
+            <Link to="/m">
+              <Button variant="outline" size="sm" className="gap-2">
+                <Smartphone className="h-4 w-4" />
+                <span className="hidden sm:inline">Mobile</span>
               </Button>
             </Link>
 

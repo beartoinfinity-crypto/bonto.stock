@@ -44,6 +44,7 @@ import TradeLedger from '@/pages/TradeLedger';
 import Settings from '@/pages/Settings';
 import ApiSettings from '@/pages/ApiSettings';
 import Admin from '@/pages/Admin';
+import MobileStock from '@/pages/MobileStock';
 import NotFound from '@/pages/NotFound';
 
 const queryClient = new QueryClient({
@@ -63,6 +64,8 @@ const routes: Array<[string, string, ReactNode]> = [
   ['/settings', '/settings', <Settings />],
   ['/api-settings', '/api-settings', <ApiSettings />],
   ['/admin', '/admin', <Admin />],
+  ['/m', '/m', <MobileStock />],
+  ['/m/AAPL', '/m/:symbol', <MobileStock />],
   ['/does-not-exist', '*', <NotFound />],
 ];
 

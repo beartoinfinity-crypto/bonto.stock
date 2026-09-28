@@ -15,6 +15,7 @@ import NotFound from "./pages/NotFound";
 import Settings from "./pages/Settings";
 import ApiSettings from "./pages/ApiSettings";
 import Admin from "./pages/Admin";
+import MobileStock from "./pages/MobileStock";
 import { purgeExpired } from "@/lib/localDb";
 import { startScheduler } from "@/lib/localCron";
 import { fetchRemoteSyncConfig, getClient, pullAll } from "@/lib/supabaseDb";
@@ -67,6 +68,8 @@ const App = () => (
             <Route path="/settings" element={<Settings />} />
             <Route path="/api-settings" element={<ApiSettings />} />
             <Route path="/admin" element={<Admin />} />
+            <Route path="/m" element={<MobileStock />} />
+            <Route path="/m/:symbol" element={<MobileStock />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
