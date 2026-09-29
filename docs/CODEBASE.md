@@ -62,7 +62,7 @@ Server cron job runs (Supabase Edge Functions, 24/7)
 
 ## Core Modules
 
-### `index.js` — Express Server (437 lines)
+### `index.js` — Express Server (1037 lines)
 
 Serves `dist/` SPA and provides server-side API endpoints.
 
@@ -106,7 +106,7 @@ Browsers read server-written rows via the existing boot hydration (`pullAll`) an
 
 Key: `proxyFetch()` chains server proxy → direct → CORS proxies (legacy).
 
-### `src/lib/stockApi.ts` — Yahoo Finance (484 lines)
+### `src/lib/stockApi.ts` — Yahoo Finance (810 lines)
 
 Fetch chain: `proxyFetch()` → server proxy first → direct → CORS proxies.
 
@@ -124,7 +124,7 @@ Fetch chain: `proxyFetch()` → server proxy first → direct → CORS proxies.
 
 **Fresh-quote speed (Master Matrix):** `fetchStockQuote` reads the local cache first, then (for uncached symbols) tries `quoteFromFinnhub` via the `/api/finnhub/quote` proxy — which rotates over the server `FINNHUB_API_KEY`/`FINNHUB_API_KEY_2` env keys plus any browser-saved `api_key`/`api_key_2` tokens — before falling back to Yahoo/Stooq. This makes fresh quote retrieval on the Master Matrix page much faster than Yahoo's slow/blocked endpoints. `useMasterMatrix.runAnalysis` also fetches in larger batches (6) with a shorter 120 ms delay between them.
 
-### `src/lib/masterAnalysis.ts` — 12 Trading Masters (594 lines)
+### `src/lib/masterAnalysis.ts` — 12 Trading Masters (663 lines)
 
 Rule-based engine (no AI/ML) implementing 12 investor strategies. Each master returns a verdict over a stock's historical bars.
 
@@ -138,7 +138,7 @@ Rule-based engine (no AI/ML) implementing 12 investor strategies. Each master re
 | `NASDAQ100_TICKERS` / `filterToNASDAQ100` | ~100 constituents |
 | `Verdict` | `BUY` / `HOLD` / `WATCH` / `SELL` / `AVOID` |
 
-### `src/lib/tradingAgents.ts` — Trading Agents Engine (573 lines)
+### `src/lib/tradingAgents.ts` — Trading Agents Engine (687 lines)
 
 Rule-based reimplementation of the TradingAgents multi-agent workflow — **no AI/ML/LLM**. It runs a staged pipeline over a stock's quote + historical bars, reusing the existing analyzers (`generateSignals`, `analyzeStock`, `analyzeMarketConditions`, `calculateLiquidityConditions`, `fetchSentiment`), and returns a 5-tier final decision.
 
@@ -157,7 +157,7 @@ Key behavioral details of recent fixes (all rule-based):
 - **Fundamentals analyst** (`fundamentalsAnalyst`): the headline reads `${bullCount}/${total} bulls vs ${bearCount} bears` and the summary is driven by the raw master **vote split** (`margin ≥ 2` bullish, `≤ −2` bearish, else lean/evenly-split), not solely by weighted bias. Masters run through the shared `masterAnalysis.ts` engine with `FUNDAMENTAL_MASTER_IDS` = `['buffett-graham','greenblatt','peter-lynch','munger','marks','templeton']`.
 - **Portfolio Manager** (`portfolioManager`): exposes `sizingPersona` (a `PERSONA_CAP` map) and the decision panel shows `{persona} cap {base}% · position {n}%`; liquidity evidence uses `toFixed(2)`.
 
-### `src/lib/peadAnalysis.ts` — PEAD Alpha Model (~90 lines)
+### `src/lib/peadAnalysis.ts` — PEAD Alpha Model (178 lines)
 
 Rule-based TypeScript port of the ai-hedge-fund `pead.py` **Post-Earnings Announcement Drift** quant alpha model — **no AI/ML/LLM**. It scores a stock's drift signal from quarterly earnings surprises (BEAT / MISS).
 
@@ -168,9 +168,9 @@ Rule-based TypeScript port of the ai-hedge-fund `pead.py` **Post-Earnings Announ
 | `surpriseToConviction(pct)` | Maps surprise magnitude to [-1, +1], saturating at ±25% |
 | `parseQuarterEnd(period)` | "1Q2024" → `2024-03-31` (approximate filing point for the window check) |
 
-The page fetches quarterly actuals/estimates via `getEarningsSurprises` (in `stockApi.ts`), which hits the cached local sql.js metadata store first (24h TTL), then Yahoo quoteSummary `earnings` module (surprise % derived from actual−estimate), then **falls back to the Finnhub `/stock/earnings-surprises` endpoint** via the `/api/finnhub/earnings-surprises` server proxy (requires `FINNHUB_API_KEY`, same as the sentiment proxy). A fresh surprise (within the 45-day drift window) carries full conviction; a stale one still reports a residual lean; no surprise → abstain (0). The `hedge_fund/` port powers the `/hedge-fund` page.
+Quarterly actuals/estimates come via `getEarningsSurprises` (in `stockApi.ts`), which hits the cached local sql.js metadata store first (24h TTL), then Yahoo quoteSummary `earnings` module (surprise % derived from actual−estimate), then **falls back to the Finnhub `/stock/earnings-surprises` endpoint** via the `/api/finnhub/earnings-surprises` server proxy (requires `FINNHUB_API_KEY`, same as the sentiment proxy). A fresh surprise (within the 45-day drift window) carries full conviction; a stale one still reports a residual lean; no surprise → abstain (0). **Currently unused:** the `/hedge-fund` page and its `hedge_fund/` port were removed in `25d418e`; the model and its fetch chain remain in the tree (unit-tested in `peadAnalysis.test.ts` / `stockApi.test.ts`) but no page imports them.
 
-### `src/lib/supabaseHistory.ts` — Stored OHLCV (158 lines)
+### `src/lib/supabaseHistory.ts` — Stored OHLCV (241 lines)
 
 Pulls real daily bars from the **`stock_historical`** Supabase table (the 80-symbol index universe + legacy extras, 10y depth, refreshed nightly by the batched `sync-stock-data` edge functions) — the data source for Master Matrix snapshots and per-stock history backfill.
 
@@ -186,7 +186,7 @@ No Supabase credentials live in source. Browsers resolve them at runtime:
 - Edge functions (stock-data news, analyze-news-sentiment, social-sentiment, asymmetric-value-screener) — `GET /api/edge-config` (Vercel env `EDGE_FN_URL` / `EDGE_FN_KEY` — public anon key of the current project `aqyaarnpmvvdzasjefje`)
 - Local dev fallback: `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` in the gitignored `.env`
 
-### `src/hooks/useMasterMatrix.ts` — Master Matrix Hook (511 lines)
+### `src/hooks/useMasterMatrix.ts` — Master Matrix Hook (563 lines)
 
 Central state for the Master Matrix and history pages.
 
@@ -233,9 +233,7 @@ New `/ledger` page ("Simulated Traders"). A cast of seven named personas, each b
 - **Validation**: `scripts/validate-ledger.cjs` audits fills against cloud bars (every fill inside its session's high–low, exact official close, own-session bar exists, no duplicate ids, qty×price==value, snapshot completeness) — exit 1 + violation details on failure. Run after each simulated day: `node scripts/validate-ledger.cjs`.
 - Pure account math (`runDayForPerson`) is unit-tested (`tradeSimulator.test.ts`); signal sourcing lives in the hook.
 
-### `src/lib/stockData.ts` — Analytics Engine (866 lines)
-
-### `src/lib/syncKeys.ts` — Synced Keys (31 lines)
+### `src/lib/stockData.ts` — Analytics Engine (904 lines)
 
 **No AI/ML.** Rule-based signals, template narratives.
 
@@ -249,21 +247,21 @@ Additional technical indicators exported from `stockData.ts`:
 
 Forecasting: `generateForecast()` (trend + confidence bands), `generateMonteCarloPaths()` (GBM simulation, p10-p90).
 
-### `src/lib/supabaseDb.ts` — Supabase Cloud (597 lines)
+### `src/lib/supabaseDb.ts` — Supabase Cloud (603 lines)
 
 Tables: `stockpulse_kv`, `stock_quotes`, `stock_historical` (real OHLCV bars, read via `supabaseHistory.ts`), `politician_featured_trades`, `politician_trades` (Kadoa full history, `source='kadoa'`), `avs_results`, `social_sentiment_cache`, `api_usage_log`.
 
 Key: `maybeSyncToSupabase(key)` debounced 3s push. `pullAll()` paginated 500/page. `pushFeaturedTrades()` chunked 100/batch. `pullFreshCloudPrices()` fetches the current cloud quote board for live marks. Removed ledger paths (ledger is server-authoritative): no `overwriteLedger`, no merge; `pullLedger` adopts the cloud copy verbatim and rebuilds accounts from trades via `replayAccounts(healSameDayConflicts(trades))`.
 
-### `src/lib/storage.ts` — Unified Write Layer (70 lines)
+### `src/lib/storage.ts` — Unified Write Layer (71 lines)
 
 **Single entry point for ALL writes.** `setItem()` → localStorage (sync) + Supabase (debounced 3s) + SQLite (fire-and-forget).
 
-### `src/hooks/useStockData.ts` — Main Hook (126 lines)
+### `src/hooks/useStockData.ts` — Main Hook (133 lines)
 
 Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSelectedStock, refetch }`. TanStack React Query with 1-min stale (quotes), 5-min (historical). Listens for `stockpulse-sync` cron events.
 
-### `src/lib/syncKeys.ts` — Synced Keys (31 lines)
+### `src/lib/syncKeys.ts` — Synced Keys (38 lines)
 
 `CONFIG_KEYS`: watchlist, users, auth, admin auth, API config, lang, recent stocks.
 `DOCUMENT_KEYS`: screener results, AVS results, politician trades, featured trades, cron history, alerts, market snapshot. **`stockpulse_trade_ledger` is intentionally absent** — the ledger is server-authoritative (the `simulate-ledger` edge fn is its only writer); browsers pull it verbatim and never push/merge it.
@@ -275,56 +273,55 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | Route | Page | Key Hook/Component |
 |-------|------|--------------------|
 | `/` | Index — Dashboard (278 lines) | `useStockData`; includes KDJIndicator with SMA crossover signals. Small viewports (<768px) auto-redirect to `/m` via `siteMode.mobileRedirectTarget()` (opt-out remembered in `stockpulse_use_full_site`) |
-| `/masters` | TradingMasters — 12-investor analyzer (281 lines) | `analyzeStock` + `summarizeMasterResult`; verdict summary boxes (BUY/HOLD/WATCH/SELL-AVOID), per-master cards |
-| `/trading-agents` | TradingAgentsPage — multi-agent report (391 lines) | `runTradingAgents`; analyst team, bull/bear debate, trader plan, risk committee, portfolio decision, final 5-tier rating |
-| `/hedge-fund` | HedgeFundPage — PEAD alpha model (291 lines) | `fetchEarningsSurprises` + `computePEAD`; quarterly EPS surprise → drift conviction |
-| `/masters-matrix` | MasterMatrix — Top-50 matrix (521 lines) | `useMasterMatrix`; universe/custom-stock picker, rank, rows link to history |
-| `/masters-matrix/:symbol` | StockHistory — Per-stock history (275 lines) | `useMasterMatrix`; 12-master verdicts per day, stats, "Backfill past year" |
-| `/ledger` | TradeLedger — Simulated traders (729 lines) | `useTradeLedger` + `tradeSimulator` + `ledgerView`; 7-persona leaderboard (cash/positions split), positions, per-person trades, global accumulated Decisions panel + All Transactions table with filter bar, stats, pagination, run-status badge; cloud viewer — auto-pulls the server-simulated ledger, Re-run session button |
+| `/masters` | TradingMasters — 12-investor analyzer (305 lines) | `analyzeStock` + `summarizeMasterResult`; verdict summary boxes (BUY/HOLD/WATCH/SELL-AVOID), per-master cards |
+| `/trading-agents` | TradingAgentsPage — multi-agent report (554 lines) | `runTradingAgents`; analyst team, bull/bear debate, trader plan, risk committee, portfolio decision, final 5-tier rating |
+| `/masters-matrix` | MasterMatrix — Top-50 matrix (542 lines) | `useMasterMatrix`; universe/custom-stock picker, rank, rows link to history |
+| `/masters-matrix/:symbol` | StockHistory — Per-stock history (288 lines) | `useMasterMatrix`; 12-master verdicts per day, stats, "Backfill past year" |
+| `/ledger` | TradeLedger — Simulated traders (730 lines) | `useTradeLedger` + `tradeSimulator` + `ledgerView`; 7-persona leaderboard (cash/positions split), positions, per-person trades, global accumulated Decisions panel + All Transactions table with filter bar, stats, pagination, run-status badge; cloud viewer — auto-pulls the server-simulated ledger, Re-run session button |
 | `/tactical` | Tactical — Trade planner (681 lines) | `useTacticalHistory`, `tacticalEngine` |
 | `/m` + `/m/:symbol` | MobileStock — Mobile view (517 lines) | Hub = `StockSearch` + popular list; detail = sticky price summary with Live/Simulated badge, Recharts touch chart (`touch-pan-y`, drag-to-scrub syncs header price + haptic via `useHapticFeedback`), timeframe pills (`?tf=`, 1M…5Y/All daily bars), key stats, `StockNews`, fixed action bar. Sets the full-site opt-out flag when leaving for `/` |
-| `/screener` | Screener — Batch screen (604 lines) | `useScreenerData` |
-| `/settings` | Settings — Config (767 lines) | Auth, watchlist, Supabase, DB ops |
-| `/admin` | Admin — Cron mgmt (255 lines) | `localCron` jobs, run history |
-| `/api-settings` | ApiSettings — API keys (265 lines) | Provider configs |
-| `*` | NotFound — 404 (24 lines) | — |
+| `/screener` | Screener — Batch screen (605 lines) | `useScreenerData` |
+| `/settings` | Settings — Config (788 lines) | Auth, watchlist, Supabase, DB ops |
+| `/admin` | Admin — Cron mgmt (276 lines) | `localCron` jobs, run history |
+| `/api-settings` | ApiSettings — API keys (299 lines) | Provider configs |
+| `*` | NotFound — 404 (25 lines) | — |
 
 ## Components
 
 | Component | Lines | Purpose |
 |-----------|-------|---------|
-| `PoliticianTrades.tsx` | 893 | 6-source politician trades — **Kadoa first** (Supabase `politician_trades` full history), then CapitolExposed, CongressInvests. Featured: Trump + Pelosi. Supabase cache. |
-| `SocialSentimentCheck.tsx` | 210 | 10-source sentiment (Google News, StockTwits, Yahoo, ApeWisdom, SocialTickers, Finnhub, Adanos, MarketWatch, CNBC, Google Trends). Keyword scoring, no AI. |
-| `AsymmetricValueScreener.tsx` | 326 | Risk/reward scoring. Inside Screener. |
-| `SectorHeatmap.tsx` | 262 | Sector performance heatmap. Inside Screener. |
-| `ChartAnalyst.tsx` | 589 | Pattern recognition: S/R, trendlines, candle patterns. |
-| `AlertPanel.tsx` | 280 | Price alert manager. |
-| `MultiTimeframeRSI.tsx` | 138 | RSI(7/14/21) confluence display. |
-| `KDJIndicator.tsx` | — | KDJ indicator with SMA20/SMA50 dual-axis chart, KDJ + SMA crossover signal detection, Golden/Death Cross detection, zone analysis (overbought/oversold), and combined KDJ+SMA alignment signals. |
-| `LiquidityMonitor.tsx` | 183 | Bid/ask depth via `deriveOrderBook()`. |
-| `StockSearch.tsx` | 88 | Autocomplete search, 300ms debounce. |
-| `StockMetrics.tsx` | 131 | P/E, market cap, 52-week range, volume. |
-| `SignalPanel.tsx` | 195 | 8 strategy signals with confidence bars. |
-| `PriceChart.tsx` | 259 | Candlestick + volume, canvas rendering. |
-| `ForecastSimulator.tsx` | 270 | Monte Carlo paths + percentile bands. |
-| `StockNews.tsx` | 276 | Aggregated news headlines. |
+| `PoliticianTrades.tsx` | 970 | 6-source politician trades — **Kadoa first** (Supabase `politician_trades` full history), then CapitolExposed, CongressInvests. Featured: Trump + Pelosi. Supabase cache. |
+| `SocialSentimentCheck.tsx` | 212 | 10-source sentiment (Google News, StockTwits, Yahoo, ApeWisdom, SocialTickers, Finnhub, Adanos, MarketWatch, CNBC, Google Trends). Keyword scoring, no AI. |
+| `AsymmetricValueScreener.tsx` | 359 | Risk/reward scoring. Inside Screener. |
+| `SectorHeatmap.tsx` | 58 | TradingView Stock Heatmap widget (sector-grouped S&P 500 performance map); drop-in replacement for the now-blocked Finviz hotlink. Inside Screener. |
+| `ChartAnalyst.tsx` | 571 | Pattern recognition: S/R, trendlines, candle patterns. |
+| `AlertPanel.tsx` | 339 | Price alert manager. |
+| `MultiTimeframeRSI.tsx` | 355 | RSI(7/14/21) confluence display. |
+| `KDJIndicator.tsx` | 650 | KDJ indicator with SMA20/SMA50 dual-axis chart, KDJ + SMA crossover signal detection, Golden/Death Cross detection, zone analysis (overbought/oversold), and combined KDJ+SMA alignment signals. |
+| `LiquidityMonitor.tsx` | 133 | Bid/ask depth via `deriveOrderBook()`. |
+| `StockSearch.tsx` | 245 | Autocomplete search, 300ms debounce. |
+| `StockMetrics.tsx` | 100 | P/E, market cap, 52-week range, volume. |
+| `SignalPanel.tsx` | 180 | 8 strategy signals with confidence bars. |
+| `PriceChart.tsx` | 352 | Candlestick + volume, canvas rendering. |
+| `ForecastSimulator.tsx` | 486 | Monte Carlo paths + percentile bands. |
+| `StockNews.tsx` | 259 | Aggregated news headlines. |
 | `Header.tsx` | 151 | Nav bar with links + search + dark mode (Market Open/10Y Data/5 Strategies labels removed). Includes the **Mobile** link to `/m` (icon-only below `sm`). |
 
 ## Remaining Lib Files
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `tacticalEngine.ts` | 755 | Regime state machine, 3 entry weapons, position sizing, trailing exit, iceberg execution, `replayEngine()` backtest. |
-| `tradingAgents.ts` | 573 | Rule-based reimplementation of the TradingAgents multi-agent workflow → 5-tier final rating. No AI/ML. |
-| `peadAnalysis.ts` | 177 | PEAD (post-earnings drift) alpha model — surprise → drift conviction. Port of ai-hedge-fund `pead.py`. No AI/ML. |
-| `strategyRecommendation.ts` | 581 | Market condition analysis → strategy recommendation with confidence + suitability. |
-| `stockScreener.ts` | — | `screenerStocks` list, filter types. |
-| `useScreenerData.ts` | 361 | Fetches all screener stocks, runs recommendations, caches results. |
-| `useTacticalHistory.ts` | 48 | In-browser tactical engine replay. No server calls. |
+| `tacticalEngine.ts` | 664 | Regime state machine, 3 entry weapons, position sizing, trailing exit, iceberg execution, `replayEngine()` backtest. |
+| `tradingAgents.ts` | 687 | Rule-based reimplementation of the TradingAgents multi-agent workflow → 5-tier final rating. No AI/ML. |
+| `peadAnalysis.ts` | 178 | PEAD (post-earnings drift) alpha model — surprise → drift conviction. Port of ai-hedge-fund `pead.py`. No AI/ML. Currently unused (see above). |
+| `strategyRecommendation.ts` | 582 | Market condition analysis → strategy recommendation with confidence + suitability. |
+| `stockScreener.ts` | 104 | `screenerStocks` list, filter types. |
+| `useScreenerData.ts` | 355 | Fetches all screener stocks, runs recommendations, caches results. |
+| `useTacticalHistory.ts` | 58 | In-browser tactical engine replay. No server calls. |
 | `siteMode.ts` | 36 | Mobile auto-redirect decision: `<768px` viewport + no `stockpulse_use_full_site` flag → bounce `/` to `/m` (keeps `?symbol=`). Unit-tested in `siteMode.test.ts`. |
 | `useHapticFeedback.ts` | 16 | `navigator.vibrate` wrapper for chart scrub feedback (no-ops where unsupported, e.g. iOS). |
-| `edgeFn.ts` | — | Supabase Edge Function client. The `simulate-ledger` fn is the server-authoritative ledger writer — shares core logic with `tradeSimulator.ts`. |
-| `localDb.ts` | — | sql.js WASM wrapper, IndexedDB persistence. Historical cache has a bar-currency gate (`isDailyBarSeriesFresh`): newest bar must be ≤ 4 days old or the series is a miss. |
+| `edgeFn.ts` | 134 | Supabase Edge Function client. The `simulate-ledger` fn is the server-authoritative ledger writer — shares core logic with `tradeSimulator.ts`. |
+| `localDb.ts` | 829 | sql.js WASM wrapper, IndexedDB persistence. Historical cache has a bar-currency gate (`isDailyBarSeriesFresh`): newest bar must be ≤ 4 days old or the series is a miss. |
 
 ## Design Decisions
 

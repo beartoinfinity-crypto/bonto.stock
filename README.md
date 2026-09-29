@@ -40,7 +40,6 @@ npm start          # serve dist/ via Express
 | `/trading-agents` | Trading Agents | Rule-based multi-agent analyst report (bull/bear debate, risk committee) |
 | `/masters-matrix` | Master Matrix | Rank S&P 500 / NASDAQ-100 / custom stocks into a top-50 matrix by 12-master verdicts |
 | `/masters-matrix/:symbol` | Stock History | Per-stock daily 12-master history, with past-year backfill |
-| `/hedge-fund` | Hedge Fund | PEAD post-earnings-drift alpha model |
 | `/ledger` | Simulated Traders | Seven personas trade the shared S&P 500 / NASDAQ-100 universe daily (server-simulated at each session's official close); cloud viewer with run-status badge + Re-run session; accumulated Decisions + All Transactions with filter bar, live stats, pagination |
 | `/api-settings` | API Settings | Third-party provider API-key entry |
 | `/settings` | Settings | Auth, watchlist, DB export/import, cloud sync |

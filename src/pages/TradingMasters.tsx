@@ -79,7 +79,7 @@ export default function TradingMasters() {
       }, 200);
       return () => clearInterval(progressTimer.current);
     } else if (analyzing) {
-      // Data loaded ??fill to 100%
+      // Data loaded — fill to 100%
       clearInterval(progressTimer.current);
       setProgress(100);
       const t = setTimeout(() => setAnalyzing(false), 400);
