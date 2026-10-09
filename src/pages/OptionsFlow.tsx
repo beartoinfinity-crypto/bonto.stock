@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Header } from '@/components/Header';
 import { BackToTop } from '@/components/BackToTop';
+import { ResearchNotes, type ResearchNote } from '@/components/ResearchNotes';
 import {
   Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
@@ -39,6 +40,15 @@ interface LoadState {
   loading: boolean;
   error: string | null;
 }
+
+const FLOW_NOTES: ResearchNote[] = [
+  { term: 'Put/call ratio (volume & OI)', body: 'Put volume ÷ call volume for the selected expiry. The badge tags ≥ 1.10 “bearish”, ≤ 0.80 “bullish”, in between “neutral” — a contrarian read: heavy put buying usually marks fear/hedging that can precede bounces, while call froth often marks complacency. The OI variant is standing positioning — slower and steadier than today’s tape. A single sweep swings the intraday ratio, so judge both together.' },
+  { term: 'Open-interest walls', body: 'The highest-OI call and put strikes. Price tends to be drawn toward the area between the walls into expiry (dealers hedge around big OI), and a decisive break of a wall often accelerates — those strikes are where stops and hedges cluster.' },
+  { term: 'Max pain', body: 'The strike where option holders are paid the least at expiry — the classic pin candidate. A tendency, not a promise: strong trends run straight through it, and it only carries meaning close to expiry.' },
+  { term: 'Expected move (ATM straddle)', body: '±0.85 × the ATM straddle mid ≈ one standard deviation — roughly a 68% chance the expiry lands inside that dollar band. It is the market’s own estimate of how far price may travel; about a third of expiries resolve outside it. Same information as IV30, expressed in dollars.' },
+  { term: 'Unusual activity', body: 'Volume ≥ 2× open interest: contracts changing hands faster than they are being opened — fresh positioning (a new thesis or hedge) rather than rotation between strikes. “∞” means volume with zero prior OI (all-new interest). Biggest prints first; unusual says something is happening, not which way it resolves.' },
+  { term: 'Chain table', body: 'The ATM row is highlighted (nearest strike to spot with both sides quoted). “Near the money” caps the chain around spot — the far tails are noise for most reads; toggle to all rows for full depth. IV is annualized: 40% ≈ ±2.5% expected daily wiggle (÷√252).' },
+];
 
 export default function OptionsFlow() {
   const [symbolInput, setSymbolInput] = useState<string>(
@@ -473,6 +483,8 @@ export default function OptionsFlow() {
             </Card>
           </>
         )}
+
+        <ResearchNotes notes={FLOW_NOTES} />
 
         <p className="text-xs text-muted-foreground">
           Data: CBOE delayed quotes (≈15 minutes), served through the StockPulse API.

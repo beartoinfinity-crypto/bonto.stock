@@ -8,6 +8,7 @@ import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Header } from '@/components/Header';
 import { BackToTop } from '@/components/BackToTop';
+import { ResearchNotes, type ResearchNote } from '@/components/ResearchNotes';
 import {
   ArrowDown, ArrowUp, Fuel, Loader2, RefreshCw, Search, TrendingDown, TrendingUp,
 } from 'lucide-react';
@@ -28,6 +29,14 @@ const SORT_LABEL: Record<SortMode, string> = {
   listed: 'As listed',
   movers: 'Biggest movers',
 };
+
+const COMMODITIES_NOTES: ResearchNote[] = [
+  { term: 'A price board, not a signal screen', body: 'This page computes no buy/sell signals — it shows live futures quotes plus a static exposure map. Use it to read the commodity regime and trace spillover, then take positioning decisions to /tactical, /risk or /flow.' },
+  { term: 'Front-month continuous contracts', body: 'Prices are the active contract from Yahoo (CL=F, KC=F, …). Futures roll to the next month around expiry — a roll gap can print a move that never happened in the physical market, so compare across dates with that in mind.' },
+  { term: 'Exposure map: helps / squeezes', body: 'Click any row. “Helps” lists what typically benefits when this commodity rises (producer economies, related equities); “Squeezes” lists what is pressured (input-cost users: airlines, chemicals, packaging). The value is spillover logic: oil up → transport margins down; copper up → manufacturing costs up.' },
+  { term: 'Movers sort', body: 'Sorts each group by |day change| — biggest swing first, direction ignored, so a −4% collapse outranks a +2% bounce. It is a “where is the action” filter, not a strength ranking.' },
+  { term: 'Group behaviour', body: 'Energy, metals, grains, softs and livestock each move on their own drivers (weather-driven names in grains/softs; industrial cycle in metals; supply shocks in energy). A lone mover usually has a story — a cluster moving together is a macro regime call.' },
+];
 
 function fmtPrice(v: number): string {
   if (v >= 1000) return v.toLocaleString('en-US', { maximumFractionDigits: 0 });
@@ -293,6 +302,8 @@ export default function Commodities() {
             Nothing matches “{query}”.
           </p>
         )}
+
+        <ResearchNotes notes={COMMODITIES_NOTES} />
       </div>
       <BackToTop />
     </div>

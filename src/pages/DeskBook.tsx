@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Header } from '@/components/Header';
 import { BackToTop } from '@/components/BackToTop';
+import { ResearchNotes, type ResearchNote } from '@/components/ResearchNotes';
 import {
   BookOpen, Info, Loader2, Plus, RefreshCw, Trash2, Wallet,
 } from 'lucide-react';
@@ -27,6 +28,14 @@ const SORT_LABEL: Record<BookSort, string> = {
   day: 'Day %',
   pnl: 'P&L %',
 };
+
+const BOOK_NOTES: ResearchNote[] = [
+  { term: 'Bookkeeping, not signals', body: 'This is your private position book — it stores lots and prices them from daily quotes; it computes no buy/sell signals. Entries and exits you act on come from the analysis screens (/tactical, /risk, /flow).' },
+  { term: 'Unrealized P&L vs cost', body: 'Market value − cost basis (invested capital). Adding shares to an existing symbol merges the lot and re-averages cost as a weighted average, so P&L stays continuous — realized (closed) trades are not tracked on this screen.' },
+  { term: 'Day change', body: 'Derived from each quote’s day % applied to that position’s current value — an estimate that refreshes with the quotes, not a tick-by-tick P&L feed.' },
+  { term: 'Weight column', body: 'Position value ÷ total market value. Watch concentration: a single name above roughly a quarter of the book turns the whole book into a single-issuer bet — the /risk screen quantifies this with sector HHI and beta.' },
+  { term: 'Unpriced positions', body: 'Symbols whose quote failed show “—” and are excluded from market value, P&L and weights. Refresh (or fix the symbol) before reading totals — otherwise percentages are computed over the priced subset only.' },
+];
 
 function fmtMoney(v: number): string {
   return `${v < 0 ? '-' : ''}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -349,6 +358,8 @@ export default function DeskBook() {
             </AlertDescription>
           </Alert>
         )}
+
+        <ResearchNotes notes={BOOK_NOTES} />
       </div>
       <BackToTop />
     </div>

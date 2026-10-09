@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Header } from '@/components/Header';
 import { BackToTop } from '@/components/BackToTop';
+import { ResearchNotes, type ResearchNote } from '@/components/ResearchNotes';
 import { Landmark, Loader2, RefreshCw } from 'lucide-react';
 import {
   aggregatePortfolio, formatUsd, MANAGERS, parseInfoTable, pick13fFilings,
@@ -27,6 +28,14 @@ interface FundsData {
   exitedCount: number;
   rowCount: number;
 }
+
+const FUNDS_NOTES: ResearchNote[] = [
+  { term: 'A slow, lagging signal', body: '13F-HR is due up to 45 days after quarter end — you are reading last quarter’s book, and the manager traded freely during that window. Use it to confirm positioning across quarters, never as a timing trigger.' },
+  { term: 'Longs only — half the picture', body: '13F reports long US equity exposure (index puts show up as negative-value lines). Market-neutral funds’ shorts and hedges are invisible, so “value” is gross exposure, not conviction — and a shrinking total can mean de-risking or simply rising prices.' },
+  { term: 'QoQ shares delta & NEW', body: 'Δ shares vs the previous original filing: positive = ended the quarter adding, negative = trimming, NEW = first appearance in the book, “—” = no prior filing to compare. “Exited” counts CUSIPs that were held last filing and are gone now.' },
+  { term: '% of portfolio', body: 'Position value ÷ filing total — lets you compare conviction across managers of very different sizes and spot concentration: a top holding at 20%+ of the book is a conviction bet, 1–2% is often index-filler.' },
+  { term: 'How rows are grouped', body: 'Positions are summed by CUSIP, so duplicate lines from multiple sub-managers merge into one row. Share classes of the same issuer stay separate rows — that is how the information table is filed.' },
+];
 
 async function proxyJson<T>(url: string): Promise<T> {
   const res = await fetch(`/api/proxy?url=${encodeURIComponent(url)}`);
@@ -312,6 +321,8 @@ export default function Funds() {
             </Card>
           </>
         )}
+
+        <ResearchNotes notes={FUNDS_NOTES} />
 
         <p className="text-xs text-muted-foreground">
           Source: SEC EDGAR Form 13F-HR (quarterly, filed up to 45 days after quarter end).

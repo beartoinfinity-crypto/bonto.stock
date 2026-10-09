@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Header } from '@/components/Header';
 import { BackToTop } from '@/components/BackToTop';
+import { ResearchNotes, type ResearchNote } from '@/components/ResearchNotes';
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Gauge, Loader2, RefreshCw } from 'lucide-react';
 import {
@@ -31,6 +32,15 @@ interface MacroState {
 }
 
 const INITIAL: MacroState = { loading: true, error: null, disabled: null, data: {}, failed: {} };
+
+const MACRO_NOTES: ResearchNote[] = [
+  { term: 'The YoY badge', body: 'Latest value minus the value one year earlier — smooths seasonality and shows the regime direction: rates in a cutting year vs a hiking year, claims climbing vs cooling. For levels like payrolls the absolute change is the story.' },
+  { term: 'Yield curve (DGS2, DGS10, T10Y2Y)', body: 'T10Y2Y = 10-year minus 2-year. Inverted (below zero) has preceded most US recessions with a long lag; DGS2 embeds expected Fed moves, DGS10 sets the discount rate growth equities are valued against — rising long yields pressure long-duration valuations.' },
+  { term: 'Labor (UNRATE, PAYEMS, ICSA)', body: 'UNRATE is a lagging level; weekly ICSA claims turn first — a sustained rise is the earliest labor-cooling tell. PAYEMS is a monthly level in thousands: watch the pace of change, not the raw level.' },
+  { term: 'Risk gauges (HY OAS, VIX)', body: 'BAMLH0A0HYM2 is the high-yield credit spread — widening means borrowers pay more for risk, the classic risk-off tell. VIX above ~20 = elevated fear, below ~13 = complacency. Both are coincident gauges, not forecasts.' },
+  { term: 'Policy-rate chain (DFF)', body: 'DFF is the overnight rate actually paid today; DGS2 leads it with market expectations; DGS10 anchors long-run borrowing. When an inverted curve re-steepens it usually signals cuts are coming — historically supportive for bonds, mixed for equities.' },
+  { term: 'How this feeds the other screens', body: 'Macro is context, not signals: rising oil maps to /commodities, widening credit spreads argue for smaller risk budgets in /book, and the rate level is the backdrop against which every /risk beta and /flow implied move is computed.' },
+];
 
 export default function Macro() {
   const [state, setState] = useState<MacroState>(INITIAL);
@@ -185,6 +195,13 @@ export default function Macro() {
             ))}
           </div>
         )}
+
+        <ResearchNotes notes={MACRO_NOTES} />
+
+        <p className="text-xs text-muted-foreground">
+          Source: Federal Reserve Bank of St. Louis (FRED), release lags vary by series.
+          Rule-based context for education only — not investment advice.
+        </p>
       </div>
       <BackToTop />
     </div>

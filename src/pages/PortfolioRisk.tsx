@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/select';
 import { Header } from '@/components/Header';
 import { BackToTop } from '@/components/BackToTop';
+import { ResearchNotes, type ResearchNote } from '@/components/ResearchNotes';
 import {
   Activity, AlertTriangle, Loader2, PieChart, Plus, RefreshCw, ShieldAlert, Star, Trash2, TrendingUp,
 } from 'lucide-react';
@@ -45,6 +46,17 @@ const WINDOWS: Array<{ days: number; label: string }> = [
   { days: 126, label: '6 months' },
   { days: 252, label: '1 year' },
   { days: 756, label: '3 years' },
+];
+
+const RISK_NOTES: ResearchNote[] = [
+  { term: 'Portfolio beta', body: 'Slope of your daily returns against the benchmark over the selected window. β > 1 → the book historically moves harder than the index (index ±1% ≈ your book ±β%); β < 1 → softer; β near 0 → little co-movement. It measures past sensitivity, not a forecast.' },
+  { term: 'Volatility & diversification benefit', body: 'Annualized standard deviation of daily returns (×√252). The “+X pp” line is benchmark vol minus portfolio vol: positive means the holdings partially offset each other (calmer than the index), negative means the book is wilder than simply holding the benchmark.' },
+  { term: 'Worst drawdown', body: 'Largest peak-to-trough slide of the growth curve in the window, plus sessions underwater (trough until recovery). This is the pain you would actually have sat through — a capacity check for your risk tolerance, not a prediction.' },
+  { term: '5% stress line', body: 'One-factor scenario: if the benchmark fell 5%, β implies your book moves ≈ 5% × β. Rule-of-thumb only — it ignores overnight gaps, correlations spiking toward 1 in selloffs, and single-stock news.' },
+  { term: 'Correlation column', body: 'Each holding’s correlation with the benchmark’s daily returns. ≈ 1 → it trades like the index (little diversification); ≈ 0 → independent; negative → a natural hedge. When every holding sits near 1, the book is one bet wearing several tickers.' },
+  { term: 'Sector concentration (HHI)', body: 'Sum of squared sector weights (0 = fully spread, 1 = one sector). Badge thresholds: > 0.25 Concentrated, > 0.15 Moderate, otherwise Diversified. Concentrated books ride single-sector cycles harder — the sector bars below show exactly what dominates.' },
+  { term: 'Weights', body: 'Enter weights as % of capital; they are normalized to sum to 100% internally (a 40/60 pair equals 2:3 exposure regardless of total). Watchlist import splits 100% evenly across the imported symbols.' },
+  { term: 'Data warnings', body: 'Symbols without real daily bars are excluded and listed in the yellow alert — check warnings before trusting the numbers, since weights then apply across the remaining names.' },
 ];
 
 function loadHoldings(): HoldingRow[] {
@@ -470,6 +482,8 @@ export default function PortfolioRisk() {
             </Card>
           </>
         )}
+
+        <ResearchNotes notes={RISK_NOTES} />
       </div>
       <BackToTop />
     </div>
