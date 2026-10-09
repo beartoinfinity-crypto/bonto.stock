@@ -1069,6 +1069,64 @@ app.get('/api/fred/observations', async (req, res) => {
   return res.json(out);
 });
 
+// --- SEC EDGAR proxy (declared User-Agent) ---------------------------------
+// GET /api/edgar?url=<sec.gov URL>
+// www.sec.gov (Akamai) 403s the generic Chrome-spoofing /api/proxy UA from
+// cloud IPs with "Your Request Originates from an Undeclared Automated Tool".
+// SEC's fair-access policy asks client apps to declare an identifiable
+// User-Agent with a contact — that is what this endpoint sends. Narrow host
+// allowlist (EDGAR only). Archive files are immutable → cached 1h.
+
+const edgarCache = new Map(); // url -> { at, body, type, status }
+const EDGAR_CACHE_TTL_MS = 60 * 60 * 1000;
+const EDGAR_UA = 'StockPulse/1.0 (https://dandanball-stock.vercel.app; ben.chan@stockpulse.local)';
+
+app.get('/api/edgar', async (req, res) => {
+  const target = String(req.query.url || '');
+  let host;
+  try {
+    host = new URL(target).hostname;
+  } catch {
+    return res.status(400).json({ error: 'Invalid URL' });
+  }
+  if (host !== 'www.sec.gov' && host !== 'sec.gov' && host !== 'data.sec.gov') {
+    return res.status(403).json({ error: 'Only sec.gov hosts are allowed' });
+  }
+
+  const cached = edgarCache.get(target);
+  if (cached && Date.now() - cached.at < EDGAR_CACHE_TTL_MS) {
+    res.set('Content-Type', cached.type);
+    res.set('Cache-Control', 'private, max-age=3600');
+    return res.status(cached.status).send(cached.body);
+  }
+
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    const upstream = await fetch(target, {
+      signal: ctrl.signal,
+      headers: {
+        'User-Agent': EDGAR_UA,
+        'Accept': 'application/json, application/xml, text/xml, text/html, */*',
+      },
+    });
+    clearTimeout(timer);
+
+    const body = await upstream.text();
+    const type = upstream.headers.get('content-type') || 'application/octet-stream';
+    if (upstream.ok) {
+      edgarCache.set(target, { at: Date.now(), body, type, status: upstream.status });
+    }
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Content-Type', type);
+    res.set('Cache-Control', upstream.ok ? 'private, max-age=3600' : 'no-store');
+    return res.status(upstream.status).send(body);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return res.status(502).json({ error: 'EDGAR fetch failed', detail: msg });
+  }
+});
+
 // Hashed build outputs (dist/assets/*) are content-addressed — cache them
 // a year. Everything else (favicon, wasm, robots) revalidates.
 app.use(express.static(path.join(__dirname, 'dist'), {

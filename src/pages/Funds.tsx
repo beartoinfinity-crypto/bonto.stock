@@ -38,8 +38,11 @@ const FUNDS_NOTES: ResearchNote[] = [
 ];
 
 async function proxyJson<T>(url: string): Promise<T> {
-  const res = await fetch(`/api/proxy?url=${encodeURIComponent(url)}`);
+  const res = await fetch(`/api/edgar?url=${encodeURIComponent(url)}`);
   if (!res.ok) {
+    if (res.status === 403) {
+      throw new Error('SEC blocked this request (rate limit or automated-tool check) — wait a minute and retry.');
+    }
     let detail = `HTTP ${res.status}`;
     try {
       const body = (await res.json()) as { error?: string };
@@ -51,7 +54,10 @@ async function proxyJson<T>(url: string): Promise<T> {
 }
 
 async function proxyText(url: string): Promise<string> {
-  const res = await fetch(`/api/proxy?url=${encodeURIComponent(url)}`);
+  const res = await fetch(`/api/edgar?url=${encodeURIComponent(url)}`);
+  if (res.status === 403) {
+    throw new Error('SEC blocked this request (rate limit or automated-tool check) — wait a minute and retry.');
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${new URL(url).pathname.split('/').pop()}`);
   return res.text();
 }
