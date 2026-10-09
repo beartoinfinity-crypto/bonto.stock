@@ -879,6 +879,119 @@ app.get('/api/diag/opencabinet', async (req, res) => {
   }
 });
 
+// --- CBOE options tape (delayed quotes, normalized) -----------------------
+// GET /api/cboe/options?symbol=AAPL
+// CBOE publishes free delayed option-chain JSON (bid/ask/volume/OI/IV/delta
+// per contract) but the raw file is >1.5 MB per symbol. Fetch it server-side
+// and strip it to the fields the /flow screen needs, so the browser receives
+// a few hundred KB instead of the whole tape. Quotes are delayed ~15 min
+// (CBOE delayed quotes) — education only.
+
+const cboeCache = new Map(); // symbol -> { at: number, payload: object }
+const CBOE_CACHE_TTL_MS = 10 * 60 * 1000;
+const OCC_RE = /^([A-Z]+)(\d{6})([CP])(\d{8})$/;
+
+// OCC symbology: ROOT + YYMMDD + C/P + strike*1000 → dated contract parts.
+function parseOccSymbol(occ) {
+  const m = OCC_RE.exec(occ);
+  if (!m) return null;
+  const ymd = m[2];
+  return {
+    expiry: `20${ymd.slice(0, 2)}-${ymd.slice(2, 4)}-${ymd.slice(4, 6)}`,
+    strike: Number(m[4]) / 1000,
+    type: m[3],
+  };
+}
+
+const round4 = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 10000) / 10000 : null);
+
+function normalizeCboeTape(json, symbol) {
+  const d = json && json.data;
+  if (!d || !Array.isArray(d.options)) return null;
+  const contracts = [];
+  for (const o of d.options) {
+    const parsed = parseOccSymbol(String(o.option || ''));
+    if (!parsed) continue;
+    const bid = typeof o.bid === 'number' ? o.bid : 0;
+    const ask = typeof o.ask === 'number' ? o.ask : 0;
+    const last = typeof o.last_trade_price === 'number' ? o.last_trade_price : 0;
+    const volume = typeof o.volume === 'number' ? o.volume : 0;
+    const oi = typeof o.open_interest === 'number' ? o.open_interest : 0;
+    // Skip dead far-OTM rows with no market at all (biggest size win).
+    if (!bid && !ask && !last && !volume && !oi) continue;
+    contracts.push({
+      e: parsed.expiry,
+      k: parsed.strike,
+      t: parsed.type,
+      b: bid,
+      a: ask,
+      l: last,
+      v: volume,
+      o: oi,
+      i: round4(o.iv),
+      d: round4(o.delta),
+    });
+  }
+  contracts.sort((x, y) =>
+    x.e === y.e ? (x.k - y.k) || x.t.localeCompare(y.t) : x.e.localeCompare(y.e));
+  return {
+    symbol: d.symbol || symbol,
+    price: typeof d.current_price === 'number' ? d.current_price : null,
+    priceChangePercent: typeof d.price_change_percent === 'number' ? d.price_change_percent : null,
+    iv30: typeof d.iv30 === 'number' ? d.iv30 : null,
+    timestamp: json.timestamp || d.last_trade_time || null,
+    contracts,
+  };
+}
+
+app.get('/api/cboe/options', async (req, res) => {
+  const symbol = String(req.query.symbol || '').trim().toUpperCase();
+  if (!/^\.?[A-Z][A-Z.]{0,7}$/.test(symbol)) {
+    return res.status(400).json({ error: 'Invalid symbol' });
+  }
+
+  const cached = cboeCache.get(symbol);
+  if (cached && Date.now() - cached.at < CBOE_CACHE_TTL_MS) {
+    res.set('Cache-Control', 'no-store');
+    return res.json(cached.payload);
+  }
+
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    const upstream = await fetch(
+      `https://cdn.cboe.com/api/global/delayed_quotes/options/${encodeURIComponent(symbol)}.json`,
+      {
+        signal: ctrl.signal,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+      },
+    );
+    clearTimeout(timer);
+
+    // CBOE answers 404 for some misses and S3-style 403 AccessDenied for
+    // unknown symbols — both mean "no such chain".
+    if (upstream.status === 404 || upstream.status === 403) {
+      return res.status(404).json({ error: `No CBOE options for ${symbol}` });
+    }
+    if (!upstream.ok) {
+      return res.status(502).json({ error: `CBOE returned HTTP ${upstream.status}` });
+    }
+
+    const payload = normalizeCboeTape(await upstream.json(), symbol);
+    if (!payload || payload.contracts.length === 0) {
+      return res.status(502).json({ error: 'CBOE payload had no usable contracts' });
+    }
+
+    cboeCache.set(symbol, { at: Date.now(), payload });
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Cache-Control', 'no-store');
+    return res.json(payload);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return res.status(502).json({ error: 'CBOE fetch failed', detail: msg });
+  }
+});
+
 // Hashed build outputs (dist/assets/*) are content-addressed — cache them
 // a year. Everything else (favicon, wasm, robots) revalidates.
 app.use(express.static(path.join(__dirname, 'dist'), {
