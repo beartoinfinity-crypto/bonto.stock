@@ -1,9 +1,17 @@
 import { Link } from 'react-router-dom';
-import { TrendingUp, Search, Globe, Crosshair, Settings, User, Grid3X3, SearchCode, Wallet, Smartphone } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { TrendingUp, Search, Globe, Crosshair, Settings, User, Grid3X3, SearchCode, Wallet, Smartphone, FlaskConical, Shield } from 'lucide-react';
 import { AlertPanel } from './AlertPanel';
 import { Alert, AlertConfig } from '@/lib/alertTypes';
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useLanguage } from '@/lib/i18n';
+
+// Research-desk screens (greeksoup ports) — one dropdown keeps the header
+// from crowding as pages are added.
+const RESEARCH_LINKS: Array<{ to: string; label: string; icon: ReactNode }> = [
+  { to: '/risk', label: 'Risk', icon: <Shield className="h-4 w-4" /> },
+];
 
 interface HeaderProps {
   alerts?: Alert[];
@@ -104,6 +112,26 @@ export function Header({
                 <span className="hidden sm:inline">Mobile</span>
               </Button>
             </Link>
+
+            {/* Research desk (ported screens) */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="gap-2">
+                  <FlaskConical className="h-4 w-4" />
+                  <span className="hidden sm:inline">Research</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {RESEARCH_LINKS.map(link => (
+                  <DropdownMenuItem key={link.to} asChild>
+                    <Link to={link.to} className="flex items-center gap-2 cursor-pointer">
+                      {link.icon}
+                      {link.label}
+                    </Link>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             {/* Settings Link */}
             <Link to="/settings">
