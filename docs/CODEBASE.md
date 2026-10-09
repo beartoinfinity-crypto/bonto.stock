@@ -62,7 +62,7 @@ Server cron job runs (Supabase Edge Functions, 24/7)
 
 ## Core Modules
 
-### `index.js` — Express Server (1037 lines)
+### `index.js` — Express Server (1227 lines)
 
 Serves `dist/` SPA and provides server-side API endpoints.
 
@@ -77,6 +77,8 @@ Serves `dist/` SPA and provides server-side API endpoints.
 | `GET /api/politician-trades/opencabinet?politician=X` | OpenCabinet CSV parse (PapaParse), name + ticker filter. |
 | `GET /api/politician-trades/kadoa?politician=X&limit=N` | Kadoa Congress Trading Monitor — **Supabase `politician_trades` first** (full backfilled history, `source='kadoa'`), GitHub static JSON fallback (`filers.json` → `filer/<id>.json` envelope `{filer,trades}`, or recent `trades.json` feed). 6h GitHub cache. |
 | `GET /api/diag/opencabinet` | Diagnostic: Trump trade counts. |
+| `GET /api/cboe/options?symbol=X` | CBOE delayed option-chain tape for `/flow` — normalized server-side (OCC symbol parse, dead rows dropped) from the >1.5 MB raw file. 10-min in-memory cache. |
+| `GET /api/fred/observations?series=A,B&start=YYYY-MM-DD` | FRED macro series for `/macro` (up to 20 ids, server-held `FRED_API_KEY`, 15-min cache). 501 + setup hint when the key is unset. |
 
 ### Cron architecture — server-side (primary) + browser (local only)
 
@@ -261,10 +263,10 @@ Key: `maybeSyncToSupabase(key)` debounced 3s push. `pullAll()` paginated 500/pag
 
 Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSelectedStock, refetch }`. TanStack React Query with 1-min stale (quotes), 5-min (historical). Listens for `stockpulse-sync` cron events.
 
-### `src/lib/syncKeys.ts` — Synced Keys (38 lines)
+### `src/lib/syncKeys.ts` — Synced Keys (41 lines)
 
-`CONFIG_KEYS`: watchlist, users, auth, admin auth, API config, lang, recent stocks.
-`DOCUMENT_KEYS`: screener results, AVS results, politician trades, featured trades, cron history, alerts, market snapshot. **`stockpulse_trade_ledger` is intentionally absent** — the ledger is server-authoritative (the `simulate-ledger` edge fn is its only writer); browsers pull it verbatim and never push/merge it.
+`CONFIG_KEYS`: watchlist, users, auth, admin auth, API config, lang, recent stocks, `/risk` holdings + benchmark + window.
+`DOCUMENT_KEYS`: screener results, AVS results, politician trades, featured trades, cron history, alerts, market snapshot, `/book` positions. **`stockpulse_trade_ledger` is intentionally absent** — the ledger is server-authoritative (the `simulate-ledger` edge fn is its only writer); browsers pull it verbatim and never push/merge it.
 
 ---
 
@@ -280,6 +282,12 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | `/ledger` | TradeLedger — Simulated traders (730 lines) | `useTradeLedger` + `tradeSimulator` + `ledgerView`; 7-persona leaderboard (cash/positions split), positions, per-person trades, global accumulated Decisions panel + All Transactions table with filter bar, stats, pagination, run-status badge; cloud viewer — auto-pulls the server-simulated ledger, Re-run session button |
 | `/tactical` | Tactical — Trade planner (706 lines) | `useTacticalHistory`, `tacticalEngine`; bar-by-bar replay with a full metric suite (Sharpe, Sortino, Calmar, max drawdown + duration, CAGR, profit factor, expectancy) computed from real fills |
 | `/m` + `/m/:symbol` | MobileStock — Mobile view (517 lines) | Hub = `StockSearch` + popular list; detail = sticky price summary with Live/Simulated badge, Recharts touch chart (`touch-pan-y`, drag-to-scrub syncs header price + haptic via `useHapticFeedback`), timeframe pills (`?tf=`, 1M…5Y/All daily bars), key stats, `StockNews`, fixed action bar. Sets the full-site opt-out flag when leaving for `/` |
+| `/risk` | PortfolioRisk — Risk screen (475 lines) | `portfolioRisk` — beta/correlation/vol/drawdown, sector HHI, stress scenario, growth-of-100; holdings from watchlist or manual, SPY/QQQ/DIA/IWM benchmark |
+| `/commodities` | Commodities — Futures board (298 lines) | `commodities` — 30 verified futures symbols in 6 groups (batched live quotes), click row for industry exposure map (helps/squeezes) |
+| `/book` | DeskBook — Desk book (356 lines) | `deskBook` — hand-kept lots with weighted-average cost merge, mark-to-market, day change, weights; persisted via syncKeys (`stockpulse_book_positions`) |
+| `/flow` | OptionsFlow — Options tape (528 lines) | `optionsFlow` + `/api/cboe/options` — real CBOE delayed tape: put/call ratios, OI walls chart, max pain, ATM-straddle expected move, unusual activity, chain table |
+| `/funds` | Funds — 13F portfolios (323 lines) | `funds13f` via `/api/proxy` → SEC EDGAR (submissions → info-table XML): top holdings, % of portfolio, qoq share deltas, new/exited counts; 16 curated managers + custom CIK |
+| `/macro` | Macro — FRED board (275 lines) | `macro` + `/api/fred/observations` — 12 curated FRED series, latest + YoY, windowed sparklines, category filter; setup notice when `FRED_API_KEY` unset |
 | `/screener` | Screener — Batch screen (605 lines) | `useScreenerData` |
 | `/settings` | Settings — Config (788 lines) | Auth, watchlist, Supabase, DB ops |
 | `/admin` | Admin — Cron mgmt (276 lines) | `localCron` jobs, run history |
@@ -305,7 +313,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | `PriceChart.tsx` | 352 | Candlestick + volume, canvas rendering. |
 | `ForecastSimulator.tsx` | 486 | Monte Carlo paths + percentile bands. |
 | `StockNews.tsx` | 259 | Aggregated news headlines. |
-| `Header.tsx` | 151 | Nav bar with links + search + dark mode (Market Open/10Y Data/5 Strategies labels removed). Includes the **Mobile** link to `/m` (icon-only below `sm`). |
+| `Header.tsx` | 183 | Nav bar with links + search + dark mode (Market Open/10Y Data/5 Strategies labels removed). Includes the **Mobile** link to `/m` (icon-only below `sm`) and a **Research** dropdown (`RESEARCH_LINKS`: Risk, Commodities, Book, Options Flow, 13F Funds, Macro). |
 
 ## Remaining Lib Files
 
@@ -323,6 +331,12 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | `useHapticFeedback.ts` | 16 | `navigator.vibrate` wrapper for chart scrub feedback (no-ops where unsupported, e.g. iOS). |
 | `edgeFn.ts` | 134 | Supabase Edge Function client. The `simulate-ledger` fn is the server-authoritative ledger writer — shares core logic with `tradeSimulator.ts`. |
 | `localDb.ts` | 829 | sql.js WASM wrapper, IndexedDB persistence. Historical cache has a bar-currency gate (`isDailyBarSeriesFresh`): newest bar must be ≤ 4 days old or the series is a miss. |
+| `portfolioRisk.ts` | 266 | `/risk` math: daily returns, Pearson correlation, beta, annualized vol, weights, drawdown (`maxDrawdownStats`), sector HHI, stress + growth curve. Unit-tested. |
+| `commodities.ts` | 281 | `/commodities` universe: 30 verified futures symbols (Yahoo `F` tickers) in 6 groups + per-symbol industry exposure map (helps/squeezes). Unit-tested. |
+| `deskBook.ts` | 171 | `/book` math: lot upsert with weighted-average cost merge, validation, mark-to-market P&L, sort helpers. Unit-tested. |
+| `optionsFlow.ts` | 278 | `/flow` analytics: put/call ratios, OI walls, max pain, ATM-straddle expected move (×0.85 rule of thumb), unusual activity (vol ≥ 2× OI), chain rows. Unit-tested. |
+| `funds13f.ts` | 213 | `/funds` EDGAR handling: submissions → 13F-HR picks, info-table file selection, XML parse (DOMParser), portfolio aggregation + qoq deltas, value-scale heuristic (dollars post-2023). Unit-tested. |
+| `macro.ts` | 152 | `/macro` series metadata (12 FRED ids), observation parsing (`.` → null), latest + YoY summarize, window slice, unit-aware formatters. Unit-tested. |
 
 ## Design Decisions
 

@@ -41,6 +41,7 @@ npm start                  # Express on http://localhost:10000
 | `FINNHUB_API_KEY_2` | *(none)* | Optional: second Finnhub key — proxy rotates between them on rate-limits |
 | `ADANOS_API_KEY` | *(none)* | Optional: Adanos sentiment API key, served to every browser via `GET /api/api-keys` (enables the Adanos source in Social Sentiment Check). Falls back to per-browser Settings → API Keys → Adanos when unset |
 | `CRON_SECRET` | *(none)* | **Required for the `/api/ledger/*` proxy** — must match the Supabase `CRON_SECRET` secret (`0mv...f1gap`), and must be set as a hosting env var on Vercel. Without it `/api/ledger/status` and `/api/ledger/rerun` return 502 (the fn 401s since the proxy can't sign its calls) |
+| `FRED_API_KEY` | *(none)* | Optional: FRED API key (free at research.stlouisfed.org) powering the `/macro` board via `GET /api/fred/observations`. When unset the endpoint answers 501 and `/macro` shows a setup notice — the other research screens are unaffected |
 
 ## Cache headers on dist
 

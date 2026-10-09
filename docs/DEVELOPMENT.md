@@ -64,6 +64,7 @@ Browser features that need server URLs/keys must fetch them at runtime — never
 | `/api/sync-config` | Supabase URL + anon key (cloud sync, stored history) | `SUPABASE_URL`, `SUPABASE_ANON_KEY` |
 | `/api/edge-config` | Edge function URL + key (`edgeFn.ts` calls) | `EDGE_FN_URL`, `EDGE_FN_KEY` |
 | `/api/api-keys` | Third-party keys (e.g. `ADANOS_API_KEY`) | named Vercel env vars |
+| `/api/fred/observations` | FRED macro series for `/macro` (proxied + cached; 501 setup hint when unset) | `FRED_API_KEY` |
 
 Local dev fallback: `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` in the gitignored `.env` (never committed).
 
@@ -87,7 +88,7 @@ Editable engine: `src/lib/masterAnalysis.ts` (`analyzeStock` runs all 12). Add a
 ```powershell
 $env:Path = "C:\Program Files\nodejs;" + $env:Path
 .\node_modules\.bin\tsc.cmd --noEmit     # type check — 0 errors
-npm.cmd run test                         # 182 tests across 18 files — all pass
+npm.cmd run test                         # 287 tests across 24 files — all pass
 npm.cmd run build                        # rebuild dist/ (committed)
 ```
 

@@ -34,6 +34,12 @@ npm start          # serve dist/ via Express
 |-------|------|-------------|
 | `/` | Dashboard | Price charts, signals, sentiment, action plan. **Phones (<768px viewport) auto-redirect to `/m`** unless the user chose the full site (remembered flag) |
 | `/m` | Mobile hub | Touch-optimized entry: symbol search + popular list. Detail at `/m/:symbol` (sticky price summary, scrub-to-inspect chart, key stats, news) |
+| `/risk` | Portfolio Risk | Holdings beta/correlation/volatility, drawdown, sector concentration, stress scenario, growth-of-100 chart |
+| `/commodities` | Commodities | 30 live futures (energy, metals, grains, softs, livestock) with industry exposure map |
+| `/book` | Desk Book | Hand-kept position book: lots, weighted-average cost, mark-to-market P&L |
+| `/flow` | Options Flow | Real CBOE delayed option tape — put/call, OI walls, max pain, expected move, unusual activity, full chain |
+| `/funds` | 13F Funds | Institutional portfolios from SEC EDGAR — holdings, % of portfolio, quarter-over-quarter deltas |
+| `/macro` | Macro Board | 12 FRED series (rates, labor, prices, credit) with latest, YoY change, and windowed charts |
 | `/tactical` | Tactical | Per-stock trade planner with regime state machine and position sizing |
 | `/screener` | Screener | Batch-screen all stocks (incl. Sector Heatmap + Asymmetric Value Screener) by signal confidence |
 | `/masters` | Trading Masters | 12 legendary investors analyze any stock |
