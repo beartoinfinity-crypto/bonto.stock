@@ -21,6 +21,7 @@ import PortfolioRisk from "./pages/PortfolioRisk";
 import Commodities from "./pages/Commodities";
 import DeskBook from "./pages/DeskBook";
 import OptionsFlow from "./pages/OptionsFlow";
+import Funds from "./pages/Funds";
 import { purgeExpired } from "@/lib/localDb";
 import { startScheduler } from "@/lib/localCron";
 import { fetchRemoteSyncConfig, getClient, pullAll } from "@/lib/supabaseDb";
@@ -98,6 +99,7 @@ const App = () => (
             <Route path="/commodities" element={<Commodities />} />
             <Route path="/book" element={<DeskBook />} />
             <Route path="/flow" element={<OptionsFlow />} />
+            <Route path="/funds" element={<Funds />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

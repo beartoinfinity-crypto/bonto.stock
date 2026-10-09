@@ -49,6 +49,7 @@ import PortfolioRisk from '@/pages/PortfolioRisk';
 import Commodities from '@/pages/Commodities';
 import DeskBook from '@/pages/DeskBook';
 import OptionsFlow from '@/pages/OptionsFlow';
+import Funds from '@/pages/Funds';
 import NotFound from '@/pages/NotFound';
 
 const queryClient = new QueryClient({
@@ -74,6 +75,7 @@ const routes: Array<[string, string, ReactNode]> = [
   ['/commodities', '/commodities', <Commodities />],
   ['/book', '/book', <DeskBook />],
   ['/flow', '/flow', <OptionsFlow />],
+  ['/funds', '/funds', <Funds />],
   ['/does-not-exist', '*', <NotFound />],
 ];
 
