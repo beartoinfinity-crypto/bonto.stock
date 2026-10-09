@@ -46,6 +46,7 @@ import ApiSettings from '@/pages/ApiSettings';
 import Admin from '@/pages/Admin';
 import MobileStock from '@/pages/MobileStock';
 import PortfolioRisk from '@/pages/PortfolioRisk';
+import Commodities from '@/pages/Commodities';
 import NotFound from '@/pages/NotFound';
 
 const queryClient = new QueryClient({
@@ -68,6 +69,7 @@ const routes: Array<[string, string, ReactNode]> = [
   ['/m', '/m', <MobileStock />],
   ['/m/AAPL', '/m/:symbol', <MobileStock />],
   ['/risk', '/risk', <PortfolioRisk />],
+  ['/commodities', '/commodities', <Commodities />],
   ['/does-not-exist', '*', <NotFound />],
 ];
 
