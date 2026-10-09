@@ -992,6 +992,83 @@ app.get('/api/cboe/options', async (req, res) => {
   }
 });
 
+// --- FRED macro observations -----------------------------------------------
+// GET /api/fred/observations?series=DGS10,UNRATE&start=2019-01-01
+// The FRED API key is server-held (Vercel env FRED_API_KEY) and never reaches
+// the browser. When the key is unset the endpoint answers 501 and the /macro
+// screen shows a setup notice instead of data. Responses are cached in-memory
+// for 15 minutes (macro series update daily at most).
+
+const fredCache = new Map(); // cacheKey -> { at, payload }
+const FRED_CACHE_TTL_MS = 15 * 60 * 1000;
+
+async function fetchFredSeries(seriesId, start, apiKey) {
+  const url = 'https://api.stlouisfed.org/fred/series/observations'
+    + `?series_id=${encodeURIComponent(seriesId)}`
+    + `&api_key=${encodeURIComponent(apiKey)}`
+    + `&file_type=json&observation_start=${encodeURIComponent(start)}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10000);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    if (!res.ok) throw new Error(`FRED HTTP ${res.status}`);
+    const json = await res.json();
+    if (!Array.isArray(json.observations)) throw new Error('FRED malformed payload');
+    // FRED marks missing values as "." — keep them as null so charts skip.
+    return json.observations.map(o => ({
+      date: String(o.date || ''),
+      value: o.value === '.' || o.value === '' || o.value == null ? null : Number(o.value),
+    })).filter(o => o.date);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+app.get('/api/fred/observations', async (req, res) => {
+  const apiKey = process.env.FRED_API_KEY;
+  if (!apiKey) {
+    return res.status(501).json({
+      error: 'FRED_API_KEY is not configured on the server',
+      hint: 'Set FRED_API_KEY on Vercel (free key: research.stlouisfed.org)',
+    });
+  }
+
+  const series = String(req.query.series || '')
+    .split(',')
+    .map(s => s.trim().toUpperCase())
+    .filter(Boolean);
+  if (!series.length || series.length > 20) {
+    return res.status(400).json({ error: 'Send 1–20 comma-separated series ids' });
+  }
+  if (!series.every(s => /^[A-Z][A-Z0-9]{1,19}$/.test(s))) {
+    return res.status(400).json({ error: 'Invalid series id' });
+  }
+  const startRaw = String(req.query.start || '');
+  const start = /^\d{4}-\d{2}-\d{2}$/.test(startRaw) ? startRaw : '2015-01-01';
+
+  const cacheKey = `${start}|${series.join(',')}`;
+  const cached = fredCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < FRED_CACHE_TTL_MS) {
+    res.set('Cache-Control', 'no-store');
+    return res.json(cached.payload);
+  }
+
+  const settled = await Promise.allSettled(series.map(id => fetchFredSeries(id, start, apiKey)));
+  const out = { series: {}, failed: {} };
+  settled.forEach((r, i) => {
+    if (r.status === 'fulfilled') out.series[series[i]] = r.value;
+    else out.failed[series[i]] = r.reason instanceof Error ? r.reason.message : String(r.reason);
+  });
+  if (Object.keys(out.series).length === 0) {
+    return res.status(502).json({ error: 'All FRED fetches failed', failed: out.failed });
+  }
+
+  fredCache.set(cacheKey, { at: Date.now(), payload: out });
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Cache-Control', 'no-store');
+  return res.json(out);
+});
+
 // Hashed build outputs (dist/assets/*) are content-addressed — cache them
 // a year. Everything else (favicon, wasm, robots) revalidates.
 app.use(express.static(path.join(__dirname, 'dist'), {
