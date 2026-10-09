@@ -14,6 +14,9 @@ export const CONFIG_KEYS = [
   'stockpulse_api_config',
   'sp-lang',
   'stockpulse_recent_stocks',
+  'stockpulse_risk_holdings',
+  'stockpulse_risk_benchmark',
+  'stockpulse_risk_window',
 ] as const;
 
 // ─── Document keys (large JSON, stored in SQLite `documents` table) ─
@@ -29,6 +32,7 @@ export const DOCUMENT_KEYS = [
   'stockpulse_alert_config',
   'stockpulse_market_snapshot',
   'stockpulse_master_matrix',
+  'stockpulse_book_positions',
   // NOTE: 'stockpulse_trade_ledger' is deliberately NOT here. The ledger is
   // SERVER-AUTHORITATIVE: only the simulate-ledger edge fn writes it (daily
   // cron / rerun). Browsers pull a read-only mirror and never push — a

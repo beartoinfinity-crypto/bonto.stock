@@ -47,6 +47,7 @@ import Admin from '@/pages/Admin';
 import MobileStock from '@/pages/MobileStock';
 import PortfolioRisk from '@/pages/PortfolioRisk';
 import Commodities from '@/pages/Commodities';
+import DeskBook from '@/pages/DeskBook';
 import NotFound from '@/pages/NotFound';
 
 const queryClient = new QueryClient({
@@ -70,6 +71,7 @@ const routes: Array<[string, string, ReactNode]> = [
   ['/m/AAPL', '/m/:symbol', <MobileStock />],
   ['/risk', '/risk', <PortfolioRisk />],
   ['/commodities', '/commodities', <Commodities />],
+  ['/book', '/book', <DeskBook />],
   ['/does-not-exist', '*', <NotFound />],
 ];
 

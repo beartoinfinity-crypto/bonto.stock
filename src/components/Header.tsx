@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import type { ReactNode } from 'react';
-import { TrendingUp, Search, Globe, Crosshair, Settings, User, Grid3X3, SearchCode, Wallet, Smartphone, FlaskConical, Shield, Fuel } from 'lucide-react';
+import { TrendingUp, Search, Globe, Crosshair, Settings, User, Grid3X3, SearchCode, Wallet, Smartphone, FlaskConical, Shield, Fuel, BookOpen } from 'lucide-react';
 import { AlertPanel } from './AlertPanel';
 import { Alert, AlertConfig } from '@/lib/alertTypes';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,7 @@ import { useLanguage } from '@/lib/i18n';
 const RESEARCH_LINKS: Array<{ to: string; label: string; icon: ReactNode }> = [
   { to: '/risk', label: 'Risk', icon: <Shield className="h-4 w-4" /> },
   { to: '/commodities', label: 'Commodities', icon: <Fuel className="h-4 w-4" /> },
+  { to: '/book', label: 'Book', icon: <BookOpen className="h-4 w-4" /> },
 ];
 
 interface HeaderProps {
