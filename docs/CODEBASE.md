@@ -79,6 +79,7 @@ Serves `dist/` SPA and provides server-side API endpoints.
 | `GET /api/diag/opencabinet` | Diagnostic: Trump trade counts. |
 | `GET /api/cboe/options?symbol=X` | CBOE delayed option-chain tape for `/flow` — normalized server-side (OCC symbol parse, dead rows dropped) from the >1.5 MB raw file. 10-min in-memory cache. |
 | `GET /api/fred/observations?series=A,B&start=YYYY-MM-DD` | FRED macro series for `/macro` (up to 20 ids, server-held `FRED_API_KEY`, 15-min cache). 501 + setup hint when the key is unset. |
+| `GET /api/edgar?url=<sec.gov URL>` | SEC EDGAR proxy for `/funds` — declared `User-Agent` (www.sec.gov 403s browser-spoofed UAs from cloud IPs), `sec.gov`-only host allowlist, 1h cache of immutable Archive files. |
 
 ### Cron architecture — server-side (primary) + browser (local only)
 
