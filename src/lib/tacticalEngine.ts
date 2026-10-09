@@ -3,6 +3,7 @@
 // adaptive trailing exits and iceberg execution planning.
 
 import { StockData } from './stockData';
+import { BacktestMetrics, computeBacktestMetrics } from './backtestMetrics';
 
 export interface EngineParams {
   atrLength: number;          // ATR_Length
@@ -525,6 +526,8 @@ export interface ReplayResult {
     netPnl: number;
     openTrade: ReplayTrade | null;
   };
+  /** Spec §2.4 performance & risk metrics, computed from the closed trades. */
+  metrics: BacktestMetrics;
 }
 
 /**
@@ -645,6 +648,12 @@ export function replayEngine(data: StockData[], p: EngineParams, lookback = 30):
   }
 
   const wins = trades.filter(t => t.pnl > 0).length;
+  const metrics = computeBacktestMetrics({
+    trades,                       // still chronological here (reversed only in the return)
+    bars: data.slice(start),      // the replayed window
+    initialEquity: p.initialEquity,
+    openPosition: openTrade,
+  });
   return {
     rows: rows.slice().reverse(),
     trades: trades.slice().reverse(),
@@ -657,7 +666,8 @@ export function replayEngine(data: StockData[], p: EngineParams, lookback = 30):
       wins,
       winRate: trades.length ? (wins / trades.length) * 100 : 0,
       netPnl: trades.reduce((s, t) => s + t.pnl, 0),
-    openTrade,
+      openTrade,
     },
+    metrics,
   };
 }

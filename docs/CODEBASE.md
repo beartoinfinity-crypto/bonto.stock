@@ -233,7 +233,7 @@ New `/ledger` page ("Simulated Traders"). A cast of seven named personas, each b
 - **Validation**: `scripts/validate-ledger.cjs` audits fills against cloud bars (every fill inside its session's high–low, exact official close, own-session bar exists, no duplicate ids, qty×price==value, snapshot completeness) — exit 1 + violation details on failure. Run after each simulated day: `node scripts/validate-ledger.cjs`.
 - Pure account math (`runDayForPerson`) is unit-tested (`tradeSimulator.test.ts`); signal sourcing lives in the hook.
 
-### `src/lib/stockData.ts` — Analytics Engine (904 lines)
+### `src/lib/stockData.ts` — Analytics Engine (884 lines)
 
 **No AI/ML.** Rule-based signals, template narratives.
 
@@ -278,7 +278,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | `/masters-matrix` | MasterMatrix — Top-50 matrix (542 lines) | `useMasterMatrix`; universe/custom-stock picker, rank, rows link to history |
 | `/masters-matrix/:symbol` | StockHistory — Per-stock history (288 lines) | `useMasterMatrix`; 12-master verdicts per day, stats, "Backfill past year" |
 | `/ledger` | TradeLedger — Simulated traders (730 lines) | `useTradeLedger` + `tradeSimulator` + `ledgerView`; 7-persona leaderboard (cash/positions split), positions, per-person trades, global accumulated Decisions panel + All Transactions table with filter bar, stats, pagination, run-status badge; cloud viewer — auto-pulls the server-simulated ledger, Re-run session button |
-| `/tactical` | Tactical — Trade planner (681 lines) | `useTacticalHistory`, `tacticalEngine` |
+| `/tactical` | Tactical — Trade planner (706 lines) | `useTacticalHistory`, `tacticalEngine`; bar-by-bar replay with a full metric suite (Sharpe, Sortino, Calmar, max drawdown + duration, CAGR, profit factor, expectancy) computed from real fills |
 | `/m` + `/m/:symbol` | MobileStock — Mobile view (517 lines) | Hub = `StockSearch` + popular list; detail = sticky price summary with Live/Simulated badge, Recharts touch chart (`touch-pan-y`, drag-to-scrub syncs header price + haptic via `useHapticFeedback`), timeframe pills (`?tf=`, 1M…5Y/All daily bars), key stats, `StockNews`, fixed action bar. Sets the full-site opt-out flag when leaving for `/` |
 | `/screener` | Screener — Batch screen (605 lines) | `useScreenerData` |
 | `/settings` | Settings — Config (788 lines) | Auth, watchlist, Supabase, DB ops |
@@ -311,7 +311,8 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `tacticalEngine.ts` | 664 | Regime state machine, 3 entry weapons, position sizing, trailing exit, iceberg execution, `replayEngine()` backtest. |
+| `tacticalEngine.ts` | 674 | Regime state machine, 3 entry weapons, position sizing, trailing exit, iceberg execution, `replayEngine()` backtest. |
+| `backtestMetrics.ts` | 188 | Spec §2.4 metric suite from a replay's closed trades + bars: total return, CAGR, max drawdown + duration, volatility, Sharpe, Sortino, Calmar, win rate, profit factor, avg win/loss, expectancy. Mark-to-market equity curve (`buildEquityCurve`) includes the open position. Unit-tested in `backtestMetrics.test.ts`. |
 | `tradingAgents.ts` | 687 | Rule-based reimplementation of the TradingAgents multi-agent workflow → 5-tier final rating. No AI/ML. |
 | `peadAnalysis.ts` | 178 | PEAD (post-earnings drift) alpha model — surprise → drift conviction. Port of ai-hedge-fund `pead.py`. No AI/ML. Currently unused (see above). |
 | `strategyRecommendation.ts` | 582 | Market condition analysis → strategy recommendation with confidence + suitability. |

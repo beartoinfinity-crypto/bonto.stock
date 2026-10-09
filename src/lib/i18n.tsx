@@ -280,17 +280,6 @@ const translations = {
     riskMedium: 'Medium',
     riskHigh: 'High',
 
-    // ---- StrategyPerformance ----
-    strategyPerformance: 'Strategy Performance',
-    historicalBacktest: 'Historical backtesting results',
-    bestStrategy: 'Best Strategy',
-    winRate: 'Win Rate',
-    avgReturn: 'Avg Return',
-    trades: 'Trades',
-    profitFactor: 'Profit Factor',
-    maxDD: 'Max DD',
-    sharpe: 'Sharpe',
-
     // ---- AlertPanel ----
     alerts: 'Alerts',
     noAlerts: 'No alerts yet',
@@ -616,17 +605,6 @@ const translations = {
     riskLow: '低',
     riskMedium: '中',
     riskHigh: '高',
-
-    // ---- StrategyPerformance ----
-    strategyPerformance: '策略績效',
-    historicalBacktest: '歷史回測結果',
-    bestStrategy: '最佳策略',
-    winRate: '勝率',
-    avgReturn: '平均報酬',
-    trades: '交易次數',
-    profitFactor: '獲利因子',
-    maxDD: '最大回撤',
-    sharpe: '夏普比率',
 
     // ---- AlertPanel ----
     alerts: '警報',

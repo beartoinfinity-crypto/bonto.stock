@@ -30,6 +30,9 @@ const stateMeta: Record<MarketState, { label: string; cls: string; weapon: strin
 
 const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 
+/** Ratios can be non-finite in the degenerate no-loss / no-drawdown case. */
+const fmtRatio = (v: number) => (Number.isFinite(v) ? v.toFixed(2) : '∞');
+
 function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="rounded-lg border border-border bg-secondary/40 p-3">
@@ -568,6 +571,28 @@ const Tactical = () => {
                       <Metric label="Blocked" value={String(replay.summary.blockedSessions)} hint="kill switch / liquidity" />
                       <Metric label="Closed trades" value={String(replay.summary.closedTrades)} hint={`win rate ${replay.summary.winRate.toFixed(0)}%`} />
                       <Metric label="Net P/L" value={money(replay.summary.netPnl)} hint={replay.summary.openTrade ? `open ${money(replay.summary.openTrade.pnl)}` : 'no open position'} />
+                    </div>
+
+                    <div>
+                      <h3 className="mb-2 text-sm font-semibold">Performance metrics</h3>
+                      <p className="mb-3 text-xs text-muted-foreground">
+                        Computed from the closed trades above — return, risk, risk-adjusted and trade statistics
+                        for the replayed window. The open position is marked to market.
+                      </p>
+                      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        <Metric label="Total return" value={`${replay.metrics.totalReturn.toFixed(2)}%`} hint="mark-to-market" />
+                        <Metric label="CAGR" value={`${replay.metrics.cagr.toFixed(2)}%`} hint="annualized" />
+                        <Metric label="Max drawdown" value={`${replay.metrics.maxDrawdown.toFixed(2)}%`} hint={`${replay.metrics.maxDrawdownDuration} sessions underwater`} />
+                        <Metric label="Volatility" value={`${replay.metrics.volatility.toFixed(2)}%`} hint="annualized" />
+                        <Metric label="Sharpe" value={fmtRatio(replay.metrics.sharpe)} hint="annualized" />
+                        <Metric label="Sortino" value={fmtRatio(replay.metrics.sortino)} hint="downside-only" />
+                        <Metric label="Calmar" value={fmtRatio(replay.metrics.calmar)} hint="CAGR / |max DD|" />
+                        <Metric label="Profit factor" value={fmtRatio(replay.metrics.profitFactor)} hint="gross win / gross loss" />
+                        <Metric label="Expectancy" value={money(replay.metrics.expectancy)} hint="avg per trade" />
+                        <Metric label="Avg win" value={money(replay.metrics.avgWin)} />
+                        <Metric label="Avg loss" value={money(replay.metrics.avgLoss)} />
+                        <Metric label="Win rate" value={`${replay.metrics.winRate.toFixed(1)}%`} hint={`${replay.metrics.totalTrades} closed trades`} />
+                      </div>
                     </div>
 
                     <div>

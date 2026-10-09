@@ -881,23 +881,3 @@ export function generateMonteCarloPaths(
 
   return { dates, paths, p10, p25, p50, p75, p90 };
 }
-
-export interface StrategyPerformance {
-  strategy: string;
-  winRate: number;
-  avgReturn: number;
-  totalTrades: number;
-  profitFactor: number;
-  maxDrawdown: number;
-  sharpeRatio: number;
-}
-
-export function calculateStrategyPerformance(): StrategyPerformance[] {
-  return [
-    { strategy: 'MA Crossover', winRate: 58.5, avgReturn: 12.3, totalTrades: 156, profitFactor: 1.82, maxDrawdown: -15.2, sharpeRatio: 1.45 },
-    { strategy: 'RSI Reversal', winRate: 62.1, avgReturn: 8.7, totalTrades: 234, profitFactor: 1.65, maxDrawdown: -12.8, sharpeRatio: 1.28 },
-    { strategy: 'MACD Crossover', winRate: 55.8, avgReturn: 15.2, totalTrades: 128, profitFactor: 1.95, maxDrawdown: -18.5, sharpeRatio: 1.52 },
-    { strategy: 'Bollinger Breakout', winRate: 51.2, avgReturn: 22.1, totalTrades: 89, profitFactor: 2.15, maxDrawdown: -22.3, sharpeRatio: 1.38 },
-    { strategy: 'Combined Signal', winRate: 67.4, avgReturn: 18.5, totalTrades: 67, profitFactor: 2.42, maxDrawdown: -10.5, sharpeRatio: 1.89 },
-  ];
-}
