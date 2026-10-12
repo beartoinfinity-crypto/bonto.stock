@@ -10,9 +10,9 @@ export interface ResearchNote {
 
 /**
  * Collapsible "Signals & how to read this screen" explainer shared by the
- * six research screens (/risk, /commodities, /book, /flow, /funds, /macro).
- * Follows the Tactical page's What-it-does / How-to-read-it convention, but
- * collapsed so the data stays front-and-center.
+ * research screens (/risk, /commodities, /book, /flow, /funds, /macro,
+ * /smart-money). Follows the Tactical page's What-it-does / How-to-read-it
+ * convention, but collapsed so the data stays front-and-center.
  */
 export function ResearchNotes({
   notes,

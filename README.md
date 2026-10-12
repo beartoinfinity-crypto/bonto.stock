@@ -40,6 +40,7 @@ npm start          # serve dist/ via Express
 | `/flow` | Options Flow | Real CBOE delayed option tape — put/call, OI walls, max pain, expected move, unusual activity, full chain |
 | `/funds` | 13F Funds | Institutional portfolios from SEC EDGAR — holdings, % of portfolio, quarter-over-quarter deltas |
 | `/macro` | Macro Board | 12 FRED series (rates, labor, prices, credit) with latest, YoY change, and windowed charts |
+| `/smart-money` | Smart Money Screener | 41-stock universe scored 0–100 from four live signals: SEC Form 4 insider buys, 13F famous-manager holdings, congress trades, short-interest squeeze pressure |
 | `/tactical` | Tactical | Per-stock trade planner with regime state machine and position sizing |
 | `/screener` | Screener | Batch-screen all stocks (incl. Sector Heatmap + Asymmetric Value Screener) by signal confidence |
 | `/masters` | Trading Masters | 12 legendary investors analyze any stock |

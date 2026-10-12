@@ -88,7 +88,7 @@ Editable engine: `src/lib/masterAnalysis.ts` (`analyzeStock` runs all 12). Add a
 ```powershell
 $env:Path = "C:\Program Files\nodejs;" + $env:Path
 .\node_modules\.bin\tsc.cmd --noEmit     # type check — 0 errors
-npm.cmd run test                         # 287 tests across 24 files — all pass
+npm.cmd run test                         # 311 tests across 25 files — all pass
 npm.cmd run build                        # rebuild dist/ (committed)
 ```
 

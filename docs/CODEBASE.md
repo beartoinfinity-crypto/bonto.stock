@@ -289,6 +289,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | `/flow` | OptionsFlow — Options tape (528 lines) | `optionsFlow` + `/api/cboe/options` — real CBOE delayed tape: put/call ratios, OI walls chart, max pain, ATM-straddle expected move, unusual activity, chain table |
 | `/funds` | Funds — 13F portfolios (323 lines) | `funds13f` via `/api/proxy` → SEC EDGAR (submissions → info-table XML): top holdings, % of portfolio, qoq share deltas, new/exited counts; 16 curated managers + custom CIK |
 | `/macro` | Macro — FRED board (275 lines) | `macro` + `/api/fred/observations` — 12 curated FRED series, latest + YoY, windowed sparklines, category filter; setup notice when `FRED_API_KEY` unset |
+| `/smart-money` | SmartMoneyScreener — Composite screener (417 lines) | `smartMoney` — 41-stock universe scored 0–100 from four live signals: Form 4 insider buys (`/api/edgar`), 13F holdings of 10 fast-scan managers (funds13f reuse), congress trades (`politician_trades` REST), Yahoo short % of float; filters, expandable breakdown, 24h scan + 7d insider caches |
 | `/screener` | Screener — Batch screen (605 lines) | `useScreenerData` |
 | `/settings` | Settings — Config (788 lines) | Auth, watchlist, Supabase, DB ops |
 | `/admin` | Admin — Cron mgmt (276 lines) | `localCron` jobs, run history |
@@ -338,6 +339,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | `optionsFlow.ts` | 278 | `/flow` analytics: put/call ratios, OI walls, max pain, ATM-straddle expected move (×0.85 rule of thumb), unusual activity (vol ≥ 2× OI), chain rows. Unit-tested. |
 | `funds13f.ts` | 213 | `/funds` EDGAR handling: submissions → 13F-HR picks, info-table file selection, XML parse (DOMParser), portfolio aggregation + qoq deltas, value-scale heuristic (dollars post-2023). Unit-tested. |
 | `macro.ts` | 152 | `/macro` series metadata (12 FRED ids), observation parsing (`.` → null), latest + YoY summarize, window slice, unit-aware formatters. Unit-tested. |
+| `smartMoney.ts` | 611 | `/smart-money` screener: 41-stock universe, pure scoring (insider 25 / 13F 25 / congress 20 / squeeze 30), Form 4 XML parser (ported from AVS edge fn), paced EDGAR fetchers via `/api/edgar`, 13F issuer-name matching, Yahoo quote+short fetch, 4-stage scan orchestration with progress + soft-fail stages. Unit-tested (23 tests). |
 
 ## Design Decisions
 

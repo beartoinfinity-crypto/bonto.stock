@@ -51,6 +51,7 @@ import DeskBook from '@/pages/DeskBook';
 import OptionsFlow from '@/pages/OptionsFlow';
 import Funds from '@/pages/Funds';
 import Macro from '@/pages/Macro';
+import SmartMoneyScreener from '@/pages/SmartMoneyScreener';
 import NotFound from '@/pages/NotFound';
 
 const queryClient = new QueryClient({
@@ -78,6 +79,7 @@ const routes: Array<[string, string, ReactNode]> = [
   ['/flow', '/flow', <OptionsFlow />],
   ['/funds', '/funds', <Funds />],
   ['/macro', '/macro', <Macro />],
+  ['/smart-money', '/smart-money', <SmartMoneyScreener />],
   ['/does-not-exist', '*', <NotFound />],
 ];
 
