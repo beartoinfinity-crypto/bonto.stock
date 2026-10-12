@@ -51,8 +51,16 @@ const classColor = (c: SmartMoneyRow['classification']) => {
   }
 };
 
-const dot = (score: number, max: number, active: string, inactive: string) =>
-  cn('inline-block h-2 w-2 rounded-full', score > 0 ? active : inactive, score === max && 'ring-2 ring-offset-1 ring-offset-background');
+const SignalDot = ({ score, max, active, inactive }: { score: number; max: number; active: string; inactive: string }) => (
+  <span
+    className={cn(
+      'inline-block h-2 w-2 rounded-full',
+      score > 0 ? active : inactive,
+      score === max && 'ring-2 ring-offset-1 ring-offset-background',
+    )}
+    title={score > 0 ? `${score}/${max}` : undefined}
+  />
+);
 
 const NOTES: ResearchNote[] = [
   { term: 'A four-signal composite (0–100)', body: 'Score = insider 25 + institutional 25 + congress 20 + squeeze 30. Squeeze carries the most weight because crowded shorts plus momentum is the most explosive setup; congress the least because disclosures arrive with a ~45-day lag. Every input is computed live from public filings and quotes — no AI, no paid data.' },
@@ -326,10 +334,10 @@ export default function SmartMoneyScreener() {
                           <span className="text-xs font-semibold w-7 text-right">{r.score}</span>
                         </div>
                         <div className="flex items-center gap-1 mt-1">
-                          {dot(r.insider.score, 25, 'bg-sky-500', 'bg-sky-500/20')}
-                          {dot(r.institutional.score, 25, 'bg-violet-500', 'bg-violet-500/20')}
-                          {dot(r.congress.score, 20, 'bg-amber-500', 'bg-amber-500/20')}
-                          {dot(r.squeeze.score, 30, 'bg-rose-500', 'bg-rose-500/20')}
+                          <SignalDot score={r.insider.score} max={25} active="bg-sky-500" inactive="bg-sky-500/20" />
+                          <SignalDot score={r.institutional.score} max={25} active="bg-violet-500" inactive="bg-violet-500/20" />
+                          <SignalDot score={r.congress.score} max={20} active="bg-amber-500" inactive="bg-amber-500/20" />
+                          <SignalDot score={r.squeeze.score} max={30} active="bg-rose-500" inactive="bg-rose-500/20" />
                           <Badge variant="outline" className={cn('ml-1 text-[10px] px-1.5 py-0', classColor(r.classification))}>
                             {r.classification}
                           </Badge>
