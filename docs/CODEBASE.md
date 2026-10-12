@@ -70,6 +70,8 @@ Serves `dist/` SPA and provides server-side API endpoints.
 |----------|---------|
 | `GET /api/proxy?url=<encoded>` | CORS proxy. SSRF protection, 15s timeout. **Primary fetch path.** |
 | `GET /api/yahoo/crumb` | Two-step Yahoo crumb (cookie + crumb). Cached 30 min. |
+| `GET /api/yahoo/quote-summary?symbol=X&modules=A,B` | Yahoo v10 quoteSummary (crumb'd server-side). Used for per-symbol short-interest stats. |
+| `GET /api/yahoo/batch-quote?symbols=A,B,C&fields=price,change,marketCap,name` | Batch quotes via Yahoo v7/finance/quote (max 50 symbols/call) — lets the Smart Money index universe (~500 symbols) fetch price/change/marketCap in ~10 requests instead of ~500. 10-min cache. |
 | `GET /api/finnhub/sentiment?symbol=X` | Finnhub social sentiment. Requires `FINNHUB_API_KEY`. |
 | `GET /api/google-trends?keyword=X` | Google Trends scraping. |
 | `GET /api/politician-trades/unusualwhales?politician=X` | UW profile scrape, `__NEXT_DATA__` JSON parse. |
@@ -289,7 +291,7 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | `/flow` | OptionsFlow — Options tape (528 lines) | `optionsFlow` + `/api/cboe/options` — real CBOE delayed tape: put/call ratios, OI walls chart, max pain, ATM-straddle expected move, unusual activity, chain table |
 | `/funds` | Funds — 13F portfolios (323 lines) | `funds13f` via `/api/proxy` → SEC EDGAR (submissions → info-table XML): top holdings, % of portfolio, qoq share deltas, new/exited counts; 16 curated managers + custom CIK |
 | `/macro` | Macro — FRED board (275 lines) | `macro` + `/api/fred/observations` — 12 curated FRED series, latest + YoY, windowed sparklines, category filter; setup notice when `FRED_API_KEY` unset |
-| `/smart-money` | SmartMoneyScreener — Composite screener (417 lines) | `smartMoney` — 41-stock universe scored 0–100 from four live signals: Form 4 insider buys (`/api/edgar`), 13F holdings of 10 fast-scan managers (funds13f reuse), congress trades (`politician_trades` REST), Yahoo short % of float; filters, expandable breakdown, 24h scan + 7d insider caches |
+| `/smart-money` | SmartMoneyScreener — Composite screener (479 lines) | `smartMoney` + `indexMembers` — universes: curated 41, S&P 500, NASDAQ-100, or the ~501-symbol union (mode Select). Scored 0–100 from four live signals: Form 4 insider buys (`/api/edgar`, bucketed ~100/run on index modes), 13F holdings of 10 fast-scan managers (funds13f reuse), congress trades (bulk monthly windows via `politician_trades` REST), Yahoo short % of float (lazy top-100 + on row expand). Batch quotes via `/api/yahoo/batch-quote` (~10 calls for 500 symbols). Filters, expandable breakdown, 24h scan + 30d insider caches |
 | `/screener` | Screener — Batch screen (605 lines) | `useScreenerData` |
 | `/settings` | Settings — Config (788 lines) | Auth, watchlist, Supabase, DB ops |
 | `/admin` | Admin — Cron mgmt (276 lines) | `localCron` jobs, run history |
@@ -339,7 +341,8 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | `optionsFlow.ts` | 278 | `/flow` analytics: put/call ratios, OI walls, max pain, ATM-straddle expected move (×0.85 rule of thumb), unusual activity (vol ≥ 2× OI), chain rows. Unit-tested. |
 | `funds13f.ts` | 213 | `/funds` EDGAR handling: submissions → 13F-HR picks, info-table file selection, XML parse (DOMParser), portfolio aggregation + qoq deltas, value-scale heuristic (dollars post-2023). Unit-tested. |
 | `macro.ts` | 152 | `/macro` series metadata (12 FRED ids), observation parsing (`.` → null), latest + YoY summarize, window slice, unit-aware formatters. Unit-tested. |
-| `smartMoney.ts` | 611 | `/smart-money` screener: 41-stock universe, pure scoring (insider 25 / 13F 25 / congress 20 / squeeze 30), Form 4 XML parser (ported from AVS edge fn), paced EDGAR fetchers via `/api/edgar`, 13F issuer-name matching, Yahoo quote+short fetch, 4-stage scan orchestration with progress + soft-fail stages. Unit-tested (23 tests). |
+| `smartMoney.ts` | 780 | `/smart-money` screener: universes (curated 41 / S&P 500 / NASDAQ-100 / union via `universeForMode`), pure scoring (insider 25 / 13F 25 / congress 20 / squeeze 30), Form 4 XML parser (ported from AVS edge fn, `edgarPrimaryDocPath` strips xsl viewer prefix), paced EDGAR fetchers via `/api/edgar`, bulk congress (monthly windows, 1000-row cap-safe bisection), batch quotes via `/api/yahoo/batch-quote`, cap-tier derivation from live marketCap, 13F issuer-name matching, bucketed 4-stage scan orchestration (index modes scan ~100 Form 4s/run, lazy top-100 short interest) with progress + soft-fail stages. Unit-tested (33 tests). |
+| `indexMembers.ts` | 605 | Full S&P 500 (488 after junk filtering) + NASDAQ-100 (85) membership for the Option B index universes — `IndexMember`, `SP500_MEMBERS`, `NASDAQ100_MEMBERS`, `buildIndexUnion()` (deduped union, ~501 unique symbols). Generated from public S&P constituents + curated NDX set; share-class tickers normalized to hyphen form (BRK-B). |
 
 ## Design Decisions
 

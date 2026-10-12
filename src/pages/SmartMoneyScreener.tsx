@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -15,21 +15,26 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import * as storage from '@/lib/storage';
 import {
-  UNIVERSE,
-  SECTORS,
   CAP_TIERS,
   FAST_MANAGERS,
   runSmartMoneyScan,
+  universeForMode,
+  modeUniverseSize,
+  fetchQuoteShort,
+  totalScore,
+  computeSqueezeScore,
   type SmartMoneyRow,
   type ScanProgress,
+  type UniverseMode,
 } from '@/lib/smartMoney';
 
 const SCAN_CACHE_KEY = 'stockpulse_sm_scan';
 // v2: the v1 cache was filled while the Form 4 fetcher parsed EDGAR's HTML
 // viewer (all-empty buys) — bump the key so those results are ignored.
-const INSIDER_CACHE_KEY = 'stockpulse_sm_insider_v2';
+// v3: universe modes (curated/index) — bump so mode-less v2 caches are ignored.
+const INSIDER_CACHE_KEY = 'stockpulse_sm_insider_v3';
+const INSIDER_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d — index Form 4s are expensive
 const SCAN_TTL_MS = 24 * 60 * 60 * 1000;
-const INSIDER_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 const fmtMoney = (v: number | null | undefined) => {
   if (v === null || v === undefined) return '—';
@@ -70,15 +75,15 @@ const NOTES: ResearchNote[] = [
   { term: 'Institutional ownership (0–25)', body: `Latest 13F-HR holdings of ${FAST_MANAGERS.length} famous managers whose filings are small enough to parse in a browser (Berkshire, Bridgewater, Baupost, Pershing Square, Scion, Soros, Tiger Global, Greenlight, Lone Pine, Coatue). 1 manager = 15, 2 = 20, 3+ = 25. 13F carries CUSIPs, not tickers — matches are made on normalized issuer names, so some positions go unmatched. The mega index funds (Vanguard, BlackRock, State Street) are deliberately excluded: they hold everything and signal nothing. See /funds for full manager browsing.` },
   { term: 'Congress trades (0–20)', body: 'STOCK Act disclosures from the Kadoa congress-trading feed for the past 12 months. Any disclosed purchase scores 20; sells-only scores 8 (a sell is often portfolio pruning, not a short thesis). Remember the ~45-day disclosure lag: you are reading last month’s action, never a real-time signal.' },
   { term: 'Squeeze pressure (0–30)', body: 'Short interest as a percent of float from Yahoo: ≥5% = 10 pts, ≥10% = 20, ≥20% = 30. Days-to-cover (short ratio) is shown in the detail row as context — high short interest plus low days-to-cover is the classic squeeze fuel. A missing reading (Yahoo throttling, thin coverage) scores 0, not a penalty.' },
-  { term: 'Reading the table', body: 'Default sort is score descending. The four dots per row light up when that signal scored (blue insider, violet institutional, amber congress, rose squeeze). Classification: Strong ≥60, Watch ≥40, Light >0. Click any row to expand the full breakdown. First run takes ~2 minutes (paced SEC fetches); results and the insider scan are cached so re-runs are fast.' },
+  { term: 'Reading the table', body: 'Pick a universe (Curated 41, S&P 500 + NDX, S&P 500, or NASDAQ-100), then Run screen. Default sort is score descending. The four dots per row light up when that signal scored (blue insider, violet institutional, amber congress, rose squeeze). Classification: Strong ≥60, Watch ≥40, Light >0. Click any row to expand the full breakdown and lazy-load short interest. Index universes (~500 symbols) scan insider Form 4s in ~100-symbol batches to respect SEC fair-access limits — use “Scan next 100” to cover the rest; results and the insider scan cache so re-runs are fast.' },
 ];
 
 interface CachedScan { at: number; rows: SmartMoneyRow[] }
 interface CachedInsider { at: number; buys: SmartMoneyRow['insider']['buys'] }
 
-function loadScan(): SmartMoneyRow[] | null {
+function loadScan(mode: UniverseMode): SmartMoneyRow[] | null {
   try {
-    const raw = storage.getItem(SCAN_CACHE_KEY);
+    const raw = storage.getItem(`${SCAN_CACHE_KEY}_${mode}`);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CachedScan;
     if (!parsed?.rows?.length || Date.now() - parsed.at > SCAN_TTL_MS) return null;
@@ -86,8 +91,8 @@ function loadScan(): SmartMoneyRow[] | null {
   } catch { return null; }
 }
 
-function saveScan(rows: SmartMoneyRow[]): void {
-  try { storage.setItem(SCAN_CACHE_KEY, JSON.stringify({ at: Date.now(), rows })); } catch { /* ignore */ }
+function saveScan(mode: UniverseMode, rows: SmartMoneyRow[]): void {
+  try { storage.setItem(`${SCAN_CACHE_KEY}_${mode}`, JSON.stringify({ at: Date.now(), rows })); } catch { /* ignore */ }
 }
 
 function loadInsiderCache(): Record<string, SmartMoneyRow['insider']['buys']> {
@@ -116,6 +121,7 @@ function saveInsiderBuy(symbol: string, buys: SmartMoneyRow['insider']['buys']):
 type SortKey = 'score_desc' | 'change_desc' | 'mktcap_desc' | 'short_desc';
 
 export default function SmartMoneyScreener() {
+  const [mode, setMode] = useState<UniverseMode>('curated');
   const [rows, setRows] = useState<SmartMoneyRow[]>([]);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<ScanProgress | null>(null);
@@ -127,29 +133,40 @@ export default function SmartMoneyScreener() {
   const [sort, setSort] = useState<SortKey>('score_desc');
   const [expanded, setExpanded] = useState(false);
   const [detailSymbol, setDetailSymbol] = useState<string | null>(null);
+  const universe = useMemo(() => universeForMode(mode), [mode]);
+  const sectors = useMemo(() => ['All sectors', ...[...new Set(universe.map(u => u.sector))].sort()], [universe]);
+  const pendingCount = useMemo(() => rows.filter(r => r.insiderPending).length, [rows]);
 
   useEffect(() => {
-    const cached = loadScan();
-    if (cached) setRows(cached);
-  }, []);
+    const cached = loadScan(mode);
+    setRows(cached ?? []);
+  }, [mode]);
 
-  const runScan = useCallback(async () => {
+  const runScan = useCallback(async (opts: { bucket?: number } = {}) => {
     setRunning(true);
     setError(null);
-    setProgress({ stage: 'insider', done: 0, total: UNIVERSE.length, label: 'SEC Form 4 insider scan' });
+    const targets = universeForMode(mode);
+    setProgress({ stage: 'insider', done: 0, total: targets.length, label: 'SEC Form 4 insider scan' });
     toast.message('Running Smart Money Screener', {
-      description: 'First run pulls ~2 minutes of SEC Form 4 filings — later runs use the 1-hour EDGAR cache.',
+      description: 'First run pulls SEC Form 4 filings — later runs use the 1-hour EDGAR cache.',
     });
     try {
       const result = await runSmartMoneyScan({
+        universe: targets,
         insiderCache: loadInsiderCache(),
         onInsiderCached: saveInsiderBuy,
         onProgress: setProgress,
+        insiderBucket: opts.bucket,
       });
       setRows(result);
-      saveScan(result);
+      saveScan(mode, result);
       const strong = result.filter(r => r.classification === 'Strong').length;
-      toast.success('Screen complete', { description: `${result.length} stocks scanned · ${strong} Strong (60+).` });
+      const pending = result.filter(r => r.insiderPending).length;
+      toast.success('Screen complete', {
+        description: pending
+          ? `${result.length} scanned · ${strong} Strong (60+) · insider pending for ${pending}.`
+          : `${result.length} stocks scanned · ${strong} Strong (60+).`,
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Scan failed';
       setError(msg);
@@ -158,7 +175,37 @@ export default function SmartMoneyScreener() {
       setRunning(false);
       setProgress(null);
     }
+  }, [mode]);
+
+  // Lazy short-interest: index universes only fetch squeeze stats for the
+  // top-100 during a scan. Fetching on row expand fills the rest on demand.
+  const loadSqueeze = useCallback(async (symbol: string) => {
+    setRows(prev => prev.map(x => (x.symbol === symbol ? { ...x, squeezeLoading: true } : x)));
+    try {
+      const q = await fetchQuoteShort(symbol);
+      setRows(prev => prev.map(x => (x.symbol === symbol
+        ? {
+            ...x,
+            squeezeLoading: false,
+            squeeze: { ...x.squeeze, shortPercentOfFloat: q.shortPercentOfFloat, shortRatio: q.shortRatio },
+            score: totalScore(x.insider, x.institutional, x.congress, computeSqueezeScore(q.shortPercentOfFloat, q.shortRatio)),
+            squeezeLoaded: true,
+          }
+        : x)));
+    } catch {
+      setRows(prev => prev.map(x => (x.symbol === symbol ? { ...x, squeezeLoading: false } : x)));
+    }
   }, []);
+
+  const toggleDetail = useCallback((symbol: string) => {
+    const row = rows.find(x => x.symbol === symbol);
+    if (detailSymbol === symbol) {
+      setDetailSymbol(null);
+      return;
+    }
+    setDetailSymbol(symbol);
+    if (row && !row.squeezeLoaded && !row.squeezeLoading) void loadSqueeze(symbol);
+  }, [rows, detailSymbol, loadSqueeze]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toUpperCase();
@@ -198,15 +245,27 @@ export default function SmartMoneyScreener() {
               <h1 className="text-2xl font-bold tracking-tight">Smart Money Screener</h1>
               <p className="text-xs text-muted-foreground">
                 {rows.length
-                  ? `${UNIVERSE.length}-stock universe · live insider · 13F · congress · short-interest signals`
-                  : 'Click “Run screen” to pull live SEC, congress and short-interest data'}
+                  ? `${mode === 'curated' ? 'Curated 41-stock' : mode === 'index' ? 'S&P 500 + NDX' : mode === 'sp500' ? 'S&P 500' : 'NASDAQ-100'} universe · live insider · 13F · congress · short-interest signals`
+                  : 'Pick a universe, then click “Run screen” to pull live SEC, congress and short-interest data'}
               </p>
             </div>
           </div>
-          <Button variant="outline" size="sm" onClick={runScan} disabled={running}>
-            <RefreshCw className={cn('h-4 w-4 mr-2', running && 'animate-spin')} />
-            {running ? 'Screening…' : rows.length ? 'Re-run screen' : 'Run screen'}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Select value={mode} onValueChange={v => setMode(v as UniverseMode)}>
+              <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(['curated', 'index', 'sp500', 'ndx100'] as UniverseMode[]).map(m => (
+                  <SelectItem key={m} value={m}>
+                    {modeUniverseSize(m)} · {m === 'curated' ? 'Curated' : m === 'index' ? 'S&P 500 + NDX' : m === 'sp500' ? 'S&P 500' : 'NASDAQ-100'}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" onClick={() => runScan()} disabled={running}>
+              <RefreshCw className={cn('h-4 w-4 mr-2', running && 'animate-spin')} />
+              {running ? 'Screening…' : rows.length ? 'Re-run screen' : 'Run screen'}
+            </Button>
+          </div>
         </div>
 
         {running && progress && (
@@ -226,6 +285,20 @@ export default function SmartMoneyScreener() {
 
         {error && (
           <p className="text-sm text-red-400">{error}</p>
+        )}
+
+        {!running && pendingCount > 0 && (
+          <Card className="border-amber-500/30 bg-amber-500/5">
+            <CardContent className="py-3 flex items-center justify-between gap-3">
+              <p className="text-sm text-amber-200/90">
+                Insider (Form 4) scan pending for <span className="font-semibold">{pendingCount}</span> of {rows.length} stocks —
+                index universes scan ~100 per run to stay within SEC fair-access limits.
+              </p>
+              <Button size="sm" onClick={() => runScan({ bucket: 100 })} disabled={running}>
+                Scan next 100
+              </Button>
+            </CardContent>
+          </Card>
         )}
 
         {rows.length > 0 && (
@@ -260,7 +333,7 @@ export default function SmartMoneyScreener() {
             <Select value={sector} onValueChange={setSector}>
               <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {SECTORS.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                {sectors.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
               </SelectContent>
             </Select>
             <Select value={capTier} onValueChange={setCapTier}>
@@ -295,9 +368,9 @@ export default function SmartMoneyScreener() {
           <div className="rounded-lg border border-dashed border-border p-10 text-center space-y-2">
             <p className="text-sm text-muted-foreground">
               No results yet. Run the screen to pull live SEC Form 4 filings, 13F holdings, congress disclosures and
-              short interest for the {UNIVERSE.length}-stock universe.
+              short interest for the {universe.length}-stock universe.
             </p>
-            <Button onClick={runScan} disabled={running}>
+            <Button onClick={() => runScan()} disabled={running}>
               <RefreshCw className={cn('h-4 w-4 mr-2', running && 'animate-spin')} /> Run screen
             </Button>
           </div>
@@ -323,7 +396,7 @@ export default function SmartMoneyScreener() {
                     <TableRow
                       key={r.symbol}
                       className="cursor-pointer"
-                      onClick={() => setDetailSymbol(detailSymbol === r.symbol ? null : r.symbol)}
+                      onClick={() => toggleDetail(r.symbol)}
                     >
                       <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
                       <TableCell>
@@ -353,7 +426,9 @@ export default function SmartMoneyScreener() {
                           : '—'}
                       </TableCell>
                       <TableCell className="text-right">
-                        {fmtPct(r.squeeze.shortPercentOfFloat)}
+                        {r.squeezeLoading
+                          ? <span className="text-muted-foreground text-xs">Loading…</span>
+                          : fmtPct(r.squeeze.shortPercentOfFloat)}
                       </TableCell>
                       <TableCell className="text-right">{r.price !== null ? `$${r.price.toFixed(2)}` : '—'}</TableCell>
                       <TableCell className={cn('text-right', (r.changePercent ?? 0) > 0 ? 'text-emerald-400' : (r.changePercent ?? 0) < 0 ? 'text-red-400' : 'text-muted-foreground')}>
@@ -390,10 +465,17 @@ export default function SmartMoneyScreener() {
                             </div>
                             <div>
                               <p className="text-xs font-semibold mb-1">Squeeze · {r.squeeze.score}/30</p>
-                              <p className="text-xs text-muted-foreground">
-                                Short % of float: {fmtPct(r.squeeze.shortPercentOfFloat)}
-                                {r.squeeze.shortRatio !== null && ` · days-to-cover ${r.squeeze.shortRatio.toFixed(1)}`}
-                              </p>
+                              {r.squeezeLoading ? (
+                                <p className="text-xs text-muted-foreground">Fetching short interest…</p>
+                              ) : (
+                                <p className="text-xs text-muted-foreground">
+                                  Short % of float: {fmtPct(r.squeeze.shortPercentOfFloat)}
+                                  {r.squeeze.shortRatio !== null && ` · days-to-cover ${r.squeeze.shortRatio.toFixed(1)}`}
+                                </p>
+                              )}
+                              {r.insiderPending && (
+                                <p className="text-xs text-amber-400/90 mt-1">Insider scan pending for this symbol — runs with the next “Scan next 100” batch.</p>
+                              )}
                               {r.detailError && <p className="text-xs text-amber-400/90 mt-1">{r.detailError}</p>}
                             </div>
                           </div>

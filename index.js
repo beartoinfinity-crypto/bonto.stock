@@ -166,6 +166,81 @@ app.get('/api/yahoo/quote-summary', async (req, res) => {
   return res.status(502).json({ error: 'quoteSummary failed for ' + symbol });
 });
 
+// --- Yahoo batch quote proxy -------------------------------------------
+// GET /api/yahoo/batch-quote?symbols=AAPL,MSFT,...&fields=price,change,marketCap
+// One crumb'd v7/finance/quote call covers many symbols (vs one v10 call each).
+// This is what lets the Smart Money index universe (~500 symbols) fetch
+// price/change/marketCap in ~10 requests instead of ~500. Short-interest
+// stats (shortPercentOfFloat) are NOT in v7 — those stay per-symbol via
+// quote-summary and are fetched lazily for a top-N subset only.
+
+const BATCH_QUOTE_MAX_SYMBOLS = 50; // keep the querystring/Yahoo happy
+const batchQuoteCache = new Map(); // key -> { at, data }
+const BATCH_QUOTE_TTL_MS = 10 * 60 * 1000;
+
+app.get('/api/yahoo/batch-quote', async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const symbols = [...new Set(
+    String(req.query.symbols || '')
+      .split(',')
+      .map(s => s.trim().toUpperCase())
+      .filter(Boolean),
+  )];
+  const fields = String(req.query.fields || 'price,change,marketCap')
+    .split(',').map(f => f.trim()).filter(Boolean);
+
+  if (!symbols.length) return res.status(400).json({ error: 'Missing symbols' });
+  if (symbols.length > BATCH_QUOTE_MAX_SYMBOLS) {
+    return res.status(400).json({ error: `Too many symbols (max ${BATCH_QUOTE_MAX_SYMBOLS})` });
+  }
+  const invalid = symbols.filter(s => !/^[A-Z0-9.\-^=]{1,12}$/.test(s));
+  if (invalid.length) return res.status(400).json({ error: 'Invalid symbols: ' + invalid.join(',') });
+
+  const cacheKey = `${symbols.join(',')}|${fields.join(',')}`;
+  const cached = batchQuoteCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < BATCH_QUOTE_TTL_MS) {
+    return res.status(200).json(cached.data);
+  }
+
+  for (const host of ['https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com']) {
+    try {
+      const { crumb, cookie } = await getYahooSession();
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 12000);
+      const url = `${host}/v7/finance/quote?symbols=${encodeURIComponent(symbols.join(','))}&crumb=${encodeURIComponent(crumb)}`;
+      const r = await fetch(url, {
+        signal: ctrl.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Cookie': cookie,
+        },
+      });
+      clearTimeout(timer);
+      if (r.ok) {
+        const body = await r.json();
+        const results = Array.isArray(body?.quoteResponse?.result) ? body.quoteResponse.result : [];
+        const want = new Set(fields);
+        const quotes = {};
+        for (const row of results) {
+          if (!row || !row.symbol) continue;
+          const q = {};
+          if (want.has('price') && typeof row.regularMarketPrice === 'number') q.price = row.regularMarketPrice;
+          if (want.has('change') && typeof row.regularMarketChangePercent === 'number') q.changePercent = row.regularMarketChangePercent;
+          if (want.has('marketCap') && typeof row.marketCap === 'number') q.marketCap = row.marketCap;
+          if (want.has('name') && typeof row.longName === 'string') q.name = row.longName;
+          quotes[row.symbol] = q;
+        }
+        const payload = { quotes };
+        batchQuoteCache.set(cacheKey, { at: Date.now(), data: payload });
+        return res.status(200).json(payload);
+      }
+      // Non-OK: invalidate the cached session (crumb may have expired)
+      yahooCrumbCache = { crumb: null, cookie: null, expiry: 0 };
+    } catch { /* try next host */ }
+  }
+  return res.status(502).json({ error: 'batch-quote failed' });
+});
+
 // --- Finnhub social sentiment proxy ---------------------------------
 // GET /api/finnhub/sentiment?symbol=AAPL
 // Requires FINNHUB_API_KEY env var. Free tier: 60 calls/min.

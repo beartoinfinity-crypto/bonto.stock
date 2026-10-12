@@ -52,11 +52,11 @@ beforeAll(() => {
     insider, institutional, congress, squeeze,
     score, classification: classify(score), detailError: null,
   };
-  localStorage.setItem('stockpulse_sm_scan', JSON.stringify({ at: Date.now(), rows: [row] }));
+  localStorage.setItem('stockpulse_sm_scan_curated', JSON.stringify({ at: Date.now(), rows: [row] }));
 });
 
 afterAll(() => {
-  localStorage.removeItem('stockpulse_sm_scan');
+  localStorage.removeItem('stockpulse_sm_scan_curated');
   vi.unstubAllGlobals();
 });
 

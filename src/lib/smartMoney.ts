@@ -23,6 +23,12 @@ import {
   type RawPosition,
 } from '@/lib/funds13f';
 import { edgeRest } from '@/lib/edgeFn';
+import {
+  SP500_MEMBERS,
+  NASDAQ100_MEMBERS,
+  buildIndexUnion,
+  type IndexMember,
+} from '@/lib/indexMembers';
 
 // ── Universe ─────────────────────────────────────────────────────────
 
@@ -79,6 +85,42 @@ export const UNIVERSE: readonly UniverseEntry[] = [
 
 export const SECTORS: readonly string[] = ['All sectors', ...[...new Set(UNIVERSE.map(u => u.sector))].sort()];
 export const CAP_TIERS: readonly string[] = ['All caps', 'mega', 'large', 'mid', 'small'];
+
+// ── Universe modes (Option B: full S&P500 / NASDAQ-100 screening) ────
+
+export type UniverseMode = 'curated' | 'sp500' | 'ndx100' | 'index';
+
+export const UNIVERSE_MODES: readonly { id: UniverseMode; label: string; note: string }[] = [
+  { id: 'curated', label: 'Curated 41', note: 'The original hand-picked liquid/growth names' },
+  { id: 'index', label: 'S&P 500 + NDX', note: 'All 501 unique index constituents' },
+  { id: 'sp500', label: 'S&P 500', note: 'Full S&P 500 membership' },
+  { id: 'ndx100', label: 'NASDAQ-100', note: 'Full NASDAQ-100 membership' },
+];
+
+/** Cap tier is static on curated entries but absent on index members (filled
+ *  live from batch-quote marketCap). Use this to derive a tier at scan time. */
+export function capTierFromMarketCap(mcap: number | null | undefined): UniverseEntry['capTier'] {
+  if (typeof mcap !== 'number' || !Number.isFinite(mcap) || mcap <= 0) return 'large';
+  if (mcap >= 200e9) return 'mega';
+  if (mcap >= 10e9) return 'large';
+  if (mcap >= 2e9) return 'mid';
+  return 'small';
+}
+
+/** Build the UniverseEntry[] for a mode. Index members start with capTier
+ *  'large' — refined live from batch quotes during the scan. */
+export function universeForMode(mode: UniverseMode): UniverseEntry[] {
+  if (mode === 'curated') return UNIVERSE.map(u => ({ ...u }));
+  const members: IndexMember[] =
+    mode === 'sp500' ? [...SP500_MEMBERS] :
+    mode === 'ndx100' ? [...NASDAQ100_MEMBERS] :
+    buildIndexUnion();
+  return members.map(m => ({ symbol: m.symbol, name: m.name, sector: m.sector, capTier: 'large' as const }));
+}
+
+export function modeUniverseSize(mode: UniverseMode): number {
+  return universeForMode(mode).length;
+}
 
 // ── Scoring constants (documented on the page) ───────────────────────
 
@@ -166,6 +208,13 @@ export interface SmartMoneyRow {
   score: number;              // 0–100
   classification: 'Strong' | 'Watch' | 'Light' | 'None';
   detailError: string | null; // soft-failure note for this row (e.g. quote missing)
+  /** True when the insider stage has not been scanned for this bucket yet
+   *  (index universes scan ~100 Form 4 buckets at a time). */
+  insiderPending?: boolean;
+  /** True when short-interest hasn't been loaded (lazy for index universes). */
+  squeezeLoaded?: boolean;
+  /** UI-only flag while a lazy short-interest fetch is in flight. */
+  squeezeLoading?: boolean;
 }
 
 // ── Pure scoring ─────────────────────────────────────────────────────
@@ -257,11 +306,15 @@ export function normalizeIssuerName(name: string): string {
  * Match a 13F nameOfIssuer to a universe symbol by normalized-name equality
  * or prefix (min 4 chars so "COCA COLA CO" matches "COCA COLA"). 13F info
  * tables carry CUSIPs, not tickers — this is the documented approximation.
+ * `universe` defaults to the curated set; index scans pass the active universe.
  */
-export function matchUniverseByIssuer(issuer: string): string | null {
+export function matchUniverseByIssuer(
+  issuer: string,
+  universe: readonly UniverseEntry[] = UNIVERSE,
+): string | null {
   const norm = normalizeIssuerName(issuer);
   if (norm.length < 4) return null;
-  for (const u of UNIVERSE) {
+  for (const u of universe) {
     const target = normalizeIssuerName(u.name);
     if (target.length < 4) continue;
     if (norm === target || norm.startsWith(target) || target.startsWith(norm)) return u.symbol;
@@ -457,6 +510,62 @@ export async function fetchCongressTrades(symbols: readonly string[]): Promise<M
   return out;
 }
 
+const CONGRESS_PAGE_LIMIT = 1000; // project caps rows per REST response
+const CONGRESS_YEAR_DAYS = 365;
+
+/**
+ * Fetch congress trades by month-windows rather than per-symbol. A 365-day
+ * range is ~12 monthly GETs (each well under the 1000-row cap) instead of one
+ * call per symbol. If a window still returns exactly the page cap, split it
+ * in half down to a floor. Result is grouped by symbol; the caller filters to
+ * its active universe (works unchanged for 41- or 500-symbol universes).
+ */
+export async function fetchCongressTradesBulk(): Promise<Map<string, CongressSourceTrade[]>> {
+  const now = Date.now();
+  const start = new Date(now - CONGRESS_YEAR_DAYS * 24 * 3600 * 1000);
+
+  const windows: { from: Date; to: Date }[] = [];
+  let cursor = new Date(start);
+  while (cursor.getTime() < now) {
+    const to = new Date(cursor.getTime());
+    to.setMonth(to.getMonth() + 1);
+    if (to.getTime() > now) to.setTime(now);
+    windows.push({ from: new Date(cursor), to });
+    cursor = to;
+  }
+
+  const all: CongressSourceTrade[] = [];
+  async function pull(from: Date, to: Date, depth = 0): Promise<void> {
+    if (from.getTime() >= to.getTime()) return;
+    const fromIso = from.toISOString().slice(0, 10);
+    const toIso = to.toISOString().slice(0, 10);
+    const rows = await edgeRest<CongressSourceTrade[]>(
+      `politician_trades?select=symbol,transaction_type,transaction_date&transaction_date=gte.${fromIso}&transaction_date=lt.${toIso}&limit=${CONGRESS_PAGE_LIMIT}`,
+    );
+    if (Array.isArray(rows) && rows.length >= CONGRESS_PAGE_LIMIT && depth < 6) {
+      const mid = new Date((from.getTime() + to.getTime()) / 2);
+      await pull(from, mid, depth + 1);
+      await pull(mid, to, depth + 1);
+    } else if (Array.isArray(rows)) {
+      all.push(...rows);
+    }
+  }
+  for (let i = 0; i < windows.length; i += 4) {
+    await Promise.all(windows.slice(i, i + 4).map(w => pull(w.from, w.to)));
+    if (i + 4 < windows.length) await sleep(100);
+  }
+
+  const out = new Map<string, CongressSourceTrade[]>();
+  for (const row of all) {
+    const sym = String(row.symbol ?? '').toUpperCase();
+    if (!sym) continue;
+    const list = out.get(sym);
+    if (list) list.push(row);
+    else out.set(sym, [row]);
+  }
+  return out;
+}
+
 export interface QuoteShort {
   price: number | null;
   changePercent: number | null;
@@ -496,6 +605,44 @@ export async function fetchQuoteShort(symbol: string): Promise<QuoteShort> {
   }
 }
 
+/** Batch quotes via /api/yahoo/batch-quote (max 50 symbols per call). This
+ *  returns price/change/marketCap only — NOT short interest, which lives in
+ *  the v10 quoteSummary modules and stays per-symbol/lazy. */
+export interface BatchQuote {
+  price: number | null;
+  changePercent: number | null;
+  marketCap: number | null;
+  name: string | null;
+}
+
+const BATCH_QUOTE_CHUNK = 50;
+
+export async function fetchBatchQuotes(symbols: readonly string[]): Promise<Map<string, BatchQuote>> {
+  const out = new Map<string, BatchQuote>();
+  const list = [...new Set(symbols)];
+  for (let i = 0; i < list.length; i += BATCH_QUOTE_CHUNK) {
+    const chunk = list.slice(i, i + BATCH_QUOTE_CHUNK);
+    try {
+      const res = await fetch(
+        `/api/yahoo/batch-quote?symbols=${encodeURIComponent(chunk.join(','))}&fields=price,change,marketCap,name`,
+      );
+      if (res.ok) {
+        const data = (await res.json()) as { quotes?: Record<string, { price?: number; changePercent?: number; marketCap?: number; name?: string }> };
+        for (const [sym, q] of Object.entries(data.quotes ?? {})) {
+          out.set(sym, {
+            price: typeof q.price === 'number' ? q.price : null,
+            changePercent: typeof q.changePercent === 'number' ? q.changePercent : null,
+            marketCap: typeof q.marketCap === 'number' ? q.marketCap : null,
+            name: typeof q.name === 'string' ? q.name : null,
+          });
+        }
+      }
+    } catch { /* soft: leave missing */ }
+    if (i + BATCH_QUOTE_CHUNK < list.length) await sleep(150);
+  }
+  return out;
+}
+
 export type ScanStage = 'insider' | 'institutional' | 'congress' | 'quotes';
 export interface ScanProgress {
   stage: ScanStage;
@@ -505,28 +652,51 @@ export interface ScanProgress {
 }
 
 export interface ScanOptions {
+  /** Which universe to screen. Defaults to the curated 41. */
+  universe?: readonly UniverseEntry[];
   insiderCache?: Record<string, InsiderBuy[]>; // symbol → buys (skip cached)
   onInsiderCached?: (symbol: string, buys: InsiderBuy[]) => void;
   onProgress?: (p: ScanProgress) => void;
   abortSignal?: AbortSignal;
+  /** Index universes: only Form-4-scan this many un-scanned symbols this run
+   *  (100 ≈ a few minutes of SEC-paced fetches). Remaining rows return with
+   *  insiderPending=true so the page can offer "Scan next 100". */
+  insiderBucket?: number;
 }
 
 /**
  * Run the full four-stage scan. Stages are independent and soft-fail:
  * a broken source scores 0 for that signal rather than killing the screen.
- * First run over the SEC stages takes ~2 minutes; /api/edgar's 1h cache and
- * the caller's insider cache make re-runs fast.
+ *
+ * Curated universe (~41): quoteSummary per symbol (full data incl. short
+ * interest) — a few minutes first run.
+ *
+ * Index universes (S&P500 / NDX, ~500 symbols): prices via ~10 batch-quote
+ * calls, congress via monthly bulk windows, insider Form 4s bucketed
+ * (insiderBucket per run), and short interest fetched lazily for the top-100
+ * by partial score (insider+13F+congress). The 13F stage cost is flat
+ * regardless of universe size.
  */
 export async function runSmartMoneyScan(opts: ScanOptions = {}): Promise<SmartMoneyRow[]> {
   const { onProgress, abortSignal } = opts;
-  const symbols = UNIVERSE.map(u => u.symbol);
+  const universe = (opts.universe ?? UNIVERSE).map(u => ({ ...u }));
+  const symbols = universe.map(u => u.symbol);
+  const isIndex = universe.length > 60;
 
-  // Stage 1 — insider (slowest: paced Form 4 fetches per company)
+  // Stage 1 — insider (slowest: paced Form 4 fetches per company).
+  // Index mode: only scan a bucket of the un-scanned symbols this run.
   const cikMap = await fetchTickerCikMap();
   const insiderBySymbol = new Map<string, InsiderBuy[]>();
+  const insiderPending = new Set<string>();
+  let insiderWork = symbols;
+  if (isIndex && typeof opts.insiderBucket === 'number' && opts.insiderBucket > 0) {
+    const unscanned = symbols.filter(s => !opts.insiderCache?.[s]);
+    insiderWork = unscanned.slice(0, opts.insiderBucket);
+    for (const s of unscanned.slice(opts.insiderBucket)) insiderPending.add(s);
+  }
   let insiderDone = 0;
-  onProgress?.({ stage: 'insider', done: 0, total: symbols.length, label: 'SEC Form 4 insider scan' });
-  for (const symbol of symbols) {
+  onProgress?.({ stage: 'insider', done: 0, total: insiderWork.length, label: 'SEC Form 4 insider scan' });
+  for (const symbol of insiderWork) {
     if (abortSignal?.aborted) throw new Error('Scan aborted');
     const cached = opts.insiderCache?.[symbol];
     if (cached) {
@@ -538,13 +708,13 @@ export async function runSmartMoneyScan(opts: ScanOptions = {}): Promise<SmartMo
         insiderBySymbol.set(symbol, buys);
         opts.onInsiderCached?.(symbol, buys);
       }
-      await sleep(200);
+      await sleep(isIndex ? 120 : 200);
     }
     insiderDone++;
-    onProgress?.({ stage: 'insider', done: insiderDone, total: symbols.length, label: 'SEC Form 4 insider scan' });
+    onProgress?.({ stage: 'insider', done: insiderDone, total: insiderWork.length, label: 'SEC Form 4 insider scan' });
   }
 
-  // Stage 2 — 13F (10 managers × ~3 requests)
+  // Stage 2 — 13F (10 managers × ~3 requests — flat regardless of universe)
   const institutionBySymbol = new Map<string, InstitutionHolding[]>();
   let instDone = 0;
   onProgress?.({ stage: 'institutional', done: 0, total: FAST_MANAGERS.length, label: '13F famous-manager scan' });
@@ -553,7 +723,7 @@ export async function runSmartMoneyScan(opts: ScanOptions = {}): Promise<SmartMo
     const result = await fetchManager13f(m.cik);
     if (result) {
       for (const p of result.positions) {
-        const sym = matchUniverseByIssuer(p.issuer);
+        const sym = matchUniverseByIssuer(p.issuer, universe);
         if (!sym) continue;
         const list = institutionBySymbol.get(sym);
         const holding: InstitutionHolding = { manager: m.name, issuer: p.issuer, value: p.value, shares: p.shares };
@@ -566,32 +736,76 @@ export async function runSmartMoneyScan(opts: ScanOptions = {}): Promise<SmartMo
     await sleep(300);
   }
 
-  // Stage 3 — congress (single REST call)
-  onProgress?.({ stage: 'congress', done: 0, total: 1, label: 'Congress trade disclosures' });
-  const congressBySymbol = await fetchCongressTrades(symbols);
+  // Stage 3 — congress. Curated keeps per-symbol (tiny); index uses bulk
+  // monthly windows then filters to this universe.
+  const congressBySymbol = isIndex
+    ? await filterToUniverse(await fetchCongressTradesBulk(), symbols)
+    : await fetchCongressTrades(symbols);
   onProgress?.({ stage: 'congress', done: 1, total: 1, label: 'Congress trade disclosures' });
 
-  // Stage 4 — quotes + short interest (one Yahoo call per symbol, paced)
+  // Stage 4 — quotes. Curated: per-symbol quoteSummary (has short interest).
+  // Index: batch-quote for price/change/marketCap + name, and derive capTier
+  // from live marketCap. Short interest is fetched lazily for a top-100 slice.
   const quoteBySymbol = new Map<string, QuoteShort>();
-  let quoteDone = 0;
-  onProgress?.({ stage: 'quotes', done: 0, total: symbols.length, label: 'Quotes & short interest' });
-  for (const symbol of symbols) {
-    if (abortSignal?.aborted) throw new Error('Scan aborted');
-    quoteBySymbol.set(symbol, await fetchQuoteShort(symbol));
-    quoteDone++;
-    onProgress?.({ stage: 'quotes', done: quoteDone, total: symbols.length, label: 'Quotes & short interest' });
-    await sleep(150);
+  if (!isIndex) {
+    let quoteDone = 0;
+    onProgress?.({ stage: 'quotes', done: 0, total: symbols.length, label: 'Quotes & short interest' });
+    for (const symbol of symbols) {
+      if (abortSignal?.aborted) throw new Error('Scan aborted');
+      quoteBySymbol.set(symbol, await fetchQuoteShort(symbol));
+      quoteDone++;
+      onProgress?.({ stage: 'quotes', done: quoteDone, total: symbols.length, label: 'Quotes & short interest' });
+      await sleep(150);
+    }
+  } else {
+    onProgress?.({ stage: 'quotes', done: 0, total: 1, label: 'Batch quotes' });
+    const batch = await fetchBatchQuotes(symbols);
+    for (const u of universe) {
+      const b = batch.get(u.symbol);
+      const empty: QuoteShort = { price: null, changePercent: null, marketCap: null, shortPercentOfFloat: null, shortRatio: null };
+      quoteBySymbol.set(u.symbol, b
+        ? { price: b.price, changePercent: b.changePercent, marketCap: b.marketCap, shortPercentOfFloat: null, shortRatio: null }
+        : empty);
+      if (b?.marketCap != null) u.capTier = capTierFromMarketCap(b.marketCap);
+    }
+    onProgress?.({ stage: 'quotes', done: 1, total: 1, label: 'Batch quotes' });
+
+    // Lazy short-interest for the top-N by partial (insider+13F+congress).
+    const candidates = universe
+      .filter(u => !insiderPending.has(u.symbol))
+      .map(u => {
+        const insider = computeInsiderScore(insiderBySymbol.get(u.symbol) ?? []);
+        const institutional = computeInstitutionalScore(institutionBySymbol.get(u.symbol) ?? []);
+        const congress = computeCongressScore((congressBySymbol.get(u.symbol) ?? []).map(t => ({
+          type: congressType(t.transaction_type),
+          date: String(t.transaction_date ?? '').slice(0, 10),
+        })));
+        return { symbol: u.symbol, partial: insider.score + institutional.score + congress.score };
+      })
+      .filter(c => c.partial > 0)
+      .sort((a, b) => b.partial - a.partial)
+      .slice(0, 100);
+
+    let sqDone = 0;
+    onProgress?.({ stage: 'quotes', done: 0, total: candidates.length, label: 'Short interest (top 100)' });
+    for (const c of candidates) {
+      if (abortSignal?.aborted) throw new Error('Scan aborted');
+      const q = quoteBySymbol.get(c.symbol) ?? { price: null, changePercent: null, marketCap: null, shortPercentOfFloat: null, shortRatio: null };
+      const full = await fetchQuoteShort(c.symbol);
+      quoteBySymbol.set(c.symbol, { ...q, shortPercentOfFloat: full.shortPercentOfFloat, shortRatio: full.shortRatio });
+      sqDone++;
+      onProgress?.({ stage: 'quotes', done: sqDone, total: candidates.length, label: 'Short interest (top 100)' });
+      await sleep(150);
+    }
   }
 
   // Assemble + score
-  const congressType = (raw: string): CongressTradeType => {
-    const t = String(raw ?? '').toUpperCase();
-    if (t.includes('BUY') || t.includes('PURCHASE')) return 'BUY';
-    if (t.includes('SELL') || t.includes('SALE')) return 'SELL';
-    return 'OTHER';
-  };
+  const squeezeLoaded = new Set<string>();
+  for (const [sym, q] of quoteBySymbol) {
+    if (q.shortPercentOfFloat != null || q.shortRatio != null) squeezeLoaded.add(sym);
+  }
 
-  return UNIVERSE.map(u => {
+  return universe.map(u => {
     const insider = computeInsiderScore(insiderBySymbol.get(u.symbol) ?? []);
     const institutional = computeInstitutionalScore(institutionBySymbol.get(u.symbol) ?? []);
     const congress = computeCongressScore(
@@ -605,7 +819,7 @@ export async function runSmartMoneyScan(opts: ScanOptions = {}): Promise<SmartMo
     const score = totalScore(insider, institutional, congress, squeeze);
     return {
       symbol: u.symbol,
-      name: u.name,
+      name: q?.name && !isIndex ? u.name : (q?.name ?? u.name) || u.name,
       sector: u.sector,
       capTier: u.capTier,
       price: q?.price ?? null,
@@ -618,6 +832,25 @@ export async function runSmartMoneyScan(opts: ScanOptions = {}): Promise<SmartMo
       score,
       classification: classify(score),
       detailError: q && q.price === null ? 'Quote unavailable (Yahoo throttled this symbol)' : null,
+      insiderPending: insiderPending.has(u.symbol) || undefined,
+      squeezeLoaded: (isIndex ? squeezeLoaded.has(u.symbol) : true) || undefined,
     } satisfies SmartMoneyRow;
   });
+}
+
+function congressType(raw: string): CongressTradeType {
+  const t = String(raw ?? '').toUpperCase();
+  if (t.includes('BUY') || t.includes('PURCHASE')) return 'BUY';
+  if (t.includes('SELL') || t.includes('SALE')) return 'SELL';
+  return 'OTHER';
+}
+
+function filterToUniverse(
+  bySymbol: Map<string, CongressSourceTrade[]>,
+  universe: readonly string[],
+): Map<string, CongressSourceTrade[]> {
+  const keep = new Set(universe);
+  const out = new Map<string, CongressSourceTrade[]>();
+  for (const [sym, trades] of bySymbol) if (keep.has(sym)) out.set(sym, trades);
+  return out;
 }

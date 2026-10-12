@@ -13,8 +13,17 @@ import {
   edgarPrimaryDocPath,
   FAST_MANAGERS,
   INSIDER_MIN_TRADE,
+  UNIVERSE_MODES,
+  universeForMode,
+  modeUniverseSize,
+  capTierFromMarketCap,
   type InsiderBuy,
 } from './smartMoney';
+import {
+  SP500_MEMBERS,
+  NASDAQ100_MEMBERS,
+  buildIndexUnion,
+} from './indexMembers';
 
 const buy = (over: Partial<InsiderBuy> = {}): InsiderBuy => ({
   owner: 'DOE JOHN',
@@ -241,5 +250,69 @@ describe('FAST_MANAGERS', () => {
     expect(FAST_MANAGERS.length).toBe(10);
     expect(FAST_MANAGERS.some(m => m.name.includes('Vanguard'))).toBe(false);
     expect(FAST_MANAGERS.some(m => m.name.includes('Berkshire'))).toBe(true);
+  });
+});
+
+describe('universe modes (Option B)', () => {
+  it('exposes all four modes with unique ids', () => {
+    expect(UNIVERSE_MODES.map(m => m.id).sort()).toEqual(['curated', 'index', 'ndx100', 'sp500']);
+  });
+
+  it('curated mode returns the 41-stock hand-picked universe', () => {
+    const u = universeForMode('curated');
+    expect(u.length).toBe(41);
+    expect(u.find(x => x.symbol === 'GME')?.capTier).toBe('small');
+  });
+
+  it('index mode is the deduped S&P500 ∪ NASDAQ-100 union', () => {
+    const u = universeForMode('index');
+    expect(u.length).toBe(buildIndexUnion().length);
+    expect(new Set(u.map(x => x.symbol)).size).toBe(u.length);
+    expect(u.some(x => x.symbol === 'AAPL')).toBe(true);
+  });
+
+  it('sp500 and ndx100 sizes track the membership lists', () => {
+    expect(universeForMode('sp500').length).toBe(SP500_MEMBERS.length);
+    expect(universeForMode('ndx100').length).toBe(NASDAQ100_MEMBERS.length);
+    expect(modeUniverseSize('index')).toBe(modeUniverseSize('sp500') + modeUniverseSize('ndx100') -
+      universeForMode('index').filter(m => SP500_MEMBERS.some(s => s.symbol === m.symbol) &&
+        NASDAQ100_MEMBERS.some(n => n.symbol === m.symbol)).length);
+  });
+
+  it('index members start with capTier large (refined live from batch quotes)', () => {
+    for (const m of universeForMode('sp500').slice(0, 5)) {
+      expect(m.capTier).toBe('large');
+    }
+  });
+
+  it('hyphenates dual-class tickers to Yahoo/SEC form', () => {
+    expect(universeForMode('sp500').some(x => x.symbol === 'BRK-B')).toBe(true);
+    expect(universeForMode('sp500').some(x => x.symbol === 'BRK.B')).toBe(false);
+  });
+
+  it('has no duplicate symbols within either index list', () => {
+    expect(new Set(SP500_MEMBERS.map(m => m.symbol)).size).toBe(SP500_MEMBERS.length);
+    expect(new Set(NASDAQ100_MEMBERS.map(m => m.symbol)).size).toBe(NASDAQ100_MEMBERS.length);
+  });
+});
+
+describe('capTierFromMarketCap', () => {
+  it('maps market caps to tiers at the documented thresholds', () => {
+    expect(capTierFromMarketCap(3e12)).toBe('mega');    // ≥200B
+    expect(capTierFromMarketCap(200e9)).toBe('mega');
+    expect(capTierFromMarketCap(199e9)).toBe('large');  // <200B
+    expect(capTierFromMarketCap(10e9)).toBe('large');   // ≥10B
+    expect(capTierFromMarketCap(9.9e9)).toBe('mid');    // <10B
+    expect(capTierFromMarketCap(2e9)).toBe('mid');      // ≥2B
+    expect(capTierFromMarketCap(1.9e9)).toBe('small');  // <2B
+    expect(capTierFromMarketCap(5e8)).toBe('small');
+  });
+
+  it('defaults to large for missing, zero, or non-finite values', () => {
+    expect(capTierFromMarketCap(null)).toBe('large');
+    expect(capTierFromMarketCap(undefined)).toBe('large');
+    expect(capTierFromMarketCap(0)).toBe('large');
+    expect(capTierFromMarketCap(-5e9)).toBe('large');
+    expect(capTierFromMarketCap(Number.NaN)).toBe('large');
   });
 });
