@@ -30,10 +30,18 @@ create table if not exists smart_money_scan_rows (
   squeeze_loaded boolean not null default false,
   leg text,               -- last leg that touched this row: quotes|insider|weekly
   scanned_at timestamptz not null default now(),
+  -- Freshness of the INSIDER signal only. scanned_at moves on every leg
+  -- (quotes rewrites rows daily), so insider staleness must not key off it —
+  -- otherwise the insider leg would never see a stale row.
+  insider_scanned_at timestamptz,
   primary key (universe, symbol)
 );
 
 alter table smart_money_scan_rows enable row level security;
+
+-- Upgrade path for tables created before insider_scanned_at existed (no-op
+-- on fresh envs — the column is already in the create table above).
+alter table smart_money_scan_rows add column if not exists insider_scanned_at timestamptz;
 
 -- Page reads with the anon key; only the edge fn (service role) writes.
 create policy "Allow select for anon" on smart_money_scan_rows

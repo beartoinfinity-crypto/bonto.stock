@@ -63,6 +63,7 @@ const FORM4_SCAN_CAP = 20;
 const CONGRESS_PAGE_LIMIT = 1000;
 const INSIDER_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30d — matches page
 const INSIDER_BUCKET = 85;                       // symbols per insider leg
+const TIME_BUDGET_MS = 110_000;                  // edge-fn wall-clock guard per leg (AVS pattern)
 const SQUEEZE_TOP_N = 125;
 const BATCH_QUOTE_CHUNK = 50;
 const SEC_UA = 'StockPulse smart-money-scan research bot (contact: research@stockpulse.local)';
@@ -539,6 +540,9 @@ interface StoredRow {
   squeeze_loaded: boolean;
   leg: string;
   scanned_at: string;
+  /** Freshness of the insider signal only — the other legs rewrite rows
+   *  daily, so insider staleness must not key off scanned_at. */
+  insider_scanned_at: string | null;
 }
 
 type SupabaseClient = ReturnType<typeof createClient>;
@@ -608,22 +612,26 @@ function buildRow(
 
 /** Leg "quotes": batch quotes for all 500 + short interest for top-N. */
 async function legQuotes(supabase: SupabaseClient): Promise<unknown> {
+  const started = Date.now();
   const existing = await loadExistingRows(supabase, 'index');
   const symbols = UNIVERSE.map(u => u.symbol);
 
   const batch = await fetchBatchQuotes(symbols);
 
   // Rank by the cached score so short interest lands on the names that
-  // actually matter this run (not the whole 500).
+  // actually matter this run (not the whole 500). Rows without squeeze data
+  // yet are also eligible (score 0 on a cold start), so coverage fills in
+  // progressively across runs: loaded rows drop out of this filter.
   const candidates = UNIVERSE
-    .map(u => ({ symbol: u.symbol, score: existing.get(u.symbol)?.score ?? 0 }))
-    .filter(c => c.score > 0)
+    .map(u => ({ symbol: u.symbol, score: existing.get(u.symbol)?.score ?? 0, hasSqueeze: existing.get(u.symbol)?.squeeze_loaded ?? false }))
+    .filter(c => c.score > 0 || !c.hasSqueeze)
     .sort((a, b) => b.score - a.score)
     .slice(0, SQUEEZE_TOP_N);
 
   const shortBySymbol = new Map<string, QuoteShort>();
   let sq = 0;
   for (const c of candidates) {
+    if (Date.now() - started > TIME_BUDGET_MS) break;
     shortBySymbol.set(c.symbol, await fetchQuoteShort(c.symbol));
     sq++;
     await sleep(300); // ~3/s — Yahoo comfort zone
@@ -672,11 +680,12 @@ async function legQuotes(supabase: SupabaseClient): Promise<unknown> {
       squeeze_loaded: q.shortPercentOfFloat != null || q.shortRatio != null,
       leg: 'quotes',
       scanned_at: now,
+      insider_scanned_at: prev?.insider_scanned_at ?? null,
     } satisfies StoredRow;
   });
 
   const written = await upsertRows(supabase, rows);
-  return { leg: 'quotes', universe: 'index', symbols: UNIVERSE.length, quotes: batch.size, shortInterest: sq, congressSymbols: congressBySymbol.size, written };
+  return { leg: 'quotes', universe: 'index', symbols: UNIVERSE.length, quotes: batch.size, shortInterest: sq, congressSymbols: congressBySymbol.size, written, budgetMs: Date.now() - started };
 }
 
 /** Leg "insider": SEC Form 4 bucket of up to INSIDER_BUCKET stale symbols. */
@@ -684,17 +693,18 @@ async function legInsider(supabase: SupabaseClient): Promise<unknown> {
   const existing = await loadExistingRows(supabase, 'index');
   const nowMs = Date.now();
 
-  // Refresh whatever is missing first, then whatever is oldest past TTL.
+  // Refresh whatever is missing first, then whatever is past the 30d
+  // insider TTL. Key off insider_scanned_at (not scanned_at — the quotes
+  // leg rewrites every row daily and would otherwise keep it "fresh").
+  // Null = never scanned by the insider leg -> stale.
   const missing = UNIVERSE.filter(u => !existing.has(u.symbol));
   const stale = UNIVERSE
     .filter(u => {
       const prev = existing.get(u.symbol);
       if (!prev) return false;
-      // no buys recorded: use scanned_at; has buys: use newest buy date
-      const stamp = prev.insider?.buys?.length
-        ? Date.parse(prev.insider.buys[0].date) || Date.parse(prev.scanned_at) || 0
-        : Date.parse(prev.scanned_at) || 0;
-      return nowMs - stamp > INSIDER_TTL_MS;
+      if (!prev.insider_scanned_at) return true;
+      const stamp = Date.parse(prev.insider_scanned_at);
+      return !Number.isFinite(stamp) || nowMs - stamp > INSIDER_TTL_MS;
     })
     .sort((a, b) => {
       const ta = existing.get(a.symbol)?.scanned_at ?? '';
@@ -703,14 +713,24 @@ async function legInsider(supabase: SupabaseClient): Promise<unknown> {
     });
 
   const work = [...missing, ...stale].slice(0, INSIDER_BUCKET);
-  if (!work.length) return { leg: 'insider', universe: 'index', scanned: 0, written: 0 };
+  if (!work.length) return { leg: 'insider', universe: 'index', scanned: 0, written: 0, remainingUnscanned: 0 };
 
   const cikMap = await fetchTickerCikMap();
+  // An empty map means SEC's company_tickers.json fetch failed — bailing
+  // out instead of marking every symbol "checked" with no data.
+  if (!cikMap.size) {
+    return { leg: 'insider', universe: 'index', scanned: 0, written: 0, error: 'SEC ticker map unavailable' };
+  }
+  const started = Date.now();
   const now = new Date().toISOString();
-  const rows: StoredRow[] = [];
-  let scanned = 0;
+  const scannedSet = new Set<string>();
+  let written = 0;
 
+  // Flush inside the loop: a hard platform timeout must not lose the whole
+  // bucket. Budget keeps the run inside the edge-fn wall-clock limit (same
+  // pattern as the AVS fn's TIME_BUDGET_MS).
   for (const u of work) {
+    if (Date.now() - started > TIME_BUDGET_MS) break;
     const prev = existing.get(u.symbol);
     const cik = cikMap.get(u.symbol);
     const buys = cik ? await fetchInsiderBuys(cik) : null;
@@ -719,7 +739,7 @@ async function legInsider(supabase: SupabaseClient): Promise<unknown> {
     const congress = prev?.congress ?? computeCongressScore([]);
     const squeeze = prev?.squeeze ?? computeSqueezeScore(null, null);
     const score = totalScore(insider, institutional, congress, squeeze);
-    rows.push({
+    const row: StoredRow = {
       universe: 'index',
       symbol: u.symbol,
       name: prev?.name ?? u.name,
@@ -734,29 +754,50 @@ async function legInsider(supabase: SupabaseClient): Promise<unknown> {
       squeeze,
       score,
       classification: classify(score),
-      insider_pending: false,
+      // cik missing: SEC has no filings for this symbol — nothing to wait
+      // for. cik present but fetch failed: keep pending, next run retries.
+      insider_pending: cik ? buys === null : false,
       squeeze_loaded: prev?.squeeze_loaded ?? false,
       leg: 'insider',
       scanned_at: now,
-    } satisfies StoredRow);
-    scanned++;
+      // checked this run -> fresh. Exceptions: SEC has no CIK for the
+      // symbol (nothing to ever scan -> fresh), or the fetch failed
+      // (keep prior timestamp so the row stays stale and retries tomorrow).
+      insider_scanned_at: cik && buys === null ? (prev?.insider_scanned_at ?? null) : now,
+    } satisfies StoredRow;
+    await upsertRows(supabase, [row]);
+    written++;
+    // A failed fetch leaves insider_scanned_at unchanged -> still stale.
+    if (row.insider_scanned_at === now) scannedSet.add(u.symbol);
     await sleep(150); // keep total run well inside the edge-fn time limit
   }
 
-  const written = await upsertRows(supabase, rows);
-  const newSymbols = rows.filter(r => !existing.has(r.symbol)).length;
-  const remaining = UNIVERSE.length - (existing.size + newSymbols);
-  return { leg: 'insider', universe: 'index', scanned, written, remainingUnscanned: Math.max(0, remaining) };
+  // Coverage metric: symbols whose row still has no fresh insider scan.
+  const remaining = UNIVERSE.filter(u =>
+    !scannedSet.has(u.symbol) && !existing.get(u.symbol)?.insider_scanned_at,
+  ).length;
+  return {
+    leg: 'insider',
+    universe: 'index',
+    scanned: scannedSet.size,
+    written,
+    remainingUnscanned: remaining,
+    budgetMs: Date.now() - started,
+  };
 }
 
 /** Leg "weekly": 13F (10 managers) — quarterly filings don't justify a
  *  daily re-fetch; congress moves daily with the quotes leg instead. */
 async function legWeekly(supabase: SupabaseClient): Promise<unknown> {
+  const started = Date.now();
   const existing = await loadExistingRows(supabase, 'index');
 
   // 13F — 10 managers, ~3 EDGAR requests each.
   const instBySymbol = new Map<string, InstitutionHolding[]>();
+  let attempted = 0;
   for (const m of FAST_MANAGERS) {
+    if (Date.now() - started > TIME_BUDGET_MS) break;
+    attempted++;
     const result = await fetchManager13f(m.cik);
     if (result) {
       for (const p of result.positions) {
@@ -769,13 +810,19 @@ async function legWeekly(supabase: SupabaseClient): Promise<unknown> {
     }
     await sleep(300);
   }
+  // Budget cut before attempting every manager = truncated data. Scoring a
+  // full recompute off a partial manager set would zero out real holdings,
+  // so keep the previous 13F result until a complete run lands.
+  const complete = attempted === FAST_MANAGERS.length;
 
   const now = new Date().toISOString();
   const rows: StoredRow[] = UNIVERSE.map(u => {
     const prev = existing.get(u.symbol);
     // Full recompute over all 10 managers each run (same semantics as the
     // browser scan): a symbol absent from every manager legitimately scores 0.
-    const institutional = computeInstitutionalScore(instBySymbol.get(u.symbol) ?? []);
+    const institutional = complete
+      ? computeInstitutionalScore(instBySymbol.get(u.symbol) ?? [])
+      : (prev?.institutional ?? computeInstitutionalScore([]));
     const congress = prev?.congress ?? computeCongressScore([]);
     const insider = prev?.insider ?? computeInsiderScore([]);
     const squeeze = prev?.squeeze ?? computeSqueezeScore(null, null);
@@ -799,11 +846,12 @@ async function legWeekly(supabase: SupabaseClient): Promise<unknown> {
       squeeze_loaded: prev?.squeeze_loaded ?? false,
       leg: 'weekly',
       scanned_at: now,
+      insider_scanned_at: prev?.insider_scanned_at ?? null,
     } satisfies StoredRow;
   });
 
   const written = await upsertRows(supabase, rows);
-  return { leg: 'weekly', universe: 'index', written, managers: instBySymbol.size };
+  return { leg: 'weekly', universe: 'index', written, managers: attempted, complete, budgetMs: Date.now() - started };
 }
 
 // ── Entry ───────────────────────────────────────────────────────────────────
