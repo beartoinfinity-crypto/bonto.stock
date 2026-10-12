@@ -25,7 +25,9 @@ import {
 } from '@/lib/smartMoney';
 
 const SCAN_CACHE_KEY = 'stockpulse_sm_scan';
-const INSIDER_CACHE_KEY = 'stockpulse_sm_insider';
+// v2: the v1 cache was filled while the Form 4 fetcher parsed EDGAR's HTML
+// viewer (all-empty buys) — bump the key so those results are ignored.
+const INSIDER_CACHE_KEY = 'stockpulse_sm_insider_v2';
 const SCAN_TTL_MS = 24 * 60 * 60 * 1000;
 const INSIDER_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
