@@ -347,6 +347,15 @@ export function parseForm4(xml: string): InsiderBuy | null {
 }
 
 /**
+ * EDGAR submissions list Form 4 primaryDocuments with an `xslF345X0X/`
+ * viewer prefix — fetching that path returns XSL-rendered HTML (no
+ * transactionCode tags). Strip it to get the raw XML the parser needs.
+ */
+export function edgarPrimaryDocPath(primaryDocument: string): string {
+  return primaryDocument.replace(/^xsl\w+\//, '');
+}
+
+/**
  * Scan a company's recent Form 4s (most recent `FORM4_SCAN_CAP` within the
  * 60-day window) for open-market purchases. Returns null when the company
  * could not be resolved/scanned (soft failure — score stays 0).
@@ -369,7 +378,7 @@ export async function fetchInsiderBuys(
     if (new Date(recent.filingDate?.[i] ?? '').getTime() < cutoff) continue;
     targets.push({
       acc: String(recent.accessionNumber?.[i] ?? '').replace(/-/g, ''),
-      doc: recent.primaryDocument?.[i] ?? '',
+      doc: edgarPrimaryDocPath(recent.primaryDocument?.[i] ?? ''),
     });
     if (targets.length >= maxFilings) break;
   }

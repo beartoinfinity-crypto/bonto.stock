@@ -10,6 +10,7 @@ import {
   normalizeIssuerName,
   matchUniverseByIssuer,
   parseForm4,
+  edgarPrimaryDocPath,
   FAST_MANAGERS,
   INSIDER_MIN_TRADE,
   type InsiderBuy,
@@ -224,6 +225,14 @@ describe('parseForm4', () => {
     expect(parseForm4(xmlFor('A', '1000', '250'))).toBeNull(); // grant
     expect(parseForm4(xmlFor('S', '1000', '250', 'D'))).toBeNull(); // sale
     expect(parseForm4(xmlFor('M', '1000', '0'))).toBeNull(); // vest, no price
+  });
+});
+
+describe('edgarPrimaryDocPath', () => {
+  it('strips the xsl viewer prefix that serves HTML instead of raw XML', () => {
+    expect(edgarPrimaryDocPath('xslF345X06/form4.xml')).toBe('form4.xml');
+    expect(edgarPrimaryDocPath('xslF345X05/wk-form4_1791242243.xml')).toBe('wk-form4_1791242243.xml');
+    expect(edgarPrimaryDocPath('form4.xml')).toBe('form4.xml');
   });
 });
 

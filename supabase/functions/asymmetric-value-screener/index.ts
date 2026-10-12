@@ -154,7 +154,12 @@ async function getInsiderBuys(cik: string, maxFilings: number): Promise<InsiderB
   for (let i = 0; i < (recent.form?.length ?? 0); i++) {
     if (recent.form[i] !== "4") continue;
     if (new Date(recent.filingDate[i]).getTime() < cutoff) continue;
-    targets.push({ acc: String(recent.accessionNumber[i]).replace(/-/g, ""), doc: recent.primaryDocument[i] });
+    // submissions list Form 4 docs with an xslF345X0X/ viewer prefix that
+    // serves XSL-rendered HTML (no transactionCode tags) — strip it.
+    targets.push({
+      acc: String(recent.accessionNumber[i]).replace(/-/g, ""),
+      doc: String(recent.primaryDocument[i] ?? "").replace(/^xsl\w+\//, ""),
+    });
     if (targets.length >= maxFilings) break;
   }
 
