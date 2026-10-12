@@ -33,3 +33,6 @@ verify_jwt = false
 
 [functions.simulate-ledger]
 verify_jwt = false
+
+[functions.smart-money-scan]
+verify_jwt = false

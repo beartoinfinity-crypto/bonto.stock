@@ -1,7 +1,8 @@
 -- ============================================================================
 -- Server-side schedules for the StockPulse Edge Functions
 --
--- CURRENTLY LIVE on project aqyaarnpmvvdzasjefje (4 active jobs).
+-- CURRENTLY LIVE on project aqyaarnpmvvdzasjefje (9 active jobs: 6 data/ledger
+-- + 3 smart-money-scan legs — the smart-money block is new, run after deploy).
 --
 -- Prerequisites:
 --   1. Functions deployed with --no-verify-jwt (see DEPLOY.md):
@@ -119,8 +120,62 @@ select cron.schedule(
   $$
 );
 
+-- ── Smart Money scan: index universe pre-scan (daily, 3 legs) ────────────────
+-- Keeps public.smart_money_scan_rows warm so /smart-money opens instantly with
+-- zero browser API traffic. Each leg is independent so a slow SEC leg can never
+-- starve the quote leg.
+--   quotes  01:30 UTC  batch quotes + top-125 short interest + congress bulk
+--   insider 02:30 UTC  SEC Form 4 bucket (85 symbols/run -> full 500 over ~6 runs)
+--   weekly  Mon 03:30  13F (10 managers; quarterly filings don't need daily)
+select cron.schedule(
+  'stockpulse-smart-money-scan-quotes',
+  '30 1 * * *',
+  $$
+  select net.http_post(
+    url     := 'https://aqyaarnpmvvdzasjefje.supabase.co/functions/v1/smart-money-scan?leg=quotes',
+    headers := jsonb_build_object(
+      'Content-Type',  'application/json',
+      'x-cron-secret', '<CRON_SECRET>'
+    ),
+    body    := '{}'::jsonb
+  );
+  $$
+);
+
+select cron.schedule(
+  'stockpulse-smart-money-scan-insider',
+  '30 2 * * *',
+  $$
+  select net.http_post(
+    url     := 'https://aqyaarnpmvvdzasjefje.supabase.co/functions/v1/smart-money-scan?leg=insider',
+    headers := jsonb_build_object(
+      'Content-Type',  'application/json',
+      'x-cron-secret', '<CRON_SECRET>'
+    ),
+    body    := '{}'::jsonb
+  );
+  $$
+);
+
+-- 13F: weekly only — filings are quarterly, so a daily re-fetch adds
+-- nothing. Congress moves daily with the quotes leg. Monday after the weekend.
+select cron.schedule(
+  'stockpulse-smart-money-scan-weekly',
+  '30 3 * * 1',
+  $$
+  select net.http_post(
+    url     := 'https://aqyaarnpmvvdzasjefje.supabase.co/functions/v1/smart-money-scan?leg=weekly',
+    headers := jsonb_build_object(
+      'Content-Type',  'application/json',
+      'x-cron-secret', '<CRON_SECRET>'
+    ),
+    body    := '{}'::jsonb
+  );
+  $$
+);
+
 -- ── Verify / manage ────────────────────────────────────────────────────────
-select jobname, schedule, active from cron.job;   -- expect 6 active jobs
+select jobname, schedule, active from cron.job;   -- expect 9 active jobs
 
 -- Recreate (unschedule first, then re-run the block above):
 -- select cron.unschedule('stockpulse-sync-stock-data-batch-1');
@@ -129,6 +184,9 @@ select jobname, schedule, active from cron.job;   -- expect 6 active jobs
 -- select cron.unschedule('stockpulse-sync-politician-trades');
 -- select cron.unschedule('stockpulse-sync-featured-trades');
 -- select cron.unschedule('stockpulse-simulate-ledger');
+-- select cron.unschedule('stockpulse-smart-money-scan-quotes');
+-- select cron.unschedule('stockpulse-smart-money-scan-insider');
+-- select cron.unschedule('stockpulse-smart-money-scan-weekly');
 -- Legacy name from the pre-batch setup:
 -- select cron.unschedule('stockpulse-sync-stock-data');
 
@@ -143,3 +201,8 @@ select jobname, schedule, active from cron.job;   -- expect 6 active jobs
 --   07:30 job: select count(*), max(updated_at) from politician_featured_trades;
 --   12:00 job: select updated_at, value::jsonb ->> 'lastRunDate' from stockpulse_kv
 --                where key = 'stockpulse_trade_ledger';
+--   smart-money-scan (01:30 / 02:30 / Mon 03:30):
+--                select leg, count(*), max(scanned_at) from smart_money_scan_rows
+--                  group by leg order by max(scanned_at) desc;
+--                select count(*) from smart_money_scan_rows where universe = 'index';  -- expect 500
+--                -- insider leg fills ~85 new symbols/run; `remaining` shrinks to 0 over ~6 days.

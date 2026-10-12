@@ -23,10 +23,13 @@ import {
   fetchQuoteShort,
   totalScore,
   computeSqueezeScore,
+  mapScanDbRow,
   type SmartMoneyRow,
+  type SmartMoneyScanDbRow,
   type ScanProgress,
   type UniverseMode,
 } from '@/lib/smartMoney';
+import { edgeRest } from '@/lib/edgeFn';
 
 const SCAN_CACHE_KEY = 'stockpulse_sm_scan';
 // v2: the v1 cache was filled while the Form 4 fetcher parsed EDGAR's HTML
@@ -138,8 +141,25 @@ export default function SmartMoneyScreener() {
   const pendingCount = useMemo(() => rows.filter(r => r.insiderPending).length, [rows]);
 
   useEffect(() => {
+    let cancelled = false;
+    // Every mode has a local 24h cache — show it immediately. The daily
+    // background scan only fills the full index union, so on top of that
+    // local cache we overwrite with the fresher server pre-scan.
     const cached = loadScan(mode);
     setRows(cached ?? []);
+    if (mode !== 'index') return () => { cancelled = true; };
+    (async () => {
+      const remote = await edgeRest<SmartMoneyScanDbRow[]>(
+        'smart_money_scan_rows?universe=eq.index&select=*',
+      );
+      if (cancelled) return;
+      if (remote?.length) {
+        const serverRows = remote.map(mapScanDbRow);
+        setRows(serverRows);
+        saveScan(mode, serverRows);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [mode]);
 
   const runScan = useCallback(async (opts: { bucket?: number } = {}) => {

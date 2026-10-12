@@ -32,6 +32,60 @@ import {
 
 // ── Universe ─────────────────────────────────────────────────────────
 
+/** Row shape of public.smart_money_scan_rows written by the daily
+ *  smart-money-scan edge fn. Signals are stored as JSONB columns. */
+export interface SmartMoneyScanDbRow {
+  symbol: string;
+  name: string | null;
+  sector: string | null;
+  cap_tier: string | null;
+  price: number | null;
+  change_percent: number | null;
+  market_cap: number | null;
+  insider: InsiderSignal | null;
+  institutional: InstitutionalSignal | null;
+  congress: CongressSignal | null;
+  squeeze: SqueezeSignal | null;
+  score: number | null;
+  classification: SmartMoneyRow['classification'] | null;
+  insider_pending: boolean | null;
+  squeeze_loaded: boolean | null;
+  scanned_at: string;
+}
+
+/** Map a stored scan row to the UI row shape. `scannedAt` (epoch ms) is
+ *  surfaced as a soft note so a stale background scan is not mistaken for
+ *  live data — the interactive "Run screen" still overrides it. */
+export function mapScanDbRow(db: SmartMoneyScanDbRow): SmartMoneyRow {
+  const insider = db.insider ?? computeInsiderScore([]);
+  const institutional = db.institutional ?? computeInstitutionalScore([]);
+  const congress = db.congress ?? computeCongressScore([]);
+  const squeeze = db.squeeze ?? computeSqueezeScore(null, null);
+  const score = db.score ?? totalScore(insider, institutional, congress, squeeze);
+  const scannedAt = db.scanned_at ? Date.parse(db.scanned_at) : 0;
+  const staleNote = Number.isFinite(scannedAt) && scannedAt > 0
+    ? `Background scan ${new Date(scannedAt).toISOString().slice(0, 10)}`
+    : null;
+  return {
+    symbol: db.symbol,
+    name: db.name ?? db.symbol,
+    sector: db.sector ?? 'Technology',
+    capTier: db.cap_tier ?? capTierFromMarketCap(db.market_cap),
+    price: db.price,
+    changePercent: db.change_percent,
+    marketCap: db.market_cap,
+    insider,
+    institutional,
+    congress,
+    squeeze,
+    score,
+    classification: db.classification ?? classify(score),
+    detailError: staleNote,
+    insiderPending: db.insider_pending ?? false,
+    squeezeLoaded: db.squeeze_loaded ?? false,
+  };
+}
+
 export interface UniverseEntry {
   symbol: string;
   name: string;

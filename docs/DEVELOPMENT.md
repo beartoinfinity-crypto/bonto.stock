@@ -88,7 +88,7 @@ Editable engine: `src/lib/masterAnalysis.ts` (`analyzeStock` runs all 12). Add a
 ```powershell
 $env:Path = "C:\Program Files\nodejs;" + $env:Path
 .\node_modules\.bin\tsc.cmd --noEmit     # type check — 0 errors
-npm.cmd run test                         # 323 tests across 26 files — all pass
+ npm.cmd run test                         # 330 tests across 26 files — all pass
 npm.cmd run build                        # rebuild dist/ (committed)
 ```
 
@@ -102,3 +102,15 @@ New pure logic should come with unit tests (see `src/lib/*.test.ts`, `*.simulate
 - Analytics: rule-based only; template narratives, no AI/ML APIs.
 - Secrets: runtime-config pattern only (see above) — the committed `dist/` is public.
 - PowerShell gotchas: use `npm.cmd` not `npm`; never `Set-Content` source files (UTF-8 em-dash/emoji corruption) — use the `write`/`edit` tools; probe Supabase REST via Node `.cjs` scripts (PowerShell mangles `select=*`).
+
+## Smart Money scheduled scan (smart-money-scan)
+
+`/smart-money` reads a pre-scan from `public.smart_money_scan_rows` (written by the `smart-money-scan` edge fn) so the index universes open instantly with zero browser API traffic. The interactive "Run screen" button still exists for the curated 41 and for manual re-runs.
+
+- **Edge fn**: `supabase/functions/smart-money-scan/index.ts` — one leg per invocation: `?leg=quotes` (batch quotes + top-125 short interest + congress bulk), `?leg=insider` (85-symbol SEC Form 4 bucket → full 500 over ~6 days), `?leg=weekly` (13F only, Monday). Auth via `x-cron-secret`.
+- **Membership**: the Deno fn can't import browser TS, so `supabase/functions/smart-money-scan/universe.ts` is generated from `src/lib/indexMembers.ts`. **After editing `indexMembers.ts`, regenerate**: `node scripts/gen-deno-universe.cjs`.
+- **Scores are duplicated**: `smart_money_scan/index.ts` ports the pure scoring/fetch helpers from `src/lib/smartMoney.ts`. Change thresholds in **both** files (same rule as the ledger fn).
+- **Schedule**: `supabase/schedules.sql` — 3 cron rows (`01:30` quotes, `02:30` insider, `Mon 03:30` weekly).
+- **Migration**: `supabase/migrations/20261012000000_smart_money_scan_rows.sql` (RLS allows anon SELECT; only the edge fn writes).
+- **Deploy**: `npx.cmd supabase functions deploy smart-money-scan --no-verify-jwt`, apply the migration, then run the schedule block in SQL Editor.
+- **Verify by data freshness**: `select leg, count(*), max(scanned_at) from smart_money_scan_rows group by leg;` (ignore pg_net's 5s timeout).

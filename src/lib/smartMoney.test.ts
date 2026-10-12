@@ -17,7 +17,9 @@ import {
   universeForMode,
   modeUniverseSize,
   capTierFromMarketCap,
+  mapScanDbRow,
   type InsiderBuy,
+  type SmartMoneyScanDbRow,
 } from './smartMoney';
 import {
   SP500_MEMBERS,
@@ -314,5 +316,71 @@ describe('capTierFromMarketCap', () => {
     expect(capTierFromMarketCap(0)).toBe('large');
     expect(capTierFromMarketCap(-5e9)).toBe('large');
     expect(capTierFromMarketCap(Number.NaN)).toBe('large');
+  });
+});
+
+describe('mapScanDbRow', () => {
+  const dbRow = (over: Partial<SmartMoneyScanDbRow> = {}): SmartMoneyScanDbRow => ({
+    symbol: 'AAPL',
+    name: 'Apple Inc.',
+    sector: 'Technology',
+    cap_tier: 'mega',
+    price: 300,
+    change_percent: 1.2,
+    market_cap: 4e12,
+    insider: computeInsiderScore([buy({ value: 250_000 }), buy({ owner: 'B', value: 250_000 }), buy({ owner: 'C', value: 250_000 })]),
+    institutional: computeInstitutionalScore([{ manager: 'Berkshire Hathaway', issuer: 'APPLE INC', value: 1e9, shares: 1e6 }]),
+    congress: computeCongressScore([{ type: 'BUY', date: '2026-05-01' }]),
+    squeeze: computeSqueezeScore(12, 5),
+    score: null,
+    classification: null,
+    insider_pending: false,
+    squeeze_loaded: true,
+    scanned_at: '2026-10-12T01:30:00.000Z',
+    ...over,
+  });
+
+  it('derives score and classification from the four stored signals when columns are null', () => {
+    const row = mapScanDbRow(dbRow());
+    expect(row.score).toBe(80); // insider 25 + institutional 25 + congress 20 + squeeze 10
+    expect(row.classification).toBe('Strong');
+  });
+
+  it('prefers the stored score/classification columns when present', () => {
+    const row = mapScanDbRow(dbRow({ score: 42, classification: 'Watch' }));
+    expect(row.score).toBe(42);
+    expect(row.classification).toBe('Watch');
+  });
+
+  it('maps snake_case columns to the UI row fields', () => {
+    const row = mapScanDbRow(dbRow());
+    expect(row.capTier).toBe('mega');
+    expect(row.changePercent).toBe(1.2);
+    expect(row.marketCap).toBe(4e12);
+    expect(row.squeezeLoaded).toBe(true);
+    expect(row.insiderPending).toBe(false);
+  });
+
+  it('falls back to an empty signal when a JSONB column is null', () => {
+    const row = mapScanDbRow(dbRow({ insider: null, squeeze_loaded: false }));
+    expect(row.insider.score).toBe(0);
+    expect(row.insider.buys).toEqual([]);
+    expect(row.squeezeLoaded).toBe(false);
+  });
+
+  it('caps the capTier from market_cap when cap_tier is null', () => {
+    const row = mapScanDbRow(dbRow({ cap_tier: null }));
+    expect(row.capTier).toBe('mega');
+  });
+
+  it('surfaces the scanned_at date as a stale note, never as a hard error', () => {
+    const row = mapScanDbRow(dbRow());
+    expect(row.detailError).toContain('2026-10-12');
+  });
+
+  it('handles a null scanned_at without throwing', () => {
+    const row = mapScanDbRow(dbRow({ scanned_at: '' }));
+    expect(row.detailError).toBeNull();
+    expect(row.score).toBe(80);
   });
 });

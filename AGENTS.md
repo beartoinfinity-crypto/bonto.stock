@@ -4,7 +4,7 @@
 
 1. Set Node on PATH: `$env:Path = "C:\Program Files\nodejs;" + $env:Path`
 2. Run `npm run build` before committing — `dist/` is committed to git (Vercel serves it via `index.js`)
-3. Run `npm run test` after changes — 323 tests across 26 files, must pass
+3. Run `npm run test` after changes — 330 tests across 26 files, must pass
 4. Use `npm.cmd` (not `npm`) in PowerShell commands
 5. Supabase CLI deploy runs from the **repo root** (`supabase/config.toml` is resolved relative to cwd). If the link is lost: `npx.cmd supabase link --project-ref aqyaarnpmvvdzasjefje`
 
@@ -22,7 +22,7 @@
 - **Secrets never go in source or `.env`-built bundles** — GitHub push protection blocks them. Keys are served at runtime via `/api/api-keys` (ADANOS_API_KEY) and `/api/edge-config` (EDGE_FN_URL/EDGE_FN_KEY), set on Vercel. The committed `dist/` bundle is public. `CRON_SECRET` must ALSO be set as a hosting env var on Vercel — the `/api/ledger/*` proxy forwards it to the edge fn (without it those endpoints 502)
 - **pg_net 5s timeout** — Supabase SQL `net.http_post` records "timeout" for any edge fn running >5s (sync-stock-data ~60s). The fn still completes; verify by data freshness, not `_http_response` status
 - **Edge fn auth** — functions are deployed `--no-verify-jwt`; the `x-cron-secret` header (CRON_SECRET secret) is the only auth. The secret is write-only (`secrets list` shows a digest)
-- **Supabase schedules** — 6 pg_cron jobs live on the project (see `supabase/schedules.sql`); data jobs are server-side, browser cron keeps only local maintenance (`archive-sqlite`, `pull-stock-data`)
+- **Supabase schedules** — 9 pg_cron jobs live on the project (see `supabase/schedules.sql`); data jobs are server-side, browser cron keeps only local maintenance (`archive-sqlite`, `pull-stock-data`)
 - **Mobile view** — `/m` (hub) + `/m/:symbol` (detail) is the phone-optimized page. Phones auto-bounce `/` → `/m` at <768px (`src/lib/siteMode.ts`); opting into the full site sets localStorage `stockpulse_use_full_site`. `IndexRoute` in `App.tsx` renders `null` for one frame while checking — intentional, not a blank-page bug
 
 ## Conventions
@@ -37,6 +37,7 @@
 - **NaN propagation**: `Math.floor(Infinity / 0)` produces `Infinity` which serializes as `null` in JSON. Both `tradeSimulator.ts` and `simulate-ledger/index.ts` guard against this: `!(available > 0)`, `!(s.price > 0)`, and `Number.isFinite(qty)` checks before computing buy qty
 - **Same-day round-trips**: `soldToday` set in `runDayForPerson` tracks symbols sold during current session to prevent buy-after-sell same-day. Edge fn deploys may cache — verify source is present after deploy
 - **Edge fn builds sync**: the edge fn (`simulate-ledger/index.ts`) shares core logic with browser (`tradeSimulator.ts`). When fixing buy/sell logic, apply the fix to BOTH files and deploy both
+- **Smart Money scan sync**: the `smart-money-scan` edge fn duplicates scoring from `smartMoney.ts` (thresholds in both files); its `universe.ts` is generated — run `node scripts/gen-deno-universe.cjs` after editing `src/lib/indexMembers.ts`
 
 ## Context pointers
 
