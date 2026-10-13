@@ -1,46 +1,60 @@
 #!/usr/bin/env node
 /**
- * Regenerates supabase/functions/smart-money-scan/universe.ts from
- * src/lib/indexMembers.ts so the daily edge fn and the browser share one
- * membership source of truth (the fn can't import browser TS).
+ * Regenerates supabase/functions/smart-money-scan/universe.ts from the two
+ * browser-side membership sources so the daily edge fn and the app share one
+ * source of truth (the fn can't import browser TS):
  *
- * Run after editing src/lib/indexMembers.ts (index rebalances):
+ *   - src/lib/indexMembers.ts  -> SP500_MEMBERS / NASDAQ100_MEMBERS
+ *   - src/lib/smartMoney.ts    -> UNIVERSE (the curated 41)
+ *
+ * Run after editing either file:
  *   node scripts/gen-deno-universe.cjs
  */
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+// (reads src/lib/indexMembers.ts + src/lib/smartMoney.ts).
+//
+// .cjs because package.json is "type": "module" and this script must run as
+// CommonJS, same as the other scripts/*.cjs helpers.
+const fs = require('node:fs');
+const path = require('node:path');
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
-const src = fs.readFileSync(path.join(root, 'src/lib/indexMembers.ts'), 'utf8');
 
-function grabArray(name) {
+const q = (s) => "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
+
+/** Parse `{ symbol: 'X', name: 'Y', sector: 'Z' }` rows out of a const array. */
+function grabArray(src, name, label) {
   const start = src.indexOf(`export const ${name}`);
-  if (start < 0) throw new Error(`missing ${name}`);
-  const open = src.indexOf('[', start);
+  if (start < 0) throw new Error(`missing ${name} in ${label}`);
+  // Skip the type annotation — `readonly DenoMember[]` has a `[` before the
+  // array literal does. Anchor on the `=` in `= [`, then find its `[`.
+  const eq = src.indexOf('=', start);
+  const open = src.indexOf('[', eq);
   const close = src.indexOf('];', open);
   const body = src.slice(open + 1, close);
   const out = [];
-  const re = /\{\s*symbol:\s*'((?:\\'|[^'])*)',\s*name:\s*'((?:\\'|[^'])*)',\s*sector:\s*'((?:\\'|[^'])*)'\s*\}/g;
+  const re = /\{\s*symbol:\s*'((?:\\'|[^'])*)',\s*name:\s*'((?:\\'|[^'])*)',\s*sector:\s*'((?:\\'|[^'])*)'/g;
   let m;
-  while ((m = re.exec(body))) {
-    out.push({ symbol: m[1], name: m[2], sector: m[3] });
-  }
+  while ((m = re.exec(body))) out.push({ symbol: m[1], name: m[2], sector: m[3] });
   if (!out.length) throw new Error(`no rows parsed for ${name}`);
   return out;
 }
 
-const sp = grabArray('SP500_MEMBERS');
-const ndx = grabArray('NASDAQ100_MEMBERS');
-console.log(`parsed SP500=${sp.length} NDX=${ndx.length}`);
+const membersSrc = fs.readFileSync(path.join(root, 'src/lib/indexMembers.ts'), 'utf8');
+const smartSrc = fs.readFileSync(path.join(root, 'src/lib/smartMoney.ts'), 'utf8');
 
-const q = (s) => "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
-const rows = (arr) => arr.map(r => `  { symbol: ${q(r.symbol)}, name: ${q(r.name)}, sector: ${q(r.sector)} },`).join('\n');
+const sp = grabArray(membersSrc, 'SP500_MEMBERS', 'indexMembers.ts');
+const ndx = grabArray(membersSrc, 'NASDAQ100_MEMBERS', 'indexMembers.ts');
+const curated = grabArray(smartSrc, 'UNIVERSE', 'smartMoney.ts');
+console.log(`parsed SP500=${sp.length} NDX=${ndx.length} curated=${curated.length}`);
+
+const rows = (arr) =>
+  arr.map(r => `  { symbol: ${q(r.symbol)}, name: ${q(r.name)}, sector: ${q(r.sector)} },`).join('\n');
 
 const out = `// GENERATED FILE — do not edit by hand.
-// Regenerate with scripts/gen-deno-universe.cjs (reads src/lib/indexMembers.ts).
-// Full S&P 500 + NASDAQ-100 membership for the daily smart-money-scan edge fn.
+// Regenerate with scripts/gen-deno-universe.cjs
+// (reads src/lib/indexMembers.ts + src/lib/smartMoney.ts).
+// Membership for the daily smart-money-scan edge fn — the fn can't import
+// browser TS, so these lists are duplicated here.
 
 export interface DenoMember {
   symbol: string;
@@ -54,6 +68,13 @@ ${rows(sp)}
 
 export const NASDAQ100_MEMBERS: readonly DenoMember[] = [
 ${rows(ndx)}
+];
+
+/** The hand-picked curated universe — scanned in full by its own leg so the
+ *  page's default mode opens instantly (2 names, GME/RIVN, sit outside the
+ *  index union, hence a separate universe key rather than a filtered view). */
+export const CURATED_MEMBERS: readonly DenoMember[] = [
+${rows(curated)}
 ];
 
 /** Deduped S&P500 ∪ NASDAQ-100 (primary share classes only), sorted. */

@@ -18,6 +18,8 @@ import {
   modeUniverseSize,
   capTierFromMarketCap,
   mapScanDbRow,
+  serverScanForMode,
+  SERVER_SCANNED_MODES,
   type InsiderBuy,
   type SmartMoneyScanDbRow,
 } from './smartMoney';
@@ -382,5 +384,63 @@ describe('mapScanDbRow', () => {
     const row = mapScanDbRow(dbRow({ scanned_at: '' }));
     expect(row.detailError).toBeNull();
     expect(row.score).toBe(80);
+  });
+});
+
+describe('serverScanForMode', () => {
+  const dbRow = (symbol: string): SmartMoneyScanDbRow => ({
+    symbol,
+    name: `${symbol} Inc.`,
+    sector: 'Technology',
+    cap_tier: 'large',
+    price: 100,
+    change_percent: 1.5,
+    market_cap: 5e9,
+    insider: null,
+    institutional: null,
+    congress: null,
+    squeeze: null,
+    score: 45,
+    classification: 'Watch',
+    insider_pending: false,
+    squeeze_loaded: true,
+    scanned_at: '2026-10-12T01:30:00.000Z',
+  });
+
+  it('serves index, sp500 and ndx100 from the server; curated stays local', () => {
+    expect(SERVER_SCANNED_MODES.has('index')).toBe(true);
+    expect(SERVER_SCANNED_MODES.has('sp500')).toBe(true);
+    expect(SERVER_SCANNED_MODES.has('ndx100')).toBe(true);
+    expect(SERVER_SCANNED_MODES.has('curated')).toBe(false);
+    expect(serverScanForMode('curated', [dbRow('AAPL')])).toEqual([]);
+  });
+
+  it('filters the 501-row server payload down to the sp500 universe', () => {
+    const inSp500 = SP500_MEMBERS.slice(0, 5).map(m => dbRow(m.symbol));
+    const out = serverScanForMode('sp500', inSp500);
+    expect(out).toHaveLength(5);
+    expect(out.map(r => r.symbol)).toEqual(inSp500.map(r => r.symbol));
+    expect(out[0].score).toBe(45);
+    expect(out[0].classification).toBe('Watch');
+    expect(out[0].squeezeLoaded).toBe(true);
+    expect(out[0].insiderPending).toBe(false);
+  });
+
+  it('drops symbols outside the chosen mode instead of showing the wrong universe', () => {
+    const ndxOnly = NASDAQ100_MEMBERS.find(m => !SP500_MEMBERS.some(s => s.symbol === m.symbol));
+    expect(ndxOnly).toBeDefined();
+    const out = serverScanForMode('sp500', [dbRow(ndxOnly!.symbol), dbRow(SP500_MEMBERS[0].symbol)]);
+    expect(out.map(r => r.symbol)).toEqual([SP500_MEMBERS[0].symbol]);
+  });
+
+  it('returns every union symbol for index mode', () => {
+    const union = buildIndexUnion();
+    const out = serverScanForMode('index', union.slice(0, 10).map(m => dbRow(m.symbol)));
+    expect(out).toHaveLength(10);
+  });
+
+  it('returns [] when the server has no rows, so the caller keeps its local cache', () => {
+    expect(serverScanForMode('sp500', [])).toEqual([]);
+    expect(serverScanForMode('index', [])).toEqual([]);
   });
 });

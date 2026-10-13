@@ -23,7 +23,8 @@ import {
   fetchQuoteShort,
   totalScore,
   computeSqueezeScore,
-  mapScanDbRow,
+  serverScanForMode,
+  SERVER_SCANNED_MODES,
   type SmartMoneyRow,
   type SmartMoneyScanDbRow,
   type ScanProgress,
@@ -142,19 +143,19 @@ export default function SmartMoneyScreener() {
 
   useEffect(() => {
     let cancelled = false;
-    // Every mode has a local 24h cache — show it immediately. The daily
-    // background scan only fills the full index union, so on top of that
-    // local cache we overwrite with the fresher server pre-scan.
+    // Every mode has a local 24h cache — show it immediately. On top of that
+    // we overwrite with the fresher server pre-scan (index union, filtered to
+    // this mode's symbols — see SERVER_SCANNED_MODES).
     const cached = loadScan(mode);
     setRows(cached ?? []);
-    if (mode !== 'index') return () => { cancelled = true; };
+    if (!SERVER_SCANNED_MODES.has(mode)) return () => { cancelled = true; };
     (async () => {
       const remote = await edgeRest<SmartMoneyScanDbRow[]>(
         'smart_money_scan_rows?universe=eq.index&select=*',
       );
       if (cancelled) return;
-      if (remote?.length) {
-        const serverRows = remote.map(mapScanDbRow);
+      const serverRows = serverScanForMode(mode, remote ?? []);
+      if (serverRows.length) {
         setRows(serverRows);
         saveScan(mode, serverRows);
       }

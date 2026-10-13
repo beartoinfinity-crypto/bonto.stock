@@ -1,6 +1,8 @@
 // GENERATED FILE — do not edit by hand.
-// Regenerate with scripts/gen-deno-universe.cjs (reads src/lib/indexMembers.ts).
-// Full S&P 500 + NASDAQ-100 membership for the daily smart-money-scan edge fn.
+// Regenerate with scripts/gen-deno-universe.cjs
+// (reads src/lib/indexMembers.ts + src/lib/smartMoney.ts).
+// Membership for the daily smart-money-scan edge fn — the fn can't import
+// browser TS, so these lists are duplicated here.
 
 export interface DenoMember {
   symbol: string;
@@ -585,6 +587,53 @@ export const NASDAQ100_MEMBERS: readonly DenoMember[] = [
   { symbol: 'XEL', name: 'Xcel Energy', sector: 'Utilities' },
   { symbol: 'ZM', name: 'Zoom Communications', sector: 'Technology' },
   { symbol: 'ZS', name: 'Zscaler', sector: 'Technology' },
+];
+
+/** The hand-picked curated universe — scanned in full by its own leg so the
+ *  page's default mode opens instantly (2 names, GME/RIVN, sit outside the
+ *  index union, hence a separate universe key rather than a filtered view). */
+export const CURATED_MEMBERS: readonly DenoMember[] = [
+  { symbol: 'AAPL', name: 'Apple Inc.', sector: 'Technology' },
+  { symbol: 'MSFT', name: 'Microsoft Corp.', sector: 'Technology' },
+  { symbol: 'GOOGL', name: 'Alphabet Inc.', sector: 'Technology' },
+  { symbol: 'AMZN', name: 'Amazon.com Inc.', sector: 'Consumer' },
+  { symbol: 'NVDA', name: 'NVIDIA Corp.', sector: 'Technology' },
+  { symbol: 'META', name: 'Meta Platforms Inc.', sector: 'Technology' },
+  { symbol: 'TSLA', name: 'Tesla Inc.', sector: 'Consumer' },
+  { symbol: 'AMD', name: 'Advanced Micro Devices', sector: 'Technology' },
+  { symbol: 'ORCL', name: 'Oracle Corp.', sector: 'Technology' },
+  { symbol: 'CRM', name: 'Salesforce Inc.', sector: 'Technology' },
+  { symbol: 'PLTR', name: 'Palantir Technologies', sector: 'Technology' },
+  { symbol: 'INTC', name: 'Intel Corp.', sector: 'Technology' },
+  { symbol: 'CRWD', name: 'CrowdStrike Holdings', sector: 'Technology' },
+  { symbol: 'SMCI', name: 'Super Micro Computer', sector: 'Technology' },
+  { symbol: 'MSTR', name: 'Strategy Inc.', sector: 'Technology' },
+  { symbol: 'COIN', name: 'Coinbase Global', sector: 'Financials' },
+  { symbol: 'HOOD', name: 'Robinhood Markets', sector: 'Financials' },
+  { symbol: 'JPM', name: 'JPMorgan Chase', sector: 'Financials' },
+  { symbol: 'BAC', name: 'Bank of America', sector: 'Financials' },
+  { symbol: 'GS', name: 'Goldman Sachs', sector: 'Financials' },
+  { symbol: 'V', name: 'Visa Inc.', sector: 'Financials' },
+  { symbol: 'LLY', name: 'Eli Lilly & Co.', sector: 'Healthcare' },
+  { symbol: 'UNH', name: 'UnitedHealth Group', sector: 'Healthcare' },
+  { symbol: 'PFE', name: 'Pfizer Inc.', sector: 'Healthcare' },
+  { symbol: 'MRNA', name: 'Moderna Inc.', sector: 'Healthcare' },
+  { symbol: 'ABBV', name: 'AbbVie Inc.', sector: 'Healthcare' },
+  { symbol: 'XOM', name: 'Exxon Mobil Corp.', sector: 'Energy' },
+  { symbol: 'CVX', name: 'Chevron Corp.', sector: 'Energy' },
+  { symbol: 'OXY', name: 'Occidental Petroleum', sector: 'Energy' },
+  { symbol: 'CAT', name: 'Caterpillar Inc.', sector: 'Industrials' },
+  { symbol: 'BA', name: 'Boeing Co.', sector: 'Industrials' },
+  { symbol: 'GE', name: 'GE Aerospace', sector: 'Industrials' },
+  { symbol: 'F', name: 'Ford Motor Co.', sector: 'Consumer' },
+  { symbol: 'WMT', name: 'Walmart Inc.', sector: 'Consumer' },
+  { symbol: 'COST', name: 'Costco Wholesale', sector: 'Consumer' },
+  { symbol: 'KO', name: 'Coca-Cola Co.', sector: 'Consumer' },
+  { symbol: 'PG', name: 'Procter & Gamble', sector: 'Consumer' },
+  { symbol: 'NFLX', name: 'Netflix Inc.', sector: 'Communication' },
+  { symbol: 'DIS', name: 'Walt Disney Co.', sector: 'Communication' },
+  { symbol: 'GME', name: 'GameStop Corp.', sector: 'Consumer' },
+  { symbol: 'RIVN', name: 'Rivian Automotive', sector: 'Consumer' },
 ];
 
 /** Deduped S&P500 ∪ NASDAQ-100 (primary share classes only), sorted. */

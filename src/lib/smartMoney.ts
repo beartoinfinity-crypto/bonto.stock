@@ -176,6 +176,25 @@ export function modeUniverseSize(mode: UniverseMode): number {
   return universeForMode(mode).length;
 }
 
+/** Modes the daily `smart-money-scan` edge fn can serve. It writes only
+ *  `universe='index'` (the 501 union); S&P 500 (488) and NASDAQ-100 (85) are
+ *  strict subsets of that union, so both are read from the same rows.
+ *  Curated 41 is not guaranteed to sit inside the union — it stays local-only. */
+export const SERVER_SCANNED_MODES: ReadonlySet<UniverseMode> = new Set<UniverseMode>(['index', 'sp500', 'ndx100']);
+
+/** Project the server's `smart_money_scan_rows` (always `universe='index'`)
+ *  onto a specific mode: keep only that mode's symbols, map to UI rows.
+ *  Returns [] when the mode isn't server-scanned or nothing matches, so the
+ *  caller falls back to its local cache instead of clobbering the table. */
+export function serverScanForMode(
+  mode: UniverseMode,
+  dbRows: readonly SmartMoneyScanDbRow[],
+): SmartMoneyRow[] {
+  if (!SERVER_SCANNED_MODES.has(mode)) return [];
+  const wanted = new Set(universeForMode(mode).map(u => u.symbol));
+  return dbRows.filter(r => wanted.has(r.symbol)).map(mapScanDbRow);
+}
+
 // ── Scoring constants (documented on the page) ───────────────────────
 
 export const INSIDER_LOOKBACK_DAYS = 60;
