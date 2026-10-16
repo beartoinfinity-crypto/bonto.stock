@@ -195,6 +195,23 @@ export function serverScanForMode(
   return dbRows.filter(r => wanted.has(r.symbol)).map(mapScanDbRow);
 }
 
+/** PostgREST query for a server-scanned mode, or null when the mode is
+ *  local-only (curated). Trims columns the UI never reads (drops `leg` and
+ *  `universe`) and narrows `sp500`/`ndx100` to their symbols so we don't pull
+ *  all 501 union rows on every open. `index` is the whole union — no filter. */
+export function serverScanQueryForMode(mode: UniverseMode): string | null {
+  if (!SERVER_SCANNED_MODES.has(mode)) return null;
+  const select = [
+    'symbol', 'name', 'sector', 'cap_tier', 'price', 'change_percent',
+    'market_cap', 'insider', 'institutional', 'congress', 'squeeze', 'score',
+    'classification', 'insider_pending', 'squeeze_loaded', 'scanned_at',
+  ].join(',');
+  const base = `smart_money_scan_rows?universe=eq.index&select=${select}`;
+  if (mode === 'index') return base;
+  const syms = universeForMode(mode).map(u => u.symbol).join(',');
+  return `${base}&symbol=in.(${syms})`;
+}
+
 // ── Scoring constants (documented on the page) ───────────────────────
 
 export const INSIDER_LOOKBACK_DAYS = 60;

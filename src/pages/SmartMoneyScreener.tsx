@@ -24,6 +24,7 @@ import {
   totalScore,
   computeSqueezeScore,
   serverScanForMode,
+  serverScanQueryForMode,
   SERVER_SCANNED_MODES,
   type SmartMoneyRow,
   type SmartMoneyScanDbRow,
@@ -150,9 +151,11 @@ export default function SmartMoneyScreener() {
     setRows(cached ?? []);
     if (!SERVER_SCANNED_MODES.has(mode)) return () => { cancelled = true; };
     (async () => {
-      const remote = await edgeRest<SmartMoneyScanDbRow[]>(
-        'smart_money_scan_rows?universe=eq.index&select=*',
-      );
+      const q = serverScanQueryForMode(mode);
+      if (!q || cancelled) return;
+      const isFresh = !!(cached?.at && Date.now() - cached.at < SCAN_TTL_MS && (cached.rows?.length ?? 0) > 0);
+      if (isFresh) return;
+      const remote = await edgeRest<SmartMoneyScanDbRow[]>(q);
       if (cancelled) return;
       const serverRows = serverScanForMode(mode, remote ?? []);
       if (serverRows.length) {

@@ -19,6 +19,7 @@ import {
   capTierFromMarketCap,
   mapScanDbRow,
   serverScanForMode,
+  serverScanQueryForMode,
   SERVER_SCANNED_MODES,
   type InsiderBuy,
   type SmartMoneyScanDbRow,
@@ -444,3 +445,47 @@ describe('serverScanForMode', () => {
     expect(serverScanForMode('index', [])).toEqual([]);
   });
 });
+
+describe('serverScanQueryForMode', () => {
+  it('returns null for curated (local-only)', () => {
+    expect(serverScanQueryForMode('curated')).toBeNull();
+  });
+
+  it('returns index query with trimmed select and no symbol filter', () => {
+    const q = serverScanQueryForMode('index');
+    expect(q).toBeTruthy();
+    if (!q) return;
+    expect(q).toContain('universe=eq.index');
+    expect(q).toContain('select=symbol,name,sector,cap_tier,price,change_percent,market_cap,insider,institutional,congress,squeeze,score,classification,insider_pending,squeeze_loaded,scanned_at');
+    expect(q).not.toContain('leg');
+    expect(q).not.toContain('universe,');
+    expect(q).not.toContain('symbol=in.');
+  });
+
+  it('returns sp500 query with trimmed select and symbol filter', () => {
+    const q = serverScanQueryForMode('sp500');
+    expect(q).toBeTruthy();
+    if (!q) return;
+    expect(q).toContain('universe=eq.index');
+    expect(q).toContain('select=symbol,name,sector,cap_tier,price,change_percent,market_cap,insider,institutional,congress,squeeze,score,classification,insider_pending,squeeze_loaded,scanned_at');
+    expect(q).not.toContain('leg');
+    expect(q).not.toContain('universe,');
+    expect(q).toContain('symbol=in.');
+    const symbols = SP500_MEMBERS.map(m => m.symbol);
+    expect(q).toContain(`symbol=in.(${symbols.join(',')})`);
+  });
+
+  it('returns ndx100 query with trimmed select and symbol filter', () => {
+    const q = serverScanQueryForMode('ndx100');
+    expect(q).toBeTruthy();
+    if (!q) return;
+    expect(q).toContain('universe=eq.index');
+    expect(q).toContain('select=symbol,name,sector,cap_tier,price,change_percent,market_cap,insider,institutional,congress,squeeze,score,classification,insider_pending,squeeze_loaded,scanned_at');
+    expect(q).not.toContain('leg');
+    expect(q).not.toContain('universe,');
+    expect(q).toContain('symbol=in.');
+    const symbols = NASDAQ100_MEMBERS.map(m => m.symbol);
+    expect(q).toContain(`symbol=in.(${symbols.join(',')})`);
+  });
+});
+
