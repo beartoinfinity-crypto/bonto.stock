@@ -399,10 +399,15 @@ export function useTradeLedger() {
 
   const load = useCallback(() => setLedger(loadLedger()), []);
 
-  // Reload after a cloud boot hydration (`pullAll`) merges other machines'
-  // ledger days into localStorage — keeps multi-machine time line fresh.
+  // Refresh after a cloud boot hydration (`pullAll`). Re-pull the CLOUD copy
+  // rather than trusting localStorage: the ledger mirror can be stale or
+  // missing when it is too large for the origin's storage quota.
   useEffect(() => {
-    const onSync = () => load();
+    const onSync = () => {
+      pullLedger()
+        .then(cloud => { if (cloud) setLedger(cloud); })
+        .catch(() => load());
+    };
     window.addEventListener('stockpulse-sync', onSync);
     return () => window.removeEventListener('stockpulse-sync', onSync);
   }, [load]);
@@ -479,14 +484,32 @@ export function useTradeLedger() {
   // Viewer pull on mount: adopt the cloud ledger so a fresh browser or stale
   // localStorage immediately shows the server-authoritative state. Falls back
   // silently to the local copy when the server is unreachable.
+  //
+  // Also re-pull when the tab regains focus (throttled): a tab left open for
+  // days otherwise keeps whatever snapshot it mounted with.
   useEffect(() => {
     let cancelled = false;
-    pullLedger().then(cloud => {
-      if (!cancelled && cloud) {
-        setLedger(cloud);
-      }
-    }).catch(() => { /* viewer fallback: keep local copy */ });
-    return () => { cancelled = true; };
+    let lastPull = 0;
+    const pull = (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastPull < 60_000) return;
+      lastPull = now;
+      pullLedger().then(cloud => {
+        if (!cancelled && cloud) {
+          setLedger(cloud);
+        }
+      }).catch(() => { /* viewer fallback: keep local copy */ });
+    };
+    pull(true);
+    const onFocus = () => pull();
+    const onVisible = () => { if (document.visibilityState === 'visible') pull(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   return useMemo(

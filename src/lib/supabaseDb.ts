@@ -154,14 +154,32 @@ async function upsertRows(c: SupabaseClient, rows: KVRow[]): Promise<void> {
   }
 }
 
-function writeLocal(key: string, value: string): void {
+/**
+ * localStorage is a read cache, not the source of truth. A full ledger can be
+ * several MB — writing it can exceed the origin's quota (QuotaExceededError)
+ * or fail in private mode. Never let that abort a successful cloud pull: the
+ * caller still gets the fresh data, and SQLite keeps the archive when the key
+ * is tracked there.
+ */
+function safeLocalSet(key: string, value: string): boolean {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (e) {
+    console.warn('[SupabaseSync] local mirror write failed (quota?):', key, e);
+    return false;
+  }
+}
+
+function writeLocal(key: string, value: string): boolean {
   // Mirror storage.setItem's dual-write without importing it (cycle-safe)
-  localStorage.setItem(key, value);
+  const mirrored = safeLocalSet(key, value);
   if ((CONFIG_KEYS as readonly string[]).includes(key)) {
     setConfig(key, value).catch(() => {});
   } else if ((DOCUMENT_KEYS as readonly string[]).includes(key)) {
     setDocument(key, value).catch(() => {});
   }
+  return mirrored;
 }
 
 function safeParse<T = unknown>(value: string | null): T | null {

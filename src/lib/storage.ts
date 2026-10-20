@@ -25,8 +25,15 @@ export function getItem(key: string): string | null {
 }
 
 export function setItem(key: string, value: string): void {
-  // 0. Sync read cache (always)
-  localStorage.setItem(key, value);
+  // 0. Sync read cache (always, best-effort). Large documents (e.g. the trade
+  //    ledger, several MB) can exceed the localStorage quota — a failed cache
+  //    write must never block the cloud/SQLite write below or the caller's
+  //    in-memory state update.
+  try {
+    localStorage.setItem(key, value);
+  } catch (e) {
+    console.warn('[Storage] localStorage write failed (quota?):', key, e);
+  }
 
   const isConfig = CONFIG_KEYS.includes(key as typeof CONFIG_KEYS[number]);
   const isDocument = DOCUMENT_KEYS.includes(key as typeof DOCUMENT_KEYS[number]);

@@ -88,6 +88,29 @@ describe('pullLedger edge cases', () => {
     expect(localStorage.getItem('stockpulse_trade_ledger')).not.toContain('MDB');
   });
 
+  it('still returns the cloud copy when the local mirror write exceeds quota', async () => {
+    // Regression: a full ledger can be several MB. When localStorage.setItem
+    // throws QuotaExceededError the pull must still deliver the cloud data —
+    // otherwise /ledger silently freezes on an old local snapshot.
+    const original = Storage.prototype.setItem;
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage, key: string, value: string,
+    ) {
+      if (key === 'stockpulse_trade_ledger') {
+        throw new DOMException('quota', 'QuotaExceededError');
+      }
+      return original.call(this, key, value);
+    });
+    try {
+      const result = await pullLedger();
+      expect(result).not.toBeNull();
+      expect(result!.trades[0].symbol).toBe('AAPL');
+      expect(localStorage.getItem('stockpulse_trade_ledger')).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('returns null when both local and cloud are absent', async () => {
     mockFetch.mockImplementation(async (url: string) => {
       if (url.includes('/api/sync-config')) return resOf(TEST_CFG);
