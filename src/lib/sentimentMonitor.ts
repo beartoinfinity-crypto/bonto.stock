@@ -23,6 +23,14 @@ export interface SentimentResult {
   synthesis: string;
 }
 
+function ordinal(value: number): string {
+  const n = Math.round(value);
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${n}th`;
+  const suffix = ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th';
+  return `${n}${suffix}`;
+}
+
 export function calculateMarketSentiment(
   data: StockData[],
   condition: MarketCondition
@@ -100,7 +108,7 @@ export function calculateMarketSentiment(
     {
       name: 'Retail Net Buying',
       value: retailRaw,
-      displayValue: retailRaw.toFixed(0) + 'th %ile',
+      displayValue: ordinal(retailRaw) + ' percentile',
       warningThreshold: '> 85th percentile',
       isWarning: retailWarning,
       description: 'Daily retail fund flow percentile',
