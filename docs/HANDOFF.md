@@ -1,7 +1,7 @@
 # Handoff Document — Smart Money Screener & Scheduled Scan
 
 > **Last updated:** 2026-10-22  
-> **Commit:** `e9990f3` (pushed to `main`, Vercel auto-deployed)  
+> **Commit:** `aaf1d71` (pushed to `main`, Vercel auto-deployed)  
 > **Test suite:** 353 tests / 27 files passing  
 > **Typecheck:** no new errors (`tsc --noEmit` still reports ~30 pre-existing errors in unrelated files)
 
@@ -133,7 +133,7 @@ Same pattern for `LiquidityMonitor.tsx`: hero verdict Abundant / Normal / Tighte
 
 Headless verification (5 buy / 2 sell, overbought RSI): old verdict `STRONG BUY` from 7 signals over 6 strategies; new verdict `HOLD`, `NET SCORE -16`, 7 signals over 7 strategies, meter 2 red segments left of centre, neutral successes labelled as passing rows. Build: `dist/assets/index-6rrgnVJN.js` (1,893.71 kB) + `index-CjT3JW9i.css` (83.74 kB).
 
-### 2.12 Options Wheel Moved to `/flow`
+### 2.12 Options Wheel Moved to `/flow` (`aaf1d71`)
 
 `OptionsWheel` was the last options-strategy card on the home page, sitting three cards below the tape it depends on. It now lives on the Options Flow page, immediately after the full chain and before the research notes (`OptionsFlow.tsx`), and the home-page mount plus its `Index.tsx` import are gone.
 
@@ -143,6 +143,10 @@ Headless verification (5 buy / 2 sell, overbought RSI): old verdict `STRONG BUY`
 - **Loading** — a spinner card renders while history loads so the section does not pop out of the layout.
 
 `/flow` is unchanged otherwise: same tape, ratios, OI walls, max pain, expected move, unusual activity and chain table. Home page left column now ends at `ForecastSimulator`.
+
+Headless verification (`/flow`, AAPL auto-loaded): wheel renders after the chain card at 982 px tall on a 3201 px page, history spinner resolved without an error toast. Build: `dist/assets/index-Dy3wrhA0.js` (1,894.03 kB) + `index-CjT3JW9i.css` (83.74 kB); 353 tests pass.
+
+Known inconsistency in the panel itself (pre-existing, untouched by the move): the suitability hero reads `EXCELLENT · 95/100` while the Alpaca checklist reads `ACCEPTABLE · 5/7`, because affordability ($33.1K needed, $20K cash) and concentration (166% of cash per contract) fail the checklist but barely move the suitability score.
 
 ---
 
