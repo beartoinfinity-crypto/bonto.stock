@@ -1,7 +1,7 @@
 # Handoff Document — Smart Money Screener & Scheduled Scan
 
 > **Last updated:** 2026-10-22  
-> **Commit:** `9831da6` (pushed to `main`, Vercel auto-deployed); Trading Signals panel uncommitted  
+> **Commit:** `e9990f3` (pushed to `main`, Vercel auto-deployed)  
 > **Test suite:** 353 tests / 27 files passing  
 > **Typecheck:** no new errors (`tsc --noEmit` still reports ~30 pre-existing errors in unrelated files)
 
@@ -88,7 +88,7 @@ Bumped insider cache key so pre-fix empty buys are not reused.
 - Curated stays local-only (GME + RIVN not in the 501 union)
 - 5 new tests in `serverScanForMode` describe block (smartMoney.test.ts: 45 total)
 
-### 2.7 Screener Discoverability (unreleased)
+### 2.7 Screener Discoverability (`48461c7`)
 
 The 501-symbol union made the highest-scoring names hard to find; the table is now sortable and self-describing:
 
@@ -101,7 +101,7 @@ The 501-symbol union made the highest-scoring names hard to find; the table is n
 
 Verified in headless Chrome on the 501 universe: score sort → LEN first (70, Strong, insider $595.29M); Insider $ desc → RSG ($1.12B); asc → Agilent (`—`).
 
-### 2.8 Social Sentiment: Evidence-First Card (unreleased)
+### 2.8 Social Sentiment: Evidence-First Card (`48461c7`)
 
 The home-page sentiment card previously read like a template (generic prose + percentages with no provenance). It now shows the evidence behind the score:
 
@@ -120,7 +120,7 @@ The home-page sentiment card previously read like a template (generic prose + pe
 
 Same pattern for `LiquidityMonitor.tsx`: hero verdict Abundant / Normal / Tightening / Critical with `0 of 4 flagged`, 0–100 score, 4-segment meter; rows sorted flagged-first (`FLAG` chip, `line-clamp-2` reason with tooltip), passing rows truncate; duplicated summary/advice blocks removed. Card height 904 → 622 px. Enumerated labels use `t()`; counts/legend stay English (LiquidityMonitor precedent).
 
-### 2.11 Trading Signals: Verdict + De-duplicated Strategies (unreleased)
+### 2.11 Trading Signals: Verdict + De-duplicated Strategies (`e9990f3`)
 
 `generateSignals` (`stockData.ts`) and `SignalPanel.tsx` fixed six defects:
 
