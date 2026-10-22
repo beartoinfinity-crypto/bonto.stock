@@ -243,11 +243,13 @@ New `/ledger` page ("Simulated Traders"). A cast of seven named personas, each b
 - **Validation**: `scripts/validate-ledger.cjs` audits fills against cloud bars (every fill inside its session's high–low, exact official close, own-session bar exists, no duplicate ids, qty×price==value, snapshot completeness) — exit 1 + violation details on failure. Run after each simulated day: `node scripts/validate-ledger.cjs`.
 - Pure account math (`runDayForPerson`) is unit-tested (`tradeSimulator.test.ts`); signal sourcing lives in the hook.
 
-### `src/lib/stockData.ts` — Analytics Engine (884 lines)
+### `src/lib/stockData.ts` — Analytics Engine (917 lines)
 
 **No AI/ML.** Rule-based signals, template narratives.
 
-8 strategies in `generateSignals()`: MA Crossover, RSI Momentum, MACD Momentum, Bollinger Position, Volume, Candle Patterns, S/R Break, Multi-TF RSI. Each returns `Signal` with direction, strength, confidence (0-100), entry/stop/target.
+8 strategies in `generateSignals()`: MA Crossover, RSI Momentum, MACD Momentum, Bollinger Position, Volume, Candle Patterns, S/R Break, Multi-TF RSI — **at most one signal per strategy** (an `emitted` set with an `emit()` helper drops duplicate pushes). Each returns `Signal` with direction, strength, confidence (0-100), entry/stop/target.
+
+Signal quality guards: SMA200 claims only when `sma200` exists (else trend text omits the 200-SMA clause); MACD thresholds are percentages of price (`histPct = histogram / price`) rather than absolute values; Multi-TF RSI reasons must agree with its direction (rising below 50 → early-recovery hold, falling above 50 → fading-vs-exhausted distinction); Bollinger emits a squeeze hold when bandwidth is narrowing with no breakout yet.
 
 Additional technical indicators exported from `stockData.ts`:
 - `calculateKDJ(rows, period, signalPeriod)` → `{ K[], D[], J[] }` — Stochastic Oscillator with K/D/J lines
@@ -315,10 +317,10 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | `AlertPanel.tsx` | 339 | Price alert manager. |
 | `MultiTimeframeRSI.tsx` | 355 | RSI(7/14/21) confluence display. |
 | `KDJIndicator.tsx` | 650 | KDJ indicator with SMA20/SMA50 dual-axis chart, KDJ + SMA crossover signal detection, Golden/Death Cross detection, zone analysis (overbought/oversold), and combined KDJ+SMA alignment signals. |
-| `LiquidityMonitor.tsx` | 133 | Bid/ask depth via `deriveOrderBook()`. |
+| `LiquidityMonitor.tsx` | 160 | Bid/ask depth via `deriveOrderBook()`. Verdict hero (Abundant/Normal/Tightening/Critical, "n of 4 flagged", 0–100 score, 4-segment meter) over flagged-first rows with `FLAG` chips, `line-clamp-2` reasons and a single footnote. Enumerated labels via `t()`; counts/legend stay English. |
 | `StockSearch.tsx` | 245 | Autocomplete search, 300ms debounce. |
 | `StockMetrics.tsx` | 100 | P/E, market cap, 52-week range, volume. |
-| `SignalPanel.tsx` | 180 | 8 strategy signals with confidence bars. |
+| `SignalPanel.tsx` | 301 | Trading Signals card for the 8 strategies. Verdict hero from `net = (buy − sell) / totalConfidence` (STRONG BUY/BUY/HOLD/SELL/STRONG SELL, `±20`/`±60` thresholds) with a 20-segment bipolar meter, one-line advice, and Strategies Aligned / Avg Confidence / Buy–Sell stats. Below: `n flagged · m neutral` header and a 400px scroll of signals sorted flagged-first — `FLAG`/`STRONG` chips, 2-line reason with tooltip (passing rows truncate), and `E:/SL:/TP:` levels. Stats are `useMemo` copies (no prop `signals.sort()`). Verdict/stats labels via `t()`; counts, advice, empty state and footnote stay hardcoded English. |
 | `PriceChart.tsx` | 352 | Candlestick + volume, canvas rendering. |
 | `ForecastSimulator.tsx` | 486 | Monte Carlo paths + percentile bands. |
 | `StockNews.tsx` | 259 | Aggregated news headlines. |

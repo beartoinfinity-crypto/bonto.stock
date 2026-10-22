@@ -217,6 +217,13 @@ const translations = {
     liquidityIndicators: 'Liquidity Indicators',
     liquidityDisclaimer: 'Estimates derived from price action — not real macro data. Use as a directional signal only.',
 
+    // ---- SignalPanel ----
+    netScore: 'Net Score',
+    signals: 'Signals',
+    strategiesAligned: 'Strategies Aligned',
+    avgConfidence: 'Avg Confidence',
+    buySell: 'Buy / Sell',
+
     // ---- PutCallRatio ----
     putCallRatio: 'Put/Call Ratio',
     puts: 'Puts',
@@ -542,6 +549,13 @@ const translations = {
     liquidityScore: '流動性分數',
     liquidityIndicators: '流動性指標',
     liquidityDisclaimer: '基於價格走勢推算的估計值，並非實際宏觀數據。僅供方向性參考。',
+
+    // ---- SignalPanel ----
+    netScore: '淨評分',
+    signals: '訊號',
+    strategiesAligned: '策略一致',
+    avgConfidence: '平均信心',
+    buySell: '買入 / 賣出',
 
     // ---- PutCallRatio ----
     putCallRatio: '認沽/認購比率',

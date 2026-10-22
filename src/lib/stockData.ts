@@ -357,6 +357,15 @@ export function generateSignals(data: StockData[]): Signal[] {
 
   const pctAbove = (sma: number | undefined) => sma ? ((currentPrice - sma) / sma) * 100 : 0;
 
+  // One signal per strategy: the first (strongest-context) rule that fires wins,
+  // so a strategy cannot vote twice in the confidence-weighted tally.
+  const emitted = new Set<string>();
+  const emit = (s: Signal) => {
+    if (emitted.has(s.strategy)) return;
+    emitted.add(s.strategy);
+    signals.push(s);
+  };
+
   // === 1. MA TREND & CROSSOVER ===
   if (sma20[latestIdx] && sma50[latestIdx]) {
     const sma20Val = sma20[latestIdx]!;
@@ -368,16 +377,16 @@ export function generateSignals(data: StockData[]): Signal[] {
 
     if (prevSma20 && prevSma50) {
       if (sma20Val > sma50Val && prevSma20 <= prevSma50) {
-        signals.push({
+        emit({
           type: 'buy', strength: 'strong', strategy: 'MA Crossover',
-          reason: `Golden Cross: 20-SMA crossed above 50-SMA${above200 ? ' (above 200-SMA)' : ''}`,
-          date: latest.date, confidence: above200 ? 82 : 75,
+          reason: `Golden Cross: 20-SMA crossed above 50-SMA${above200 === true ? ' (price above 200-SMA)' : above200 === false ? ' (price still below 200-SMA)' : ''}`,
+          date: latest.date, confidence: above200 === true ? 82 : 75,
           entryLevel: currentPrice, stopLoss: sma50Val, takeProfit: currentPrice * 1.08,
         });
       } else if (sma20Val < sma50Val && prevSma20 >= prevSma50) {
-        signals.push({
+        emit({
           type: 'sell', strength: 'strong', strategy: 'MA Crossover',
-          reason: `Death Cross: 20-SMA crossed below 50-SMA${above200 === false ? ' (below 200-SMA)' : ''}`,
+          reason: `Death Cross: 20-SMA crossed below 50-SMA${above200 === false ? ' (price below 200-SMA)' : above200 === true ? ' (price still above 200-SMA)' : ''}`,
           date: latest.date, confidence: above200 === false ? 82 : 75,
           entryLevel: currentPrice, stopLoss: sma50Val, takeProfit: currentPrice * 0.92,
         });
@@ -385,18 +394,18 @@ export function generateSignals(data: StockData[]): Signal[] {
     }
 
     if (sma20Val > sma50Val && (above200 === true || above200 === undefined)) {
-      const conf = 50 + Math.min(20, Math.abs(dist20) * 2) + (above200 ? 10 : 0);
-      signals.push({
+      const conf = 50 + Math.min(20, Math.abs(dist20) * 2) + (above200 === true ? 10 : 0);
+      emit({
         type: 'buy', strength: dist20 > 2 ? 'moderate' : 'weak', strategy: 'MA Crossover',
-        reason: `Uptrend: price ${dist20 > 0 ? '+' : ''}${dist20.toFixed(1)}% vs 20-SMA, 20 > 50 > 200`,
+        reason: `Uptrend: price ${dist20 > 0 ? '+' : ''}${dist20.toFixed(1)}% vs 20-SMA, 20-SMA above 50-SMA${above200 === true ? ' and price above 200-SMA' : ''}`,
         date: latest.date, confidence: Math.min(70, conf),
         entryLevel: currentPrice, stopLoss: sma50Val, takeProfit: currentPrice * 1.06,
       });
     } else if (sma20Val < sma50Val && (above200 === false || above200 === undefined)) {
       const conf = 50 + Math.min(20, Math.abs(dist20) * 2) + (above200 === false ? 10 : 0);
-      signals.push({
+      emit({
         type: 'sell', strength: dist20 < -2 ? 'moderate' : 'weak', strategy: 'MA Crossover',
-        reason: `Downtrend: price ${dist20.toFixed(1)}% vs 20-SMA, 20 < 50 < 200`,
+        reason: `Downtrend: price ${dist20.toFixed(1)}% vs 20-SMA, 20-SMA below 50-SMA${above200 === false ? ' and price below 200-SMA' : ''}`,
         date: latest.date, confidence: Math.min(70, conf),
         entryLevel: currentPrice, stopLoss: sma50Val, takeProfit: currentPrice * 0.94,
       });
@@ -410,35 +419,35 @@ export function generateSignals(data: StockData[]): Signal[] {
     const rsiDelta = rsiVal - prevRsi;
 
     if (rsiVal < 30) {
-      signals.push({
+      emit({
         type: 'buy', strength: rsiVal < 20 ? 'strong' : 'moderate', strategy: 'RSI',
         reason: `Oversold: RSI ${rsiVal.toFixed(1)} — mean reversion expected`,
         date: latest.date, confidence: rsiVal < 20 ? 82 : 72,
         entryLevel: currentPrice, stopLoss: currentPrice * 0.95, takeProfit: currentPrice * 1.07,
       });
     } else if (rsiVal > 70) {
-      signals.push({
+      emit({
         type: 'sell', strength: rsiVal > 80 ? 'strong' : 'moderate', strategy: 'RSI',
         reason: `Overbought: RSI ${rsiVal.toFixed(1)} — pullback risk elevated`,
         date: latest.date, confidence: rsiVal > 80 ? 82 : 72,
         entryLevel: currentPrice, stopLoss: currentPrice * 1.05, takeProfit: currentPrice * 0.93,
       });
     } else if (rsiVal < 45 && rsiDelta > 2) {
-      signals.push({
+      emit({
         type: 'buy', strength: 'moderate', strategy: 'RSI',
         reason: `RSI momentum shift: ${prevRsi.toFixed(1)} -> ${rsiVal.toFixed(1)} (rising from below 45)`,
         date: latest.date, confidence: 58,
         entryLevel: currentPrice, stopLoss: currentPrice * 0.96, takeProfit: currentPrice * 1.05,
       });
     } else if (rsiVal > 55 && rsiDelta < -2) {
-      signals.push({
+      emit({
         type: 'sell', strength: 'moderate', strategy: 'RSI',
         reason: `RSI momentum shift: ${prevRsi.toFixed(1)} -> ${rsiVal.toFixed(1)} (falling from above 55)`,
         date: latest.date, confidence: 58,
         entryLevel: currentPrice, stopLoss: currentPrice * 1.04, takeProfit: currentPrice * 0.95,
       });
     } else {
-      signals.push({
+      emit({
         type: 'hold', strength: 'weak', strategy: 'RSI',
         reason: `RSI neutral: ${rsiVal.toFixed(1)} — no extreme signal`,
         date: latest.date, confidence: 35,
@@ -454,17 +463,21 @@ export function generateSignals(data: StockData[]): Signal[] {
     const prevSig = signal[latestIdx - 1];
     const histogram = macdVal - sigVal;
     const prevHistogram = prevMacd !== undefined && prevSig !== undefined ? prevMacd - prevSig : 0;
+    // Express the histogram as a percentage of price so the threshold means the
+    // same thing on a $5 stock as on a $500 one.
+    const histPct = (histogram / currentPrice) * 100;
+    const prevHistPct = (prevHistogram / currentPrice) * 100;
 
     if (prevMacd !== undefined && prevSig !== undefined) {
       if (macdVal > sigVal && prevMacd <= prevSig) {
-        signals.push({
+        emit({
           type: 'buy', strength: macdVal > 0 ? 'strong' : 'moderate', strategy: 'MACD',
           reason: `MACD bullish crossover${macdVal > 0 ? ' above zero' : ''}`,
           date: latest.date, confidence: macdVal > 0 ? 74 : 62,
           entryLevel: currentPrice, stopLoss: currentPrice * 0.96, takeProfit: currentPrice * 1.05,
         });
       } else if (macdVal < sigVal && prevMacd >= prevSig) {
-        signals.push({
+        emit({
           type: 'sell', strength: macdVal < 0 ? 'strong' : 'moderate', strategy: 'MACD',
           reason: `MACD bearish crossover${macdVal < 0 ? ' below zero' : ''}`,
           date: latest.date, confidence: macdVal < 0 ? 74 : 62,
@@ -473,22 +486,22 @@ export function generateSignals(data: StockData[]): Signal[] {
       }
     }
 
-    if (histogram > 0 && histogram > prevHistogram) {
-      signals.push({
-        type: 'buy', strength: histogram > 0.5 ? 'moderate' : 'weak', strategy: 'MACD',
-        reason: `MACD histogram expanding positive (${histogram.toFixed(3)}) — bullish momentum building`,
+    if (histPct > 0 && histPct > prevHistPct) {
+      emit({
+        type: 'buy', strength: Math.abs(histPct) > 0.15 ? 'moderate' : 'weak', strategy: 'MACD',
+        reason: `MACD histogram expanding positive (${histPct >= 0 ? '+' : ''}${histPct.toFixed(2)}% of price) — bullish momentum building`,
         date: latest.date, confidence: 52,
       });
-    } else if (histogram < 0 && histogram < prevHistogram) {
-      signals.push({
-        type: 'sell', strength: histogram < -0.5 ? 'moderate' : 'weak', strategy: 'MACD',
-        reason: `MACD histogram expanding negative (${histogram.toFixed(3)}) — bearish momentum building`,
+    } else if (histPct < 0 && histPct < prevHistPct) {
+      emit({
+        type: 'sell', strength: Math.abs(histPct) > 0.15 ? 'moderate' : 'weak', strategy: 'MACD',
+        reason: `MACD histogram expanding negative (${histPct.toFixed(2)}% of price) — bearish momentum building`,
         date: latest.date, confidence: 52,
       });
-    } else if (Math.abs(histogram) < 0.05) {
-      signals.push({
+    } else if (Math.abs(histPct) < 0.02) {
+      emit({
         type: 'hold', strength: 'weak', strategy: 'MACD',
-        reason: `MACD near zero — no directional momentum`,
+        reason: `MACD near zero (${histPct >= 0 ? '+' : ''}${histPct.toFixed(2)}% of price) — no directional momentum`,
         date: latest.date, confidence: 35,
       });
     }
@@ -501,39 +514,41 @@ export function generateSignals(data: StockData[]): Signal[] {
       ? ((upper[latestIdx - 1]! - lower[latestIdx - 1]!) / middle[latestIdx - 1]!) * 100 : bw;
     const pctFromMiddle = ((currentPrice - middle[latestIdx]!) / middle[latestIdx]!) * 100;
 
-    if (bw < 8 && bw < prevBw) {
-      signals.push({
-        type: 'hold', strength: 'moderate', strategy: 'Bollinger',
-        reason: `Bollinger squeeze (bandwidth ${bw.toFixed(1)}%) — breakout imminent`,
-        date: latest.date, confidence: 68,
-      });
-    }
-
     if (currentPrice > upper[latestIdx]!) {
-      signals.push({
+      emit({
         type: 'buy', strength: 'moderate', strategy: 'Bollinger',
         reason: `Price above upper band (${upper[latestIdx]!.toFixed(2)}) — bullish breakout`,
         date: latest.date, confidence: 62,
         entryLevel: currentPrice, stopLoss: middle[latestIdx]!, takeProfit: currentPrice * 1.05,
       });
     } else if (currentPrice < lower[latestIdx]!) {
-      signals.push({
+      emit({
         type: 'sell', strength: 'moderate', strategy: 'Bollinger',
         reason: `Price below lower band (${lower[latestIdx]!.toFixed(2)}) — bearish breakdown`,
         date: latest.date, confidence: 62,
         entryLevel: currentPrice, stopLoss: middle[latestIdx]!, takeProfit: currentPrice * 0.95,
       });
     } else if (pctFromMiddle > 1) {
-      signals.push({
+      emit({
         type: 'buy', strength: 'weak', strategy: 'Bollinger',
         reason: `Price in upper half of Bollinger (+${pctFromMiddle.toFixed(1)}% from mid) — bullish bias`,
         date: latest.date, confidence: 45,
       });
     } else if (pctFromMiddle < -1) {
-      signals.push({
+      emit({
         type: 'sell', strength: 'weak', strategy: 'Bollinger',
         reason: `Price in lower half of Bollinger (${pctFromMiddle.toFixed(1)}% from mid) — bearish bias`,
         date: latest.date, confidence: 45,
+      });
+    }
+
+    // Squeeze is informational, so it only reports when no directional
+    // Bollinger rule fired first.
+    if (bw < 8 && bw < prevBw) {
+      emit({
+        type: 'hold', strength: 'moderate', strategy: 'Bollinger',
+        reason: `Bollinger squeeze (bandwidth ${bw.toFixed(1)}%, still narrowing) — breakout conditions building`,
+        date: latest.date, confidence: 68,
       });
     }
   }
@@ -546,7 +561,7 @@ export function generateSignals(data: StockData[]): Signal[] {
     const bullish = currentPrice > prev.close;
 
     if (volRatio > 2.5) {
-      signals.push({
+      emit({
         type: bullish ? 'buy' : 'sell',
         strength: volRatio > 3.5 ? 'strong' : 'moderate',
         strategy: 'Volume',
@@ -554,7 +569,7 @@ export function generateSignals(data: StockData[]): Signal[] {
         date: latest.date, confidence: volRatio > 3.5 ? 72 : 58,
       });
     } else if (volRatio > 1.5) {
-      signals.push({
+      emit({
         type: bullish ? 'buy' : 'sell',
         strength: 'weak',
         strategy: 'Volume',
@@ -562,7 +577,7 @@ export function generateSignals(data: StockData[]): Signal[] {
         date: latest.date, confidence: 48,
       });
     } else if (volRatio < 0.5) {
-      signals.push({
+      emit({
         type: 'hold', strength: 'weak', strategy: 'Volume',
         reason: `Low volume (${volRatio.toFixed(1)}x avg) — no conviction`,
         date: latest.date, confidence: 35,
@@ -581,7 +596,7 @@ export function generateSignals(data: StockData[]): Signal[] {
     const prevGreen = prev.close > prev.open;
 
     if (!prevGreen && isGreen && latest.open <= prev.close && latest.close >= prev.open && body > prevBody) {
-      signals.push({
+      emit({
         type: 'buy', strength: 'moderate', strategy: 'Candle',
         reason: 'Bullish engulfing — buyers overwhelmed sellers',
         date: latest.date, confidence: 68,
@@ -589,7 +604,7 @@ export function generateSignals(data: StockData[]): Signal[] {
       });
     }
     if (prevGreen && !isGreen && latest.open >= prev.close && latest.close <= prev.open && body > prevBody) {
-      signals.push({
+      emit({
         type: 'sell', strength: 'moderate', strategy: 'Candle',
         reason: 'Bearish engulfing — sellers overwhelmed buyers',
         date: latest.date, confidence: 68,
@@ -597,7 +612,7 @@ export function generateSignals(data: StockData[]): Signal[] {
       });
     }
     if (lowerWick > body * 2 && upperWick < body * 0.5 && isGreen) {
-      signals.push({
+      emit({
         type: 'buy', strength: 'moderate', strategy: 'Candle',
         reason: 'Hammer — buyers rejected lower prices',
         date: latest.date, confidence: 62,
@@ -605,7 +620,7 @@ export function generateSignals(data: StockData[]): Signal[] {
       });
     }
     if (upperWick > body * 2 && lowerWick < body * 0.5 && !isGreen) {
-      signals.push({
+      emit({
         type: 'sell', strength: 'moderate', strategy: 'Candle',
         reason: 'Shooting star — sellers rejected higher prices',
         date: latest.date, confidence: 62,
@@ -615,13 +630,13 @@ export function generateSignals(data: StockData[]): Signal[] {
     if (range > 0) {
       const closePosition = (latest.close - latest.low) / range;
       if (closePosition > 0.8 && isGreen) {
-        signals.push({
+        emit({
           type: 'buy', strength: 'weak', strategy: 'Candle',
           reason: `Strong close at ${(closePosition * 100).toFixed(0)}% of range — buyers in control`,
           date: latest.date, confidence: 48,
         });
       } else if (closePosition < 0.2 && !isGreen) {
-        signals.push({
+        emit({
           type: 'sell', strength: 'weak', strategy: 'Candle',
           reason: `Weak close at ${(closePosition * 100).toFixed(0)}% of range — sellers in control`,
           date: latest.date, confidence: 48,
@@ -639,27 +654,27 @@ export function generateSignals(data: StockData[]): Signal[] {
     const distToSup = ((currentPrice - support) / currentPrice) * 100;
 
     if (currentPrice > resistance * 0.995) {
-      signals.push({
+      emit({
         type: 'buy', strength: 'strong', strategy: 'S/R Break',
         reason: `Testing 50-day high (${resistance.toFixed(2)}) — ${distToRes.toFixed(1)}% away`,
         date: latest.date, confidence: 70,
         entryLevel: currentPrice, stopLoss: resistance * 0.98, takeProfit: currentPrice * 1.06,
       });
     } else if (currentPrice < support * 1.005) {
-      signals.push({
+      emit({
         type: 'sell', strength: 'strong', strategy: 'S/R Break',
         reason: `Testing 50-day low (${support.toFixed(2)}) — ${distToSup.toFixed(1)}% away`,
         date: latest.date, confidence: 70,
         entryLevel: currentPrice, stopLoss: support * 1.02, takeProfit: currentPrice * 0.94,
       });
     } else if (distToRes < 3) {
-      signals.push({
+      emit({
         type: 'buy', strength: 'weak', strategy: 'S/R Break',
         reason: `Approaching resistance (${resistance.toFixed(2)}) — ${distToRes.toFixed(1)}% away`,
         date: latest.date, confidence: 45,
       });
     } else if (distToSup < 3) {
-      signals.push({
+      emit({
         type: 'sell', strength: 'weak', strategy: 'S/R Break',
         reason: `Approaching support (${support.toFixed(2)}) — ${distToSup.toFixed(1)}% away`,
         date: latest.date, confidence: 45,
@@ -675,33 +690,52 @@ export function generateSignals(data: StockData[]): Signal[] {
     const r7 = rsi7[latestIdx] ?? 50;
     const r14 = rsi14[latestIdx] ?? 50;
     const r21 = rsi21[latestIdx] ?? 50;
+    const prevR7 = rsi7[latestIdx - 1] ?? r7;
+    const r7Rising = r7 > prevR7;
+    const r7Falling = r7 < prevR7;
 
     if (r7 < 30 && r14 < 35 && r21 < 40) {
-      signals.push({
+      emit({
         type: 'buy', strength: 'strong', strategy: 'Multi-TF RSI',
         reason: `All RSI timeframes oversold (7: ${r7.toFixed(0)}, 14: ${r14.toFixed(0)}, 21: ${r21.toFixed(0)})`,
         date: latest.date, confidence: 80,
         entryLevel: currentPrice, stopLoss: currentPrice * 0.95, takeProfit: currentPrice * 1.08,
       });
     } else if (r7 > 70 && r14 > 65 && r21 > 60) {
-      signals.push({
+      emit({
         type: 'sell', strength: 'strong', strategy: 'Multi-TF RSI',
         reason: `All RSI timeframes elevated (7: ${r7.toFixed(0)}, 14: ${r14.toFixed(0)}, 21: ${r21.toFixed(0)})`,
         date: latest.date, confidence: 80,
         entryLevel: currentPrice, stopLoss: currentPrice * 1.05, takeProfit: currentPrice * 0.92,
       });
     } else if (r7 < 45 && r14 < 50 && r21 < 50) {
-      signals.push({
-        type: 'buy', strength: 'moderate', strategy: 'Multi-TF RSI',
-        reason: `All RSI timeframes below 50 — bearish but improving (7: ${r7.toFixed(0)}, 14: ${r14.toFixed(0)})`,
-        date: latest.date, confidence: 55,
-      });
+      if (r7Rising) {
+        emit({
+          type: 'buy', strength: 'moderate', strategy: 'Multi-TF RSI',
+          reason: `All RSI timeframes below 50 but 7-RSI turning up (${prevR7.toFixed(0)} → ${r7.toFixed(0)}) — early recovery`,
+          date: latest.date, confidence: 55,
+        });
+      } else {
+        emit({
+          type: 'hold', strength: 'weak', strategy: 'Multi-TF RSI',
+          reason: `All RSI timeframes below 50 (7: ${r7.toFixed(0)}, 14: ${r14.toFixed(0)}, 21: ${r21.toFixed(0)}) — weak momentum, no turn yet`,
+          date: latest.date, confidence: 35,
+        });
+      }
     } else if (r7 > 55 && r14 > 50 && r21 > 50) {
-      signals.push({
-        type: 'sell', strength: 'moderate', strategy: 'Multi-TF RSI',
-        reason: `All RSI timeframes above 50 — bullish but stretched (7: ${r7.toFixed(0)}, 14: ${r14.toFixed(0)})`,
-        date: latest.date, confidence: 55,
-      });
+      if (r7Falling) {
+        emit({
+          type: 'sell', strength: 'moderate', strategy: 'Multi-TF RSI',
+          reason: `All RSI timeframes above 50 but 7-RSI rolling over (${prevR7.toFixed(0)} → ${r7.toFixed(0)}) — momentum fading`,
+          date: latest.date, confidence: 55,
+        });
+      } else {
+        emit({
+          type: 'hold', strength: 'weak', strategy: 'Multi-TF RSI',
+          reason: `All RSI timeframes above 50 (7: ${r7.toFixed(0)}, 14: ${r14.toFixed(0)}, 21: ${r21.toFixed(0)}) — uptrend intact, no exhaustion yet`,
+          date: latest.date, confidence: 35,
+        });
+      }
     }
   }
 

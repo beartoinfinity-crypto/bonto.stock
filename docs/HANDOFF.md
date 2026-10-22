@@ -1,9 +1,9 @@
 # Handoff Document — Smart Money Screener & Scheduled Scan
 
 > **Last updated:** 2026-10-22  
-> **Commit:** `cc60388` (pushed to `main`, Vercel auto-deployed); Smart Money UX + sentiment rework uncommitted  
+> **Commit:** `9831da6` (pushed to `main`, Vercel auto-deployed); Trading Signals panel uncommitted  
 > **Test suite:** 353 tests / 27 files passing  
-> **Typecheck:** clean (`tsc --noEmit` exit 0)
+> **Typecheck:** no new errors (`tsc --noEmit` still reports ~30 pre-existing errors in unrelated files)
 
 ---
 
@@ -111,6 +111,27 @@ The home-page sentiment card previously read like a template (generic prose + pe
 - **No template prose**: `extractTopics` was removed; the summary is short and data-grounded (tone, item count, live-source count, agreement, divergence/attention). "Stand-out item" was dropped because the quotes list sits directly below it.
 - **Source hygiene**: headlines are filtered by `isRelevantToSymbol` (symbol or company name, company suffixes like Inc/Corp stripped) because Yahoo's news feed and CNBC's search return generic market stories. MarketWatch no longer falls back to unrelated headlines; SocialTickers was rewritten to mentions/upvotes after its API stopped returning `social_score` (it previously scored a constant −100%).
 - **Tests**: `src/lib/sentimentAnalysis.test.ts` (13 tests) covers tone mapping, relevance filtering, group scores, divergence, agreement, quote ranking, and `aggregateSources` (attention volume cannot flip direction; attention-only input stays neutral).
+
+### 2.9 Market Sentiment: Verdict-First Panel (`603d67c`)
+
+`SentimentMonitor.tsx` (+ `sentimentMonitor.ts#ordinal`) went from a generic score block to the shared panel pattern: a verdict hero (label, `n of N indicators flagged`, score, segmented meter, one-line advice) over flagged-first rows with `FLAG` chips and 2-line reasons, then a single footnote. Card height 982 → 751 px.
+
+### 2.10 Liquidity Proxy: Verdict-First Panel (`9831da6`)
+
+Same pattern for `LiquidityMonitor.tsx`: hero verdict Abundant / Normal / Tightening / Critical with `0 of 4 flagged`, 0–100 score, 4-segment meter; rows sorted flagged-first (`FLAG` chip, `line-clamp-2` reason with tooltip), passing rows truncate; duplicated summary/advice blocks removed. Card height 904 → 622 px. Enumerated labels use `t()`; counts/legend stay English (LiquidityMonitor precedent).
+
+### 2.11 Trading Signals: Verdict + De-duplicated Strategies (unreleased)
+
+`generateSignals` (`stockData.ts`) and `SignalPanel.tsx` fixed six defects:
+
+- **One signal per strategy** — `emitted` set + `emit()` helper; previously RSI could push twice and inflate "n of N strategies".
+- **SMA200 claim guarded** — the "20 > 50 > 200" wording only appears when `sma200` exists (<200 bars no longer prints a fake 200-SMA).
+- **MACD threshold is relative** — `histPct = histogram / price` (% of price) with an expansion check, instead of an absolute `> 0.5` that was meaningless on high-priced names; holds below 0.02%.
+- **Multi-timeframe RSI reasons agree with direction** — below-50 rising → buy / above-50 falling → sell, otherwise hold, instead of contradicting the action.
+- **Bollinger squeeze holds** while bandwidth keeps narrowing (no premature direction call).
+- **Panel stats are honest** — `net = (buy − sell) / totalConfidence` replaced the direction-blind "Strong Buy" verdict; `avgConfidence` and `strategiesAligned` consider directional signals only. Rows are sorted flagged-first, `signals.sort()` no longer mutates the prop (copies via `useMemo`).
+
+Headless verification (5 buy / 2 sell, overbought RSI): old verdict `STRONG BUY` from 7 signals over 6 strategies; new verdict `HOLD`, `NET SCORE -16`, 7 signals over 7 strategies, meter 2 red segments left of centre, neutral successes labelled as passing rows. Build: `dist/assets/index-6rrgnVJN.js` (1,893.71 kB) + `index-CjT3JW9i.css` (83.74 kB).
 
 ---
 
