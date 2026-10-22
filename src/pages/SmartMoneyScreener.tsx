@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Header } from '@/components/Header';
 import { BackToTop } from '@/components/BackToTop';
 import { ResearchNotes, type ResearchNote } from '@/components/ResearchNotes';
-import { Radar, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import { Radar, RefreshCw, ChevronDown, ChevronUp, ArrowDown, ArrowUp } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import * as storage from '@/lib/storage';
@@ -123,19 +123,33 @@ function saveInsiderBuy(symbol: string, buys: SmartMoneyRow['insider']['buys']):
   } catch { /* ignore */ }
 }
 
-type SortKey = 'score_desc' | 'change_desc' | 'mktcap_desc' | 'short_desc';
+type SortKey = 'score' | 'change' | 'mktcap' | 'short' | 'insider' | 'institutional' | 'congress' | 'price';
+type SortDir = 'asc' | 'desc';
+
+const SORT_LABELS: Record<SortKey, string> = {
+  score: 'signal score',
+  change: 'gainers',
+  mktcap: 'market cap',
+  short: 'short interest',
+  insider: 'insider buying',
+  institutional: '13F managers',
+  congress: 'congress activity',
+  price: 'price',
+};
 
 export default function SmartMoneyScreener() {
   const [mode, setMode] = useState<UniverseMode>('curated');
   const [rows, setRows] = useState<SmartMoneyRow[]>([]);
   const [running, setRunning] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [progress, setProgress] = useState<ScanProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [sector, setSector] = useState('All sectors');
   const [capTier, setCapTier] = useState('All caps');
   const [minScore, setMinScore] = useState(0);
-  const [sort, setSort] = useState<SortKey>('score_desc');
+  const [sort, setSort] = useState<SortKey>('score');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [expanded, setExpanded] = useState(false);
   const [detailSymbol, setDetailSymbol] = useState<string | null>(null);
   const universe = useMemo(() => universeForMode(mode), [mode]);
@@ -149,18 +163,28 @@ export default function SmartMoneyScreener() {
     // this mode's symbols — see SERVER_SCANNED_MODES).
     const cached = loadScan(mode);
     setRows(cached ?? []);
-    if (!SERVER_SCANNED_MODES.has(mode)) return () => { cancelled = true; };
+    setExpanded(false);
+    setDetailSymbol(null);
+    if (!SERVER_SCANNED_MODES.has(mode)) {
+      setSyncing(false);
+      return () => { cancelled = true; };
+    }
     (async () => {
       const q = serverScanQueryForMode(mode);
       if (!q || cancelled) return;
-      const isFresh = !!(cached?.at && Date.now() - cached.at < SCAN_TTL_MS && (cached.rows?.length ?? 0) > 0);
-      if (isFresh) return;
-      const remote = await edgeRest<SmartMoneyScanDbRow[]>(q);
-      if (cancelled) return;
-      const serverRows = serverScanForMode(mode, remote ?? []);
-      if (serverRows.length) {
-        setRows(serverRows);
-        saveScan(mode, serverRows);
+      setSyncing(true);
+      try {
+        const remote = await edgeRest<SmartMoneyScanDbRow[]>(q);
+        if (cancelled) return;
+        const serverRows = serverScanForMode(mode, remote ?? []);
+        if (serverRows.length) {
+          setRows(serverRows);
+          saveScan(mode, serverRows);
+        }
+      } catch {
+        /* keep the local cache when the server pre-scan is unreachable */
+      } finally {
+        if (!cancelled) setSyncing(false);
       }
     })();
     return () => { cancelled = true; };
@@ -239,20 +263,53 @@ export default function SmartMoneyScreener() {
       && (capTier === 'All caps' || r.capTier === capTier)
       && (!q || r.symbol.includes(q) || r.name.toUpperCase().includes(q)),
     );
-    const cmp: Record<SortKey, (a: SmartMoneyRow, b: SmartMoneyRow) => number> = {
-      score_desc: (a, b) => b.score - a.score || a.symbol.localeCompare(b.symbol),
-      change_desc: (a, b) => (b.changePercent ?? -Infinity) - (a.changePercent ?? -Infinity),
-      mktcap_desc: (a, b) => (b.marketCap ?? -Infinity) - (a.marketCap ?? -Infinity),
-      short_desc: (a, b) => (b.squeeze.shortPercentOfFloat ?? -Infinity) - (a.squeeze.shortPercentOfFloat ?? -Infinity),
+    const valueOf = (r: SmartMoneyRow): number => {
+      switch (sort) {
+        case 'change': return r.changePercent ?? -Infinity;
+        case 'mktcap': return r.marketCap ?? -Infinity;
+        case 'short': return r.squeeze.shortPercentOfFloat ?? -Infinity;
+        case 'insider': return r.insider.totalValue;
+        case 'institutional': return r.institutional.holdings.length;
+        case 'congress': return r.congress.buys + r.congress.sells;
+        case 'price': return r.price ?? -Infinity;
+        default: return r.score;
+      }
     };
-    return out.sort(cmp[sort]);
-  }, [rows, search, sector, capTier, minScore, sort]);
+    return out.sort((a, b) => {
+      const av = valueOf(a);
+      const bv = valueOf(b);
+      const byValue = sortDir === 'asc' ? av - bv : bv - av;
+      return byValue || a.symbol.localeCompare(b.symbol);
+    });
+  }, [rows, search, sector, capTier, minScore, sort, sortDir]);
 
   const visible = expanded ? filtered : filtered.slice(0, 25);
   const strong = rows.filter(r => r.classification === 'Strong').length;
   const watch = rows.filter(r => r.classification === 'Watch').length;
   const top = rows.length ? [...rows].sort((a, b) => b.score - a.score)[0] : null;
   const pct = progress && progress.total > 0 ? (progress.done / progress.total) * 100 : 0;
+  const sortedByScoreDesc = sort === 'score' && sortDir === 'desc';
+
+  const toggleSort = (key: SortKey) => {
+    if (sort === key) setSortDir(d => (d === 'desc' ? 'asc' : 'desc'));
+    else { setSort(key); setSortDir('desc'); }
+  };
+
+  const sortHead = (key: SortKey, label: string, right = false) => (
+    <TableHead className={right ? 'text-right' : undefined}>
+      <button
+        type="button"
+        onClick={() => toggleSort(key)}
+        className={cn('inline-flex items-center gap-1 hover:text-foreground', right && 'w-full justify-end')}
+        title={`Sort by ${SORT_LABELS[key]}`}
+      >
+        {label}
+        {sort === key && (sortDir === 'desc'
+          ? <ArrowDown className="h-3 w-3" />
+          : <ArrowUp className="h-3 w-3" />)}
+      </button>
+    </TableHead>
+  );
 
   return (
     <div className="min-h-screen bg-background">
@@ -291,6 +348,13 @@ export default function SmartMoneyScreener() {
             </Button>
           </div>
         </div>
+
+        {syncing && (
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <RefreshCw className="h-3 w-3 animate-spin" />
+            Loading {modeUniverseSize(mode)} rows from the daily scan…
+          </p>
+        )}
 
         {running && progress && (
           <Card className="border-primary/30 bg-primary/5">
@@ -339,10 +403,19 @@ export default function SmartMoneyScreener() {
               <p className="text-xs text-muted-foreground">Watch (40–59)</p>
               <p className="text-lg font-semibold text-amber-400">{watch}</p>
             </div>
-            <div className="rounded-lg border border-border/60 p-3">
+            <button
+              type="button"
+              onClick={() => {
+                if (!top) return;
+                setSearch(prev => (prev === top.symbol ? '' : top.symbol));
+                document.getElementById('sm-results')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+              className="rounded-lg border border-border/60 p-3 text-left transition-colors hover:bg-accent/20"
+              title={top ? `Filter to ${top.symbol} (${top.score}/100)` : undefined}
+            >
               <p className="text-xs text-muted-foreground">Top score</p>
-              <p className="text-lg font-semibold">{top ? `${top.symbol} · ${top.score}` : '—'}</p>
-            </div>
+              <p className="text-lg font-semibold">{top ? `${top.symbol} · ${top.score}/100` : '—'}</p>
+            </button>
           </div>
         )}
 
@@ -376,13 +449,17 @@ export default function SmartMoneyScreener() {
                 {s === 0 ? 'All scores' : `${s}+`}
               </Button>
             ))}
-            <Select value={sort} onValueChange={v => setSort(v as SortKey)}>
+            <Select value={sort} onValueChange={v => { setSort(v as SortKey); setSortDir('desc'); }}>
               <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="score_desc">Signal score ↓</SelectItem>
-                <SelectItem value="change_desc">Top gainers</SelectItem>
-                <SelectItem value="mktcap_desc">Largest cap</SelectItem>
-                <SelectItem value="short_desc">Most shorted</SelectItem>
+                <SelectItem value="score">Signal score</SelectItem>
+                <SelectItem value="change">Top gainers</SelectItem>
+                <SelectItem value="mktcap">Largest cap</SelectItem>
+                <SelectItem value="short">Most shorted</SelectItem>
+                <SelectItem value="insider">Insider buying</SelectItem>
+                <SelectItem value="institutional">13F managers</SelectItem>
+                <SelectItem value="congress">Congress activity</SelectItem>
+                <SelectItem value="price">Price</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -399,32 +476,52 @@ export default function SmartMoneyScreener() {
             </Button>
           </div>
         ) : rows.length > 0 && (
-          <div className="overflow-x-auto">
+          <div id="sm-results" className="space-y-2 scroll-mt-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <span>
+                Showing {visible.length === 0 ? 0 : 1}–{visible.length} of {filtered.length}
+                {' · '}sorted by {SORT_LABELS[sort]} {sortDir === 'desc' ? '↓' : '↑'}
+              </span>
+              {!expanded && filtered.length > visible.length && (
+                <button type="button" className="hover:text-foreground" onClick={() => setExpanded(true)}>
+                  Show all {filtered.length}
+                </button>
+              )}
+            </div>
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-8">#</TableHead>
                   <TableHead>Symbol</TableHead>
-                  <TableHead className="w-40">Score</TableHead>
-                  <TableHead className="text-right">Insider $</TableHead>
-                  <TableHead className="text-right">13F mgrs</TableHead>
-                  <TableHead className="text-right">Congress B/S</TableHead>
-                  <TableHead className="text-right">Short %Float</TableHead>
-                  <TableHead className="text-right">Price</TableHead>
-                  <TableHead className="text-right">Δ%</TableHead>
+                  {sortHead('score', 'Score')}
+                  {sortHead('insider', 'Insider $', true)}
+                  {sortHead('institutional', '13F mgrs', true)}
+                  {sortHead('congress', 'Congress B/S', true)}
+                  {sortHead('short', 'Short %Float', true)}
+                  {sortHead('price', 'Price', true)}
+                  {sortHead('change', 'Δ%', true)}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {visible.map((r, i) => (
-                  <>
+                {visible.map((r, i) => {
+                  const isTop = sortedByScoreDesc && i === 0;
+                  return (
+                  <Fragment key={r.symbol}>
                     <TableRow
-                      key={r.symbol}
-                      className="cursor-pointer"
+                      className={cn('cursor-pointer', isTop && 'bg-emerald-500/5')}
                       onClick={() => toggleDetail(r.symbol)}
                     >
                       <TableCell className="text-muted-foreground text-xs">{i + 1}</TableCell>
                       <TableCell>
-                        <div className="font-semibold">{r.symbol}</div>
+                        <div className="font-semibold flex items-center gap-2">
+                          {r.symbol}
+                          {isTop && (
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-emerald-400 border-emerald-500/40">
+                              TOP
+                            </Badge>
+                          )}
+                        </div>
                         <div className="text-xs text-muted-foreground truncate max-w-[160px]">{r.name}</div>
                       </TableCell>
                       <TableCell>
@@ -506,10 +603,12 @@ export default function SmartMoneyScreener() {
                         </TableCell>
                       </TableRow>
                     )}
-                  </>
-                ))}
+                  </Fragment>
+                  );
+                })}
               </TableBody>
             </Table>
+            </div>
           </div>
         )}
 

@@ -55,6 +55,8 @@ Social sentiment aggregates **rule-based keyword scoring — no AI/LLM**. To add
    - Never bake a real key into `dist/` — it's committed to git and public.
 3. Surface it in `SocialSentimentCheck.tsx` with the keyword-scoring convention used by the others.
 
+Every source returns a `SourceResult` with a `kind` (`social` / `news` / `attention`), real `items` (text + URL + timestamp + score + tone label), and an optional `detail` line. Keep the evidence: the card renders the actual headlines/posts with links, and `aggregateSources()` splits crowd vs financial-news scores so the UI can show divergence. Attention-only sources (ApeWisdom, SocialTickers, Google Trends, Adanos) must not steer the directional call — they only feed the attention line. Filter headlines for symbol relevance (`isRelevantToSymbol`) or generic market stories will pollute the score.
+
 ## Adding runtime config (new features)
 
 Browser features that need server URLs/keys must fetch them at runtime — never compile secrets into the SPA. Three endpoints on `index.js` serve this:
@@ -80,6 +82,7 @@ Editable engine: `src/lib/masterAnalysis.ts` (`analyzeStock` runs all 12). Add a
 - The fn simulates the **last completed session** at its **official session close** — every fill carries its own session date and a price inside that day's high–low range. Symbols with no fresh market data are untradeable (zero-price gate). The browser's `simulateDay` mirrors these session-date semantics for offline/local testing only.
 - **Edge fn shares core logic with browser**: when fixing buy/sell logic (e.g. stop-loss, `shouldSell`, buy guard), apply the fix to BOTH `tradeSimulator.ts` and `simulate-ledger/index.ts` and deploy both. Edge fn deploys may cache — verify source is present after deploy.
 - **Ledger integrity gotchas**: corrupted cloud ledger (null-qty, ghost positions, impossible sells) poisons browser state. Troubleshooting steps: (1) clean bad trades via `supabase-cli delete`, (2) re-deploy edge fn from repo root, (3) re-run via Re-run session button. Always run `node scripts/validate-ledger.cjs` after fixes.
+- **Cloud viewer resilience**: `pullLedger` writes the local mirror best-effort (`safeLocalSet`/`writeLocal` catch quota errors and return `false`) and still returns the cloud copy — an oversized ledger must never make the pull return `null`. `useTradeLedger` re-pulls on `stockpulse-sync`, tab `focus`, and `visibilitychange` (60s throttle) so a stale mirror self-heals without a reload.
 - **NaN propagation**: `Math.floor(Infinity / 0)` produces `Infinity` which serializes as `null` in JSON. Both files guard against this with `!(available > 0)`, `!(s.price > 0)`, and `Number.isFinite(qty)` checks before computing buy qty.
 - **Same-day round-trips**: `soldToday` set in `runDayForPerson` prevents buy-after-sell same-day. Edge fn deploys may cache — verify source is present after deploy.
 
@@ -88,7 +91,7 @@ Editable engine: `src/lib/masterAnalysis.ts` (`analyzeStock` runs all 12). Add a
 ```powershell
 $env:Path = "C:\Program Files\nodejs;" + $env:Path
 .\node_modules\.bin\tsc.cmd --noEmit     # type check — 0 errors
- npm.cmd run test                         # 335 tests across 26 files — all pass
+ npm.cmd run test                         # 353 tests across 27 files — all pass
 npm.cmd run build                        # rebuild dist/ (committed)
 ```
 
@@ -114,3 +117,4 @@ New pure logic should come with unit tests (see `src/lib/*.test.ts`, `*.simulate
 - **Migration**: `supabase/migrations/20261012000000_smart_money_scan_rows.sql` (RLS allows anon SELECT; only the edge fn writes).
 - **Deploy**: `npx.cmd supabase functions deploy smart-money-scan --no-verify-jwt`, apply the migration, then run the schedule block in SQL Editor.
 - **Verify by data freshness**: `select leg, count(*), max(scanned_at) from smart_money_scan_rows group by leg;` (ignore pg_net's 5s timeout).
+- **Browser UX**: results default to signal score ↓. Every numeric header sorts (click toggles direction), the `Top score` card shows `SYM · score/100` and filters to that symbol, and the `Showing 1–25 of N · sorted by X ↓` line sits above the table. Keep the header keys, the sort dropdown (8 options), and `SORT_LABELS` in sync when adding a column.

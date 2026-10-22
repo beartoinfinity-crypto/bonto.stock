@@ -40,6 +40,250 @@ async function proxyFetch(url: string, timeoutMs = 5000): Promise<Response> {
   throw new Error('All fetch methods failed');
 }
 
+// --- Types -----------------------------------------------------------
+
+export type SourceKind = 'social' | 'news' | 'attention';
+export type SentimentTone = 'bullish' | 'bearish' | 'neutral';
+export type AttentionTrend = 'rising' | 'fading' | 'steady' | 'unknown';
+export type Divergence = 'retail-more-bullish' | 'retail-more-bearish' | 'aligned' | 'unknown';
+
+export interface SentimentItem {
+  text: string;
+  url?: string;
+  publishedAt?: string;
+  score: number;
+  label?: 'Bullish' | 'Bearish';
+}
+
+export interface AttentionInfo {
+  label: string;
+  detail: string;
+  trend: AttentionTrend;
+}
+
+export interface SourceResult {
+  name: string;
+  kind: SourceKind;
+  score: number;
+  count: number;
+  headlines: string[];
+  items?: SentimentItem[];
+  detail?: string;
+  attention?: AttentionInfo;
+}
+
+export interface GroupScore {
+  score: number;
+  items: number;
+  sources: number;
+}
+
+export interface KeyQuote extends SentimentItem {
+  source: string;
+  tone: SentimentTone;
+}
+
+export interface AggregatedSentiment {
+  sentiment: SentimentTone;
+  confidence: number;
+  sources: SourceResult[];
+  totalItems: number;
+  themes: string[];
+  keyQuotes: KeyQuote[];
+  retail: GroupScore | null;
+  news: GroupScore | null;
+  divergence: Divergence;
+  agreement: number;
+  attention: AttentionInfo | null;
+  unavailableSources: string[];
+  briefSummary: string;
+  summary: string;
+  checkedAt: string;
+}
+
+export function toneOf(score: number): SentimentTone {
+  if (score > 0.08) return 'bullish';
+  if (score < -0.08) return 'bearish';
+  return 'neutral';
+}
+
+function emptySource(name: string, kind: SourceKind): SourceResult {
+  return { name, kind, score: 0, count: 0, headlines: [] };
+}
+
+function averageScore(items: SentimentItem[]): number {
+  return items.length ? items.reduce((a, i) => a + i.score, 0) / items.length : 0;
+}
+
+function formatPct(score: number): string {
+  return `${score > 0 ? '+' : ''}${(score * 100).toFixed(0)}%`;
+}
+
+const COMPANY_SUFFIXES = new Set([
+  'inc', 'corp', 'corporation', 'company', 'co', 'plc', 'ltd', 'limited', 'holdings',
+  'holding', 'group', 'the', 'class', 'common', 'stock', 'trust', 'technologies',
+  'technology', 'systems', 'international', 'industries', 'enterprises', 'brands', 'and',
+]);
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function isRelevantToSymbol(text: string, symbol: string, companyName?: string): boolean {
+  const lower = text.toLowerCase();
+  const sym = symbol.toLowerCase();
+
+  if (sym.length >= 2) {
+    const tickerRe = new RegExp(`(^|[^a-z0-9])${escapeRegExp(sym)}([^a-z0-9]|$)`, 'i');
+    if (tickerRe.test(text)) return true;
+  }
+
+  if (!companyName) return false;
+  const tokens = companyName
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t.length >= 3 && !COMPANY_SUFFIXES.has(t));
+
+  return tokens.some(t => lower.includes(t));
+}
+
+function decodeEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ');
+}
+
+function stripTags(text: string): string {
+  return decodeEntities(text.replace(/<[^>]+>/g, '')).trim();
+}
+
+interface RssEntry {
+  title: string;
+  link?: string;
+  publishedAt?: string;
+}
+
+function parseRssEntries(xml: string, limit: number): RssEntry[] {
+  const entries: RssEntry[] = [];
+  const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = itemRegex.exec(xml)) !== null && entries.length < limit) {
+    const block = match[1];
+    const titleMatch = block.match(/<title>(.*?)<\/title>/);
+    if (!titleMatch) continue;
+    const title = stripTags(titleMatch[1].replace(/<!\[CDATA\[|\]\]>/g, ''));
+    if (!title) continue;
+
+    const linkMatch = block.match(/<link>(.*?)<\/link>/);
+    const dateMatch = block.match(/<pubDate>(.*?)<\/pubDate>/);
+    const link = linkMatch ? stripTags(linkMatch[1].replace(/<!\[CDATA\[|\]\]>/g, '')) : undefined;
+    const parsed = dateMatch ? new Date(dateMatch[1]).getTime() : NaN;
+
+    entries.push({
+      title,
+      link: link || undefined,
+      publishedAt: Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined,
+    });
+  }
+
+  return entries;
+}
+
+function toItems(entries: RssEntry[]): SentimentItem[] {
+  return entries.map(e => ({
+    text: e.title,
+    url: e.link,
+    publishedAt: e.publishedAt,
+    score: scoreText(e.title).score,
+  }));
+}
+
+function recencyWeight(publishedAt?: string): number {
+  if (!publishedAt) return 0.35;
+  const ageMs = Date.now() - new Date(publishedAt).getTime();
+  if (!Number.isFinite(ageMs)) return 0.35;
+  const days = ageMs / 86_400_000;
+  if (days <= 0) return 1;
+  if (days >= 7) return 0;
+  return 1 - days / 7;
+}
+
+export function computeGroupScores(sources: SourceResult[]): { retail: GroupScore | null; news: GroupScore | null } {
+  const group = (kind: SourceKind): GroupScore | null => {
+    const list = sources.filter(s => s.kind === kind && s.count > 0);
+    if (!list.length) return null;
+    const items = list.reduce((a, s) => a + s.count, 0);
+    const weights = list.map(s => Math.min(s.count, 30));
+    const totalWeight = weights.reduce((a, w) => a + w, 0);
+    const score = totalWeight > 0
+      ? list.reduce((a, s, i) => a + s.score * weights[i], 0) / totalWeight
+      : 0;
+    return { score, items, sources: list.length };
+  };
+
+  return { retail: group('social'), news: group('news') };
+}
+
+export function detectDivergence(retail: GroupScore | null, news: GroupScore | null): Divergence {
+  if (!retail || !news || retail.items < 3 || news.items < 3) return 'unknown';
+  const r = toneOf(retail.score);
+  const n = toneOf(news.score);
+  if (r === 'neutral' || n === 'neutral') return 'unknown';
+  if (r === n) return 'aligned';
+  return r === 'bullish' ? 'retail-more-bullish' : 'retail-more-bearish';
+}
+
+export function computeAgreement(sources: SourceResult[], sentiment: SentimentTone): number {
+  const directional = sources.filter(s => s.kind !== 'attention' && s.count > 0);
+  if (!directional.length) return 0;
+  const matching = directional.filter(s => toneOf(s.score) === sentiment).length;
+  return matching / directional.length;
+}
+
+export function rankKeyQuotes(sources: SourceResult[], limit = 5): KeyQuote[] {
+  const seen = new Set<string>();
+  const pool: KeyQuote[] = [];
+
+  for (const src of sources) {
+    for (const item of src.items ?? []) {
+      const text = item.text.trim();
+      if (!text) continue;
+      const key = text.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').slice(0, 64);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      pool.push({
+        ...item,
+        text,
+        source: src.name,
+        tone: toneOf(item.label === 'Bullish' ? 1 : item.label === 'Bearish' ? -1 : item.score),
+      });
+    }
+  }
+
+  const weight = (q: KeyQuote) =>
+    Math.abs(q.score) * 0.65 + recencyWeight(q.publishedAt) * 0.25 + (q.label ? 0.2 : 0);
+
+  const sorted = [...pool].sort((a, b) => weight(b) - weight(a));
+  const picks: KeyQuote[] = [];
+  const bullish = sorted.find(q => q.tone === 'bullish');
+  const bearish = sorted.find(q => q.tone === 'bearish');
+  if (bullish) picks.push(bullish);
+  if (bearish) picks.push(bearish);
+
+  for (const quote of sorted) {
+    if (picks.length >= limit) break;
+    if (!picks.includes(quote)) picks.push(quote);
+  }
+
+  return picks.slice(0, limit);
+}
+
 // --- Keyword-based sentiment scoring --------------------------------
 
 const BULLISH_WORDS = new Set([
@@ -91,34 +335,26 @@ function scoreText(text: string): { score: number; bullishHits: string[]; bearis
 
 // --- Source: Google News RSS ------------------------------------------
 
-async function fetchGoogleNews(symbol: string): Promise<SourceResult> {
+async function fetchGoogleNews(symbol: string, companyName?: string): Promise<SourceResult> {
   try {
     const url = `https://news.google.com/rss/search?q=${symbol}+stock&hl=en-US&gl=US&ceid=US:en`;
     const res = await proxyFetch(url);
     const xml = await res.text();
+    const entries = parseRssEntries(xml, 30)
+      .filter(e => isRelevantToSymbol(e.title, symbol, companyName));
+    const items = toItems(entries);
 
-    const items: string[] = [];
-    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
-    let match;
-    while ((match = itemRegex.exec(xml)) !== null && items.length < 30) {
-      const titleMatch = match[1].match(/<title>(.*?)<\/title>/);
-      if (titleMatch) items.push(titleMatch[1].replace(/<!\[CDATA\[|\]\]>/g, ''));
-    }
-
-    let totalScore = 0;
-    let count = 0;
-    const headlines: string[] = [];
-
-    for (const item of items) {
-      const { score } = scoreText(item);
-      totalScore += score;
-      count++;
-      headlines.push(item);
-    }
-
-    return { name: 'Google News', score: count > 0 ? totalScore / count : 0, count, headlines: headlines.slice(0, 5) };
+    return {
+      name: 'Google News',
+      kind: 'news',
+      score: averageScore(items),
+      count: items.length,
+      headlines: items.slice(0, 5).map(i => i.text),
+      items,
+      detail: `${items.length} recent headlines`,
+    };
   } catch {
-    return { name: 'Google News', score: 0, count: 0, headlines: [] };
+    return emptySource('Google News', 'news');
   }
 }
 
@@ -127,54 +363,78 @@ async function fetchGoogleNews(symbol: string): Promise<SourceResult> {
 async function fetchStockTwits(symbol: string): Promise<SourceResult> {
   try {
     const url = `https://api.stocktwits.com/api/2/streams/symbol/${symbol}.json`;
-    const res = await proxyFetch(url);
+    const res = await proxyFetch(url, 8000);
     const data = await res.json();
     const messages = data?.messages ?? [];
 
-    let totalScore = 0;
-    let count = 0;
-    const headlines: string[] = [];
-
+    const items: SentimentItem[] = [];
+    let labeled = 0;
     for (const msg of messages.slice(0, 30)) {
-      const text = msg.body ?? '';
+      const text = (msg.body ?? '').trim();
       if (!text) continue;
-      const { score } = scoreText(text);
-      totalScore += score;
-      count++;
-      headlines.push(text.slice(0, 120));
+      const label = msg?.entities?.sentiment?.basic;
+      const tagged = label === 'Bullish' || label === 'Bearish' ? label : undefined;
+      if (tagged) labeled++;
+      const createdAt = msg.created_at ? new Date(msg.created_at) : null;
+      items.push({
+        text: text.slice(0, 220),
+        url: msg.id ? `https://stocktwits.com/message/${msg.id}` : undefined,
+        publishedAt: createdAt && Number.isFinite(createdAt.getTime()) ? createdAt.toISOString() : undefined,
+        score: tagged ? (tagged === 'Bullish' ? 1 : -1) : scoreText(text).score,
+        label: tagged,
+      });
     }
 
-    return { name: 'StockTwits', score: count > 0 ? totalScore / count : 0, count, headlines: headlines.slice(0, 5) };
+    return {
+      name: 'StockTwits',
+      kind: 'social',
+      score: averageScore(items),
+      count: items.length,
+      headlines: items.slice(0, 5).map(i => i.text),
+      items,
+      detail: labeled > 0 ? `${items.length} posts · ${labeled} self-labeled` : `${items.length} posts`,
+    };
   } catch {
-    return { name: 'StockTwits', score: 0, count: 0, headlines: [] };
+    return emptySource('StockTwits', 'social');
   }
 }
 
 // --- Source: Yahoo Finance news ---------------------------------------
 
-async function fetchYahooNews(symbol: string): Promise<SourceResult> {
+async function fetchYahooNews(symbol: string, companyName?: string): Promise<SourceResult> {
   try {
     const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${symbol}&quotes_count=0&news_count=20`;
     const res = await proxyFetch(url);
     const data = await res.json();
     const news = data?.news ?? [];
 
-    let totalScore = 0;
-    let count = 0;
-    const headlines: string[] = [];
-
+    const items: SentimentItem[] = [];
     for (const item of news) {
-      const title = item.title ?? '';
+      const title = (item.title ?? '').trim();
       if (!title) continue;
-      const { score } = scoreText(title);
-      totalScore += score;
-      count++;
-      headlines.push(title);
+      if (!isRelevantToSymbol(title, symbol, companyName)) continue;
+      const published = typeof item.providerPublishTime === 'number'
+        ? new Date(item.providerPublishTime * 1000)
+        : null;
+      items.push({
+        text: title,
+        url: item.link || undefined,
+        publishedAt: published && Number.isFinite(published.getTime()) ? published.toISOString() : undefined,
+        score: scoreText(title).score,
+      });
     }
 
-    return { name: 'Yahoo Finance', score: count > 0 ? totalScore / count : 0, count, headlines: headlines.slice(0, 5) };
+    return {
+      name: 'Yahoo Finance',
+      kind: 'news',
+      score: averageScore(items),
+      count: items.length,
+      headlines: items.slice(0, 5).map(i => i.text),
+      items,
+      detail: `${items.length} recent headlines`,
+    };
   } catch {
-    return { name: 'Yahoo Finance', score: 0, count: 0, headlines: [] };
+    return emptySource('Yahoo Finance', 'news');
   }
 }
 
@@ -187,20 +447,27 @@ async function fetchApeWisdom(symbol: string): Promise<SourceResult> {
     const url = 'https://apewisdom.io/api/v1.0/filter/all-stocks/page/1';
     const res = await proxyFetch(url, 8000);
     const data = await res.json();
-    const results = data?.results ?? [];
+    const results: Array<{
+      ticker?: string;
+      mentions?: string;
+      mentions_24h_ago?: string;
+      rank?: string;
+      rank_24h_ago?: string;
+    }> = data?.results ?? [];
 
     const tickerData = results.find(
-      (r: any) => (r.ticker ?? '').toUpperCase() === symbol.toUpperCase()
+      (r) => (r.ticker ?? '').toUpperCase() === symbol.toUpperCase()
     );
 
     if (!tickerData) {
-      return { name: 'ApeWisdom (Reddit)', score: 0, count: 0, headlines: [] };
+      return emptySource('ApeWisdom (Reddit)', 'attention');
     }
 
     const mentions = parseInt(tickerData.mentions ?? '0', 10);
     const prevMentions = parseInt(tickerData.mentions_24h_ago ?? '0', 10);
     const rank = parseInt(tickerData.rank ?? '0', 10);
     const prevRank = parseInt(tickerData.rank_24h_ago ?? '0', 10);
+    const changePct = prevMentions > 0 ? ((mentions - prevMentions) / prevMentions) * 100 : null;
 
     let score = 0;
     if (prevMentions > 0) {
@@ -212,15 +479,30 @@ async function fetchApeWisdom(symbol: string): Promise<SourceResult> {
       score = (score + rankChange) / 2;
     }
 
+    const detail = `${mentions.toLocaleString()} mentions${changePct === null ? '' : ` (${changePct >= 0 ? '+' : ''}${changePct.toFixed(0)}% vs 24h)`} · rank #${rank}${prevRank ? ` (was #${prevRank})` : ''}`;
     const headlines: string[] = [
       `Mentioned ${mentions}x on Reddit (WSB, r/stocks, r/investing)`,
       `Rank #${rank} (was #${prevRank} 24h ago)`,
       `24h mentions: ${mentions} (was ${prevMentions})`,
     ];
+    const items: SentimentItem[] = headlines.map(text => ({ text, score: 0 }));
 
-    return { name: 'ApeWisdom (Reddit)', score: Math.max(-1, Math.min(1, score)), count: mentions, headlines };
+    return {
+      name: 'ApeWisdom (Reddit)',
+      kind: 'attention',
+      score: Math.max(-1, Math.min(1, score)),
+      count: mentions,
+      headlines,
+      items,
+      detail,
+      attention: {
+        label: 'Reddit mentions',
+        detail,
+        trend: changePct === null ? 'unknown' : changePct > 10 ? 'rising' : changePct < -10 ? 'fading' : 'steady',
+      },
+    };
   } catch {
-    return { name: 'ApeWisdom (Reddit)', score: 0, count: 0, headlines: [] };
+    return emptySource('ApeWisdom (Reddit)', 'attention');
   }
 }
 
@@ -234,24 +516,31 @@ async function fetchSocialTickers(symbol: string): Promise<SourceResult> {
     const data = await res.json();
 
     if (!data || !data.ticker) {
-      return { name: 'SocialTickers', score: 0, count: 0, headlines: [] };
+      return emptySource('SocialTickers', 'attention');
     }
 
-    const socialScore = data.social_score ?? 0;
-    const change24 = data.change24 ?? 0;
-    const history = data.history ?? [];
-
-    const score = (socialScore - 50) / 50;
-    const count = history.length || 1;
+    const mentions = typeof data.mentions === 'number' ? data.mentions : 0;
+    const upvotes = typeof data.upvotes === 'number' ? data.upvotes : 0;
+    if (!mentions && !upvotes) {
+      return emptySource('SocialTickers', 'attention');
+    }
 
     const headlines: string[] = [
-      `Social score: ${socialScore}/100`,
-      `24h price change: ${change24 > 0 ? '+' : ''}${change24.toFixed(2)}%`,
+      `${mentions.toLocaleString()} mentions`,
+      `${upvotes.toLocaleString()} upvotes`,
     ];
 
-    return { name: 'SocialTickers', score, count, headlines };
+    return {
+      name: 'SocialTickers',
+      kind: 'attention',
+      score: 0,
+      count: Math.max(mentions, 1),
+      headlines,
+      items: headlines.map(text => ({ text, score: 0 })),
+      detail: headlines.join(' · '),
+    };
   } catch {
-    return { name: 'SocialTickers', score: 0, count: 0, headlines: [] };
+    return emptySource('SocialTickers', 'attention');
   }
 }
 
@@ -268,18 +557,17 @@ async function fetchFinnhubSentiment(symbol: string): Promise<SourceResult> {
     const reddit = data?.reddit ?? [];
     const stocktwits = data?.stocktwits ?? [];
 
-    let totalScore = 0;
-    let count = 0;
-    const headlines: string[] = [];
+    const items: SentimentItem[] = [];
 
     if (Array.isArray(reddit)) {
       for (const item of reddit.slice(0, 10)) {
         const sentiment = item.sentiment ?? 50;
         const positive = item.positive ?? 0;
         const negative = item.negative ?? 0;
-        totalScore += (sentiment - 50) / 50;
-        count++;
-        headlines.push(`Reddit: ${item.symbol} sentiment ${sentiment}/100 (+${positive}/-${negative})`);
+        items.push({
+          text: `Reddit: ${item.symbol} sentiment ${sentiment}/100 (+${positive}/-${negative})`,
+          score: (sentiment - 50) / 50,
+        });
       }
     }
 
@@ -288,20 +576,26 @@ async function fetchFinnhubSentiment(symbol: string): Promise<SourceResult> {
         const sentiment = item.sentiment ?? 50;
         const positive = item.positive ?? 0;
         const negative = item.negative ?? 0;
-        totalScore += (sentiment - 50) / 50;
-        count++;
-        headlines.push(`StockTwits: ${item.symbol} sentiment ${sentiment}/100 (+${positive}/-${negative})`);
+        items.push({
+          text: `StockTwits: ${item.symbol} sentiment ${sentiment}/100 (+${positive}/-${negative})`,
+          score: (sentiment - 50) / 50,
+        });
       }
     }
 
+    const score = items.length ? averageScore(items) : 0;
+
     return {
       name: 'Finnhub',
-      score: count > 0 ? Math.max(-1, Math.min(1, totalScore / count)) : 0,
-      count,
-      headlines: headlines.slice(0, 5),
+      kind: 'social',
+      score: Math.max(-1, Math.min(1, score)),
+      count: items.length,
+      headlines: items.slice(0, 5).map(i => i.text),
+      items,
+      detail: `${items.length} social aggregates`,
     };
   } catch {
-    return { name: 'Finnhub', score: 0, count: 0, headlines: [] };
+    return emptySource('Finnhub', 'social');
   }
 }
 
@@ -360,9 +654,9 @@ async function fetchAdanosSentiment(symbol: string): Promise<SourceResult> {
         signal: ctrl.signal,
         headers: { 'X-Api-Key': apiKey },
       });
-      if (!res.ok) return { name: 'Adanos', score: 0, count: 0, headlines: [] };
+      if (!res.ok) return emptySource('Adanos', 'social');
       const d = await res.json();
-      if (!d?.found) return { name: 'Adanos', score: 0, count: 0, headlines: [] };
+      if (!d?.found) return emptySource('Adanos', 'social');
 
       const mentions: number = d.mentions ?? 0;
       const score: number = typeof d.sentiment_score === 'number'
@@ -382,103 +676,89 @@ async function fetchAdanosSentiment(symbol: string): Promise<SourceResult> {
         headlines.push(`${d.bullish_pct}% bullish / ${d.bearish_pct}% bearish (7d)`);
       }
 
+      const trend: AttentionTrend = /ris|up|surge/i.test(String(d.trend ?? ''))
+        ? 'rising'
+        : /fall|down|fad|declin/i.test(String(d.trend ?? ''))
+          ? 'fading'
+          : d.trend
+            ? 'steady'
+            : 'unknown';
+      const buzz = typeof d.buzz_score === 'number' ? d.buzz_score : null;
+      const detail = `${mentions.toLocaleString()} mentions · ${buzz === null ? 'buzz n/a' : `buzz ${buzz}/100`}${d.trend ? ` · ${d.trend}` : ''}`;
+
       return {
         name: 'Adanos',
+        kind: 'social',
         score,
         // Weight for the aggregate: comparable to other sources (they report
         // ~5-30 items). Raw mention counts (100s-1000s) would dominate the
         // weighted average, so cap at 30.
         count: mentions > 0 ? Math.min(mentions, 30) : 1,
         headlines: headlines.slice(0, 5),
+        items: headlines.slice(0, 5).map(text => ({ text, score })),
+        detail,
+        attention: {
+          label: 'Social buzz',
+          detail,
+          trend,
+        },
       };
     } finally {
       clearTimeout(timer);
     }
   } catch {
-    return { name: 'Adanos', score: 0, count: 0, headlines: [] };
+    return emptySource('Adanos', 'social');
   }
 }
 
 // --- Source: MarketWatch RSS -----------------------------------------
 
-async function fetchMarketWatch(symbol: string): Promise<SourceResult> {
+async function fetchMarketWatch(symbol: string, companyName?: string): Promise<SourceResult> {
   try {
     const url = 'https://feeds.marketwatch.com/marketwatch/marketpulse/';
     const res = await proxyFetch(url);
     const xml = await res.text();
 
-    const items: string[] = [];
-    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
-    let match;
-    while ((match = itemRegex.exec(xml)) !== null && items.length < 50) {
-      const titleMatch = match[1].match(/<title>(.*?)<\/title>/);
-      if (titleMatch) items.push(titleMatch[1].replace(/<!\[CDATA\[|\]\]>/g, ''));
-    }
-
-    const relevant = items.filter(item => {
-      const lower = item.toLowerCase();
-      return lower.includes(symbol.toLowerCase());
-    });
-
-    let totalScore = 0;
-    let count = 0;
-    const headlines: string[] = [];
-
-    const toScore = relevant.length > 0 ? relevant : items.slice(0, 15);
-
-    for (const item of toScore) {
-      const { score } = scoreText(item);
-      totalScore += score;
-      count++;
-      headlines.push(item);
-    }
+    const entries = parseRssEntries(xml, 50)
+      .filter(e => isRelevantToSymbol(e.title, symbol, companyName));
+    const items = toItems(entries);
 
     return {
       name: 'MarketWatch',
-      score: count > 0 ? totalScore / count : 0,
-      count,
-      headlines: headlines.slice(0, 5),
+      kind: 'news',
+      score: averageScore(items),
+      count: items.length,
+      headlines: items.slice(0, 5).map(i => i.text),
+      items,
+      detail: items.length ? `${items.length} symbol headlines` : 'No symbol-specific headlines',
     };
   } catch {
-    return { name: 'MarketWatch', score: 0, count: 0, headlines: [] };
+    return emptySource('MarketWatch', 'news');
   }
 }
 
 // --- Source: CNBC RSS ------------------------------------------------
 
-async function fetchCNBC(symbol: string): Promise<SourceResult> {
+async function fetchCNBC(symbol: string, companyName?: string): Promise<SourceResult> {
   try {
     const url = `https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114&q=${symbol}`;
     const res = await proxyFetch(url);
     const xml = await res.text();
-
-    const items: string[] = [];
-    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
-    let match;
-    while ((match = itemRegex.exec(xml)) !== null && items.length < 30) {
-      const titleMatch = match[1].match(/<title>(.*?)<\/title>/);
-      if (titleMatch) items.push(titleMatch[1].replace(/<!\[CDATA\[|\]\]>/g, ''));
-    }
-
-    let totalScore = 0;
-    let count = 0;
-    const headlines: string[] = [];
-
-    for (const item of items) {
-      const { score } = scoreText(item);
-      totalScore += score;
-      count++;
-      headlines.push(item);
-    }
+    const entries = parseRssEntries(xml, 30)
+      .filter(e => isRelevantToSymbol(e.title, symbol, companyName));
+    const items = toItems(entries);
 
     return {
       name: 'CNBC',
-      score: count > 0 ? totalScore / count : 0,
-      count,
-      headlines: headlines.slice(0, 5),
+      kind: 'news',
+      score: averageScore(items),
+      count: items.length,
+      headlines: items.slice(0, 5).map(i => i.text),
+      items,
+      detail: `${items.length} recent headlines`,
     };
   } catch {
-    return { name: 'CNBC', score: 0, count: 0, headlines: [] };
+    return emptySource('CNBC', 'news');
   }
 }
 
@@ -488,16 +768,19 @@ async function fetchGoogleTrends(symbol: string): Promise<SourceResult> {
   try {
     const url = `/api/google-trends?keyword=${encodeURIComponent(symbol + ' stock')}`;
     const res = await fetch(url);
-    if (!res.ok) return { name: 'Google Trends', score: 0, count: 0, headlines: [] };
+    if (!res.ok) return emptySource('Google Trends', 'attention');
 
     const data = await res.json();
     const values: number[] = data.interestOverTime ?? [];
     const avg = data.avg ?? 0;
     const latest = data.latest ?? 0;
-    const related = data.relatedQueries ?? { top: [], rising: [] };
+    const related: {
+      top?: Array<{ query?: string }>;
+      rising?: Array<{ query?: string }>;
+    } = data.relatedQueries ?? { top: [], rising: [] };
 
     if (values.length === 0) {
-      return { name: 'Google Trends', score: 0, count: 0, headlines: [] };
+      return emptySource('Google Trends', 'attention');
     }
 
     let score = 0;
@@ -510,39 +793,38 @@ async function fetchGoogleTrends(symbol: string): Promise<SourceResult> {
       `Search interest: ${latest}/100 (4-week avg: ${avg.toFixed(0)})`,
     ];
     if (related.rising?.length > 0) {
-      headlines.push(`Rising queries: ${related.rising.slice(0, 3).map((r: any) => r.query).join(', ')}`);
+      headlines.push(`Rising queries: ${related.rising.slice(0, 3).map(r => r.query).join(', ')}`);
     }
+
+    const detail = `${latest}/100 · 4-week avg ${avg.toFixed(0)}`;
+    const trend: AttentionTrend = avg > 0
+      ? latest > avg * 1.1
+        ? 'rising'
+        : latest < avg * 0.9
+          ? 'fading'
+          : 'steady'
+      : 'unknown';
 
     return {
       name: 'Google Trends',
+      kind: 'attention',
       score,
       count: values.length,
       headlines,
+      items: [{
+        text: headlines[0],
+        url: `https://trends.google.com/trends/explore?q=${encodeURIComponent(`${symbol} stock`)}`,
+        score,
+      }, ...(headlines.length > 1 ? [{ text: headlines[1], score }] : [])],
+      detail,
+      attention: { label: 'Search interest', detail, trend },
     };
   } catch {
-    return { name: 'Google Trends', score: 0, count: 0, headlines: [] };
+    return emptySource('Google Trends', 'attention');
   }
 }
 
 // --- Aggregate -------------------------------------------------------
-
-export interface SourceResult {
-  name: string;
-  score: number; // -1 to 1
-  count: number;
-  headlines: string[];
-}
-
-export interface AggregatedSentiment {
-  sentiment: 'bullish' | 'bearish' | 'neutral';
-  confidence: number;
-  sources: SourceResult[];
-  totalItems: number;
-  themes: string[];
-  briefSummary: string;
-  summary: string;
-  checkedAt: string;
-}
 
 function extractThemes(sources: SourceResult[]): string[] {
   const wordCounts = new Map<string, number>();
@@ -571,237 +853,160 @@ const COMMON_WORDS = new Set([
   'may', 'its', 'are', 'has', 'not', 'but', 'can', 'for', 'the', 'and', 'that',
 ]);
 
-export async function fetchSentiment(symbol: string): Promise<AggregatedSentiment> {
-  const results = await Promise.allSettled([
-    fetchGoogleNews(symbol),
-    fetchStockTwits(symbol),
-    fetchYahooNews(symbol),
-    fetchApeWisdom(symbol),
-    fetchSocialTickers(symbol),
-    fetchFinnhubSentiment(symbol),
-    fetchMarketWatch(symbol),
-    fetchCNBC(symbol),
-    fetchGoogleTrends(symbol),
-    fetchAdanosSentiment(symbol),
-  ]);
+export function aggregateSources(symbol: string, allSources: SourceResult[]): AggregatedSentiment {
+  const sources = allSources.filter(s => s.count > 0);
+  const unavailableSources = allSources.filter(s => s.count === 0).map(s => s.name);
+  const directional = sources.filter(s => s.kind !== 'attention');
+  const totalItems = directional.reduce((a, s) => a + s.count, 0);
 
-  const sources = results
-    .filter((r): r is PromiseFulfilledResult<SourceResult> => r.status === 'fulfilled' && r.value.count > 0)
-    .map(r => r.value);
+  const weightOf = (s: SourceResult) => Math.min(s.count, 30);
+  const totalWeight = directional.reduce((a, s) => a + weightOf(s), 0);
+  const avgScore = totalWeight > 0
+    ? directional.reduce((a, s) => a + s.score * weightOf(s), 0) / totalWeight
+    : 0;
 
-  const totalItems = sources.reduce((a, s) => a + s.count, 0);
+  const sentiment = toneOf(avgScore);
+  const agreement = computeAgreement(sources, sentiment);
+  const coverage = Math.min(directional.length / 6, 1);
+  const volume = Math.min(totalItems / 40, 1);
+  const strength = Math.min(Math.abs(avgScore) / 0.3, 1);
+  const confidence = Math.min(95, Math.round(
+    coverage * 25 + volume * 20 + strength * 25 + agreement * 30,
+  ));
 
-  let weightedScore = 0;
-  let totalWeight = 0;
-  for (const src of sources) {
-    weightedScore += src.score * src.count;
-    totalWeight += src.count;
-  }
-  const avgScore = totalWeight > 0 ? weightedScore / totalWeight : 0;
+  const { retail, news } = computeGroupScores(sources);
+  const divergence = detectDivergence(retail, news);
+  const attention = sources.find(s => s.attention)?.attention ?? null;
+  const keyQuotes = rankKeyQuotes(directional, 5);
+  const themes = extractThemes(directional);
 
-  let sentiment: 'bullish' | 'bearish' | 'neutral' = 'neutral';
-  if (avgScore > 0.08) sentiment = 'bullish';
-  else if (avgScore < -0.08) sentiment = 'bearish';
+  const summary = directional.length > 0
+    ? `Aggregated ${totalItems} scored items from ${directional.map(s => s.name).join(', ')}. Overall tone is ${sentiment} with ${confidence}% confidence.`
+    : `No directional social or news data available for ${symbol} at this time.`;
 
-  const sourceCount = sources.length;
-  const coverageScore = Math.min(sourceCount / 7, 1);
-  const volumeScore = Math.min(totalItems / 40, 1);
-  const strengthScore = Math.min(Math.abs(avgScore) / 0.3, 1);
-  const confidence = Math.round(
-    (coverageScore * 30 + volumeScore * 30 + strengthScore * 40)
-  );
-
-  const themes = extractThemes(sources);
-
-  const sentimentLabel = sentiment === 'bullish' ? 'Bullish' : sentiment === 'bearish' ? 'Bearish' : 'Neutral';
-  const sourceNames = sources.map(s => s.name).join(', ');
-  const summary = sources.length > 0
-    ? `Aggregated ${totalItems} mentions from ${sourceNames}. Overall sentiment is ${sentimentLabel.toLowerCase()} with ${confidence}% confidence.`
-    : `No social media data available for ${symbol} at this time. Try again later.`;
-
-  const briefSummary = generateBriefSummary(symbol, sentiment, confidence, sources, themes, avgScore);
+  const briefSummary = generateBriefSummary({
+    symbol,
+    sentiment,
+    sources,
+    retail,
+    news,
+    divergence,
+    agreement,
+    attention,
+    totalItems,
+  });
 
   return {
     sentiment,
-    confidence: Math.min(confidence, 95),
+    confidence,
     sources,
     totalItems,
     themes,
+    keyQuotes,
+    retail,
+    news,
+    divergence,
+    agreement,
+    attention,
+    unavailableSources,
     briefSummary,
     summary,
     checkedAt: new Date().toISOString(),
   };
 }
 
-function generateBriefSummary(
-  symbol: string,
-  sentiment: 'bullish' | 'bearish' | 'neutral',
-  confidence: number,
-  sources: SourceResult[],
-  themes: string[],
-  avgScore: number,
-): string {
-  if (sources.length === 0) {
-    return `No social media or news data available for ${symbol} at this time. Sentiment analysis requires at least one active data source.`;
-  }
+export async function fetchSentiment(symbol: string, companyName?: string): Promise<AggregatedSentiment> {
+  const settled = await Promise.allSettled([
+    fetchGoogleNews(symbol, companyName),
+    fetchStockTwits(symbol),
+    fetchYahooNews(symbol, companyName),
+    fetchApeWisdom(symbol),
+    fetchSocialTickers(symbol),
+    fetchFinnhubSentiment(symbol),
+    fetchMarketWatch(symbol, companyName),
+    fetchCNBC(symbol, companyName),
+    fetchGoogleTrends(symbol),
+    fetchAdanosSentiment(symbol),
+  ]);
 
-  const totalItems = sources.reduce((a, s) => a + s.count, 0);
-  const allHeadlines = sources.flatMap(s => s.headlines);
-  const topics = extractTopics(allHeadlines);
-  const bullishSources = sources.filter(s => s.score > 0.08);
-  const bearishSources = sources.filter(s => s.score < -0.08);
-  const strongest = sources.reduce((a, b) => a.score > b.score ? a : b);
-  const weakest = sources.reduce((a, b) => a.score < b.score ? a : b);
-
-  const srcNames = sources.map(s => s.name).join(', ');
-  const parts: string[] = [];
-
-  if (sentiment === 'bullish') {
-    parts.push(
-      `Based on an analysis of ${totalItems} mentions across ${srcNames}, the prevailing sentiment around ${symbol} is bullish. ` +
-      `${bullishSources.length} of ${sources.length} data sources registered a positive tone, suggesting that market participants are positioning for near-term upside. ` +
-      `The aggregate sentiment score of ${(avgScore * 100).toFixed(1)}% reflects a meaningful lean toward optimism rather than mere noise.`
-    );
-  } else if (sentiment === 'bearish') {
-    parts.push(
-      `Based on an analysis of ${totalItems} mentions across ${srcNames}, the prevailing sentiment around ${symbol} is bearish. ` +
-      `${bearishSources.length} of ${sources.length} data sources registered a negative tone, indicating that investors and traders are increasingly cautious. ` +
-      `The aggregate sentiment score of ${(avgScore * 100).toFixed(1)}% signals meaningful selling pressure or risk-off positioning in social and news channels.`
-    );
-  } else {
-    const mixed = bullishSources.length > 0 && bearishSources.length > 0;
-    parts.push(
-      mixed
-        ? `Based on an analysis of ${totalItems} mentions across ${srcNames}, sentiment on ${symbol} is divided. ` +
-          `${bullishSources.length} source(s) lean positive while ${bearishSources.length} lean negative, resulting in a neutral aggregate. ` +
-          `This type of split often precedes a directional breakout as the market digests competing narratives.`
-        : `Based on an analysis of ${totalItems} mentions across ${srcNames}, sentiment on ${symbol} is flat. ` +
-          `No strong directional conviction was detected across social media or news outlets. ` +
-          `This could indicate a period of consolidation or a lack of meaningful catalysts in the current news cycle.`
-    );
-  }
-
-  if (topics.catalysts.length > 0) {
-    const catalystList = topics.catalysts.slice(0, 4).join(', ');
-    parts.push(
-      `Key catalysts driving the conversation include ${catalystList}. ` +
-      `These themes are dominating social feeds and news headlines, shaping the directional bias for ${symbol} in the near term.`
-    );
-  }
-
-  if (topics.priceTalk.bullish.length > 0 || topics.priceTalk.bearish.length > 0) {
-    const evidenceParts: string[] = [];
-    if (topics.priceTalk.bullish.length > 0) {
-      evidenceParts.push(
-        `On the bullish side, notable mentions include: "${topics.priceTalk.bullish[0].slice(0, 80)}"` +
-        (topics.priceTalk.bullish.length > 1 ? ` and "${topics.priceTalk.bullish[1].slice(0, 80)}"` : '')
-      );
-    }
-    if (topics.priceTalk.bearish.length > 0) {
-      evidenceParts.push(
-        `On the bearish side, concerns center on: "${topics.priceTalk.bearish[0].slice(0, 80)}"` +
-        (topics.priceTalk.bearish.length > 1 ? ` and "${topics.priceTalk.bearish[1].slice(0, 80)}"` : '')
-      );
-    }
-    parts.push(`The narrative tug-of-war is clear. ${evidenceParts.join(' Meanwhile, ')}.`);
-  }
-
-  if (sources.length >= 2) {
-    const srcBreakdown = sources.map(s => {
-      const tone = s.score > 0.08 ? 'bullish' : s.score < -0.08 ? 'bearish' : 'neutral';
-      return `${s.name} (${tone}, ${s.count} items)`;
-    }).join(', ');
-    parts.push(
-      `Source-level breakdown: ${srcBreakdown}. ` +
-      `${strongest.name} is the most optimistic signal at +${(strongest.score * 100).toFixed(0)}%, ` +
-      `while ${weakest.name} is the most cautious at ${(weakest.score * 100).toFixed(0)}%.`
-    );
-  }
-
-  if (confidence >= 70) {
-    parts.push(
-      `Confidence is high at ${confidence}%, supported by strong coverage across multiple independent platforms. ` +
-      `The convergence of signals suggests this is a reliable sentiment reading worth factoring into your analysis.`
-    );
-  } else if (confidence >= 40) {
-    parts.push(
-      `Moderate confidence at ${confidence}% — the signal is present but not overwhelming. ` +
-      `Cross-reference this with technicals and fundamentals before acting on sentiment alone.`
-    );
-  } else {
-    parts.push(
-      `Low confidence at ${confidence}% — data coverage is sparse or contradictory. ` +
-      `This reading should be treated as preliminary and may shift materially as more data becomes available.`
-    );
-  }
-
-  if (sentiment === 'bullish' && confidence >= 50) {
-    parts.push(
-      `Takeaway: Social sentiment supports a bullish lean on ${symbol}. ` +
-      `Watch for confirmation from price action — a break above recent resistance on elevated volume would validate the positive social momentum.`
-    );
-  } else if (sentiment === 'bearish' && confidence >= 50) {
-    parts.push(
-      `Takeaway: Social sentiment supports a bearish lean on ${symbol}. ` +
-      `Watch for confirmation from price action — a break below recent support would validate the negative social momentum. ` +
-      `Contrarian traders may view extreme bearishness as a potential contrarian signal if fundamentals remain intact.`
-    );
-  } else if (sentiment === 'neutral') {
-    parts.push(
-      `Takeaway: No clear social edge on ${symbol} at this time. ` +
-      `Wait for a clearer signal — either a catalyst-driven shift in sentiment or a decisive technical breakout — before committing capital based on social data.`
-    );
-  }
-
-  return parts.join('\n\n');
-}
-
-// --- Topic extraction from headlines ---------------------------------
-
-interface Topics {
-  catalysts: string[];
-  priceTalk: { bullish: string[]; bearish: string[] };
-}
-
-function extractTopics(headlines: string[]): Topics {
-  const catalysts: string[] = [];
-  const bullish: string[] = [];
-  const bearish: string[] = [];
-
-  const catalystPatterns = [
-    { regex: /earnings|revenue|profit|eps|quarterly/i, label: 'earnings report' },
-    { regex: /upgrade|upgraded|raise.*target|price target.*\$/i, label: 'analyst upgrade' },
-    { regex: /downgrade|downgraded|cut.*target|lower.*target/i, label: 'analyst downgrade' },
-    { regex: /federal\s*reserve|fed|rate\s*cut|rate\s*hike|interest\s*rate/i, label: 'Fed/rates' },
-    { regex: /tariff|trade\s*war|sanction|import\s*duty/i, label: 'tariffs/trade' },
-    { regex: /acquisition|acquire|merger|deal|buyout/i, label: 'M&A activity' },
-    { regex: /dividend|buyback|share\s*repurchase/i, label: 'capital return' },
-    { regex: /ipo|listing|going\s*public/i, label: 'IPO' },
-    { regex: /launch|new\s*product|release|unveil/i, label: 'product launch' },
-    { regex: /partnership|collaboration|joint\s*venture/i, label: 'partnership' },
-    { regex: /lawsuit|sec|investigation|regulat/i, label: 'regulatory/legal' },
-    { regex: /layoff|job\s*cut|restructur/i, label: 'restructuring' },
-    { regex: /insider\s*(buy|sell)|ceo\s*(buy|sell)/i, label: 'insider activity' },
-    { regex: /guidance|forecast|outlook|projection/i, label: 'guidance update' },
+  const fallbacks: Array<[string, SourceKind]> = [
+    ['Google News', 'news'],
+    ['StockTwits', 'social'],
+    ['Yahoo Finance', 'news'],
+    ['ApeWisdom (Reddit)', 'attention'],
+    ['SocialTickers', 'social'],
+    ['Finnhub', 'social'],
+    ['MarketWatch', 'news'],
+    ['CNBC', 'news'],
+    ['Google Trends', 'attention'],
+    ['Adanos', 'social'],
   ];
 
-  const seen = new Set<string>();
+  const allSources = settled.map((result, i) => {
+    if (result.status === 'fulfilled') return result.value;
+    const [name, kind] = fallbacks[i];
+    return emptySource(name, kind);
+  });
 
-  for (const h of headlines) {
-    for (const { regex, label } of catalystPatterns) {
-      if (regex.test(h) && !seen.has(label)) {
-        catalysts.push(label);
-        seen.add(label);
-      }
-    }
+  return aggregateSources(symbol, allSources);
+}
 
-    if (/\b(bull|buy|long|upside|surge|rally|beat|upgrade|record high)\b/i.test(h)) {
-      if (bullish.length < 3) bullish.push(h.slice(0, 80));
-    }
-    if (/\b(bear|sell|short|downside|crash|miss|downgrade|fear)\b/i.test(h)) {
-      if (bearish.length < 3) bearish.push(h.slice(0, 80));
-    }
+interface BriefSummaryInput {
+  symbol: string;
+  sentiment: SentimentTone;
+  sources: SourceResult[];
+  retail: GroupScore | null;
+  news: GroupScore | null;
+  divergence: Divergence;
+  agreement: number;
+  attention: AttentionInfo | null;
+  totalItems: number;
+}
+
+function generateBriefSummary({
+  symbol,
+  sentiment,
+  sources,
+  retail,
+  news,
+  divergence,
+  agreement,
+  attention,
+  totalItems,
+}: BriefSummaryInput): string {
+  const directionalCount = sources.filter(s => s.kind !== 'attention').length;
+
+  if (totalItems === 0) {
+    return attention
+      ? `No directional chatter on ${symbol} right now — ${attention.label.toLowerCase()} is ${attention.trend} (${attention.detail}).`
+      : `No live social or news data for ${symbol} right now.`;
   }
 
-  return { catalysts, priceTalk: { bullish, bearish } };
+  const label = sentiment === 'bullish' ? 'Bullish' : sentiment === 'bearish' ? 'Bearish' : 'Neutral';
+  const parts = [
+    `${label} tone on ${symbol} — ${totalItems} scored items from ${directionalCount} live source${directionalCount === 1 ? '' : 's'}, ${Math.round(agreement * 100)}% agreement.`,
+  ];
+
+  if (retail && news) {
+    const relation = divergence === 'aligned'
+      ? 'in line with'
+      : divergence === 'retail-more-bullish'
+        ? 'more bullish than'
+        : divergence === 'retail-more-bearish'
+          ? 'more bearish than'
+          : null;
+    parts.push(relation
+      ? `Retail chatter is ${relation} financial news (${formatPct(retail.score)} vs ${formatPct(news.score)}).`
+      : `Retail ${formatPct(retail.score)} vs financial news ${formatPct(news.score)}.`);
+  } else if (retail) {
+    parts.push(`No financial-news read; retail chatter alone is ${toneOf(retail.score)} (${formatPct(retail.score)}).`);
+  } else if (news) {
+    parts.push(`No retail read; financial news alone is ${toneOf(news.score)} (${formatPct(news.score)}).`);
+  }
+
+  if (attention && attention.trend !== 'unknown') {
+    parts.push(`${attention.label} is ${attention.trend} (${attention.detail}).`);
+  }
+
+  return parts.join(' ');
 }

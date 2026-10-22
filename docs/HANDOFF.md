@@ -1,8 +1,8 @@
 # Handoff Document — Smart Money Screener & Scheduled Scan
 
-> **Last updated:** 2026-10-15  
-> **Commit:** `b4ead13` (pushed to `main`, Vercel auto-deployed)  
-> **Test suite:** 335 tests / 26 files passing  
+> **Last updated:** 2026-10-22  
+> **Commit:** `cc60388` (pushed to `main`, Vercel auto-deployed); Smart Money UX + sentiment rework uncommitted  
+> **Test suite:** 353 tests / 27 files passing  
 > **Typecheck:** clean (`tsc --noEmit` exit 0)
 
 ---
@@ -87,6 +87,30 @@ Bumped insider cache key so pre-fix empty buys are not reused.
 - Page effect fetches `smart_money_scan_rows?universe=eq.index&select=*` for all three index modes
 - Curated stays local-only (GME + RIVN not in the 501 union)
 - 5 new tests in `serverScanForMode` describe block (smartMoney.test.ts: 45 total)
+
+### 2.7 Screener Discoverability (unreleased)
+
+The 501-symbol union made the highest-scoring names hard to find; the table is now sortable and self-describing:
+
+- **Default sort** is signal score ↓ (unchanged ranking, now visible in the header arrow and context line).
+- **Sortable headers**: Score, Insider $, 13F mgrs, Congress B/S, Short %Float, Price, Δ% — first click sorts desc, second toggles asc; the sort dropdown exposes the same 8 keys.
+- **Context line** above the table: `Showing 1–25 of N · sorted by <field> ↓` with an inline **Show all N**, so the active order and truncation are never ambiguous.
+- **Top score card** shows `LEN · 70/100` and is clickable — filters the table to that symbol (click again clears) and scrolls results into view.
+- **Rank-1 emphasis**: when sorted by score ↓, the first row gets a `TOP` badge and a subtle emerald tint.
+- **Loading state**: the server pre-scan fetch shows a spinner line (`Loading 501 rows from the daily scan…`); a failed fetch now keeps the local cache instead of throwing an unhandled rejection.
+
+Verified in headless Chrome on the 501 universe: score sort → LEN first (70, Strong, insider $595.29M); Insider $ desc → RSG ($1.12B); asc → Agilent (`—`).
+
+### 2.8 Social Sentiment: Evidence-First Card (unreleased)
+
+The home-page sentiment card previously read like a template (generic prose + percentages with no provenance). It now shows the evidence behind the score:
+
+- **Real quotes with links**: every source returns actual headlines/posts (`items` with URL + timestamp), ranked by recency × keyword strength. The card lists the top items per source and "What people are saying" with source, relative time, tone chip, and an external link.
+- **Crowd vs financial news**: `aggregateSources()` splits directional sources into `retail` (social) and `news` groups, so the card can show e.g. "Retail +3% vs financial news +16%" and call out divergence instead of hiding it in one blended number. Confidence reports `n/m sources agree`.
+- **Attention is separate**: ApeWisdom, SocialTickers, Google Trends, and Adanos feed an attention line (e.g. "Reddit mentions 23, +28% vs 24h, rank #28") and never steer the directional call.
+- **No template prose**: `extractTopics` was removed; the summary is short and data-grounded (tone, item count, live-source count, agreement, divergence/attention). "Stand-out item" was dropped because the quotes list sits directly below it.
+- **Source hygiene**: headlines are filtered by `isRelevantToSymbol` (symbol or company name, company suffixes like Inc/Corp stripped) because Yahoo's news feed and CNBC's search return generic market stories. MarketWatch no longer falls back to unrelated headlines; SocialTickers was rewritten to mentions/upvotes after its API stopped returning `social_score` (it previously scored a constant −100%).
+- **Tests**: `src/lib/sentimentAnalysis.test.ts` (13 tests) covers tone mapping, relevance filtering, group scores, divergence, agreement, quote ranking, and `aggregateSources` (attention volume cannot flip direction; attention-only input stays neutral).
 
 ---
 
@@ -247,8 +271,8 @@ Page opens → mode effect:
 
 | File | Purpose |
 |------|---------|
-| `src/pages/SmartMoneyScreener.tsx` (529 lines) | Page component — mode selector, table, scan button, load effect |
-| `src/lib/smartMoney.ts` (929 lines) | Scoring, scan orchestration, `SERVER_SCANNED_MODES`, `serverScanForMode`, `mapScanDbRow` |
+| `src/pages/SmartMoneyScreener.tsx` (630 lines) | Page component — mode selector, sortable table, Top score card, scan button, load effect |
+| `src/lib/smartMoney.ts` (946 lines) | Scoring, scan orchestration, `SERVER_SCANNED_MODES`, `serverScanForMode`, `mapScanDbRow` |
 | `src/lib/smartMoney.test.ts` (45 tests) | Unit tests for scoring + server read-path |
 | `src/pages/SmartMoneyScreener.test.tsx` | Page component tests |
 | `src/lib/edgeFn.ts` | `edgeRest(tablePath)` REST helper |
@@ -315,7 +339,7 @@ Page opens → mode effect:
 # Typecheck
 .\node_modules\.bin\tsc.cmd --noEmit
 
-# Tests (335 tests / 26 files)
+# Tests (353 tests / 27 files)
 npm.cmd run test
 
 # Build (dist/ committed to git)
@@ -336,7 +360,7 @@ npx.cmd supabase functions deploy smart-money-scan --no-verify-jwt
 ## 8. Verification Checklist (After Any Change)
 
 1. `tsc --noEmit` → exit 0
-2. `npm run test` → 335 passing
+2. `npm run test` → 353 passing
 3. `npm run build` → clean, new `dist/assets/index-*.js`
 4. `git add -A && git commit && git push origin main`
 5. Vercel auto-deploys (check `https://dandanball-stock.vercel.app`)

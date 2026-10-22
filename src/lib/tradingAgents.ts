@@ -615,7 +615,7 @@ export async function runTradingAgents(
     ? calculateLiquidityConditions(deps.historical, condition)
     : null;
 
-  const sentimentPromise = fetchSentiment(symbolUp).catch(() => null);
+  const sentimentPromise = fetchSentiment(symbolUp, stock.name).catch(() => null);
   const forecastPromise = deps.historical.length
     ? Promise.resolve(generateForecast(deps.historical, 30))
     : Promise.resolve<ForecastPoint[]>(null);

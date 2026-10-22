@@ -230,7 +230,9 @@ const Index = () => {
               <div className="animate-fade-in" style={{ animationDelay: '0.13s' }}>
                 <SocialSentimentCheck
                   symbol={selectedStock.symbol}
+                  companyName={selectedStock.name}
                   action={socialAction}
+                  changePercent={selectedStock.changePercent}
                 />
               </div>
 
