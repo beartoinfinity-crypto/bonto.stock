@@ -12,7 +12,6 @@ import { MultiTimeframeRSI } from '@/components/MultiTimeframeRSI';
 import { KDJIndicator } from '@/components/KDJIndicator';
 import { SignalPanel } from '@/components/SignalPanel';
 import { ForecastSimulator } from '@/components/ForecastSimulator';
-import { OptionsWheel } from '@/components/OptionsWheel';
 
 import { PutCallRatio } from '@/components/PutCallRatio';
 import { TodayActionPlan } from '@/components/TodayActionPlan';
@@ -211,11 +210,6 @@ const Index = () => {
               {/* Forecast Simulator */}
               <div className="animate-fade-in" style={{ animationDelay: '0.3s' }}>
                 <ForecastSimulator data={historicalData} symbol={selectedStock.symbol} />
-              </div>
-
-              {/* Options Wheel Analysis */}
-              <div className="animate-fade-in" style={{ animationDelay: '0.32s' }}>
-                <OptionsWheel data={historicalData} symbol={selectedStock.symbol} />
               </div>
             </div>
 

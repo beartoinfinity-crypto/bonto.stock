@@ -133,6 +133,17 @@ Same pattern for `LiquidityMonitor.tsx`: hero verdict Abundant / Normal / Tighte
 
 Headless verification (5 buy / 2 sell, overbought RSI): old verdict `STRONG BUY` from 7 signals over 6 strategies; new verdict `HOLD`, `NET SCORE -16`, 7 signals over 7 strategies, meter 2 red segments left of centre, neutral successes labelled as passing rows. Build: `dist/assets/index-6rrgnVJN.js` (1,893.71 kB) + `index-CjT3JW9i.css` (83.74 kB).
 
+### 2.12 Options Wheel Moved to `/flow`
+
+`OptionsWheel` was the last options-strategy card on the home page, sitting three cards below the tape it depends on. It now lives on the Options Flow page, immediately after the full chain and before the research notes (`OptionsFlow.tsx`), and the home-page mount plus its `Index.tsx` import are gone.
+
+- **Placement** — `data` comes from `fetchHistoricalData(symbol)` (the component needs ≥60 daily bars; it still returns `null` otherwise), so `/flow` no longer only needs the CBOE tape.
+- **Separate cache key** — the query uses `['options-flow-historical', symbol]` and unwraps `.data`. It deliberately does **not** reuse `useStockData`'s `['stock-historical', symbol]`, because that key holds a whole `FetchResult` object (`{ data, error, isRealData, fromCache }`) rather than `StockData[]`. `useStockData()` itself was rejected inside `/flow` — it owns its own `selectedStock` state and data-source toasts.
+- **Symbol source** — `flowSymbol = tape?.symbol ?? symbolInput.trim().toUpperCase()`, so the wheel follows the tape once a quote loads and the typed symbol before that; the query is disabled while the symbol is empty.
+- **Loading** — a spinner card renders while history loads so the section does not pop out of the layout.
+
+`/flow` is unchanged otherwise: same tape, ratios, OI walls, max pain, expected move, unusual activity and chain table. Home page left column now ends at `ForecastSimulator`.
+
 ---
 
 ## 3. Current Architecture

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -8,6 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Header } from '@/components/Header';
 import { BackToTop } from '@/components/BackToTop';
 import { ResearchNotes, type ResearchNote } from '@/components/ResearchNotes';
+import { OptionsWheel } from '@/components/OptionsWheel';
+import { fetchHistoricalData } from '@/lib/stockApi';
 import {
   Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
@@ -145,6 +148,14 @@ export default function OptionsFlow() {
   }, [analysis, spot, showAllChain]);
 
   const verdict = ratioVerdict(analysis?.ratios.byVolume ?? null);
+
+  const flowSymbol = tape?.symbol ?? symbolInput.trim().toUpperCase();
+  const historicalQuery = useQuery({
+    queryKey: ['options-flow-historical', flowSymbol],
+    queryFn: async () => (await fetchHistoricalData(flowSymbol)).data,
+    staleTime: 60 * 60 * 1000,
+    enabled: flowSymbol.length > 0,
+  });
 
   return (
     <div className="min-h-screen bg-background">
@@ -482,6 +493,18 @@ export default function OptionsFlow() {
               </CardContent>
             </Card>
           </>
+        )}
+
+        {flowSymbol.length > 0 && (
+          historicalQuery.isLoading ? (
+            <Card>
+              <CardContent className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading price history for {flowSymbol}…
+              </CardContent>
+            </Card>
+          ) : (
+            <OptionsWheel data={historicalQuery.data ?? []} symbol={flowSymbol} />
+          )
         )}
 
         <ResearchNotes notes={FLOW_NOTES} />
