@@ -80,7 +80,7 @@ export function calculateLiquidityConditions(
       warningThreshold: 'Weekly drop > 5%',
       isWarning: netLiqWarning,
       severity: netLiqWarning && liquidityWeeklyChange < -8 ? 'critical' : netLiqWarning ? 'warning' : 'normal',
-      description: `Derived from price momentum proxy | Weekly: ${liquidityWeeklyChange >= 0 ? '+' : ''}${liquidityWeeklyChange.toFixed(1)}%`,
+      description: `Price-momentum proxy · Weekly ${liquidityWeeklyChange >= 0 ? '+' : ''}${liquidityWeeklyChange.toFixed(1)}%`,
       hint: netLiqWarning
         ? `Funding pressure estimate dropped ${Math.abs(liquidityWeeklyChange).toFixed(1)}% this week. When liquidity contracts rapidly, risk assets typically sell off within 1-3 weeks. Monitor Fed statements for intervention signals.`
         : netLiquidityT > 5.5
@@ -94,7 +94,7 @@ export function calculateLiquidityConditions(
       warningThreshold: '> 5.50% suggests stress',
       isWarning: sofrWarning,
       severity: sofrValue > 5.8 ? 'critical' : sofrWarning ? 'warning' : 'normal',
-      description: 'Estimated from volatility regime — proxy for overnight funding cost',
+      description: 'Volatility-regime proxy for overnight funding cost',
       hint: sofrValue > 5.5
         ? `Estimated funding stress at ${sofrValue.toFixed(2)}% — elevated volatility regimes historically correlate with tighter credit conditions. Watch for 2-3 quarter lag before real economic impact.`
         : sofrValue < 4.8
@@ -108,7 +108,7 @@ export function calculateLiquidityConditions(
       warningThreshold: '> 130 suggests stress',
       isWarning: moveWarning,
       severity: moveValue > 160 ? 'critical' : moveWarning ? 'warning' : 'normal',
-      description: 'Derived from stock volatility + bandwidth — proxy for bond market stress',
+      description: 'Stock vol + bandwidth proxy for bond stress',
       hint: moveValue > 130
         ? `Bond volatility proxy at ${moveValue.toFixed(0)} — elevated readings historically precede stock volatility by 1-2 weeks. When bonds are unstable, equities follow. Risk-off positioning warranted.`
         : moveValue < 80
@@ -122,7 +122,7 @@ export function calculateLiquidityConditions(
       warningThreshold: 'High estimate + wide spread',
       isWarning: fxWarning,
       severity: fxWarning && usdjpyValue > 158 ? 'critical' : fxWarning ? 'warning' : 'normal',
-      description: 'Yen estimate from rate proxy — carry trade risk indicator',
+      description: 'Rate-proxy carry-trade risk estimate',
       hint: fxWarning
         ? `Estimated FX risk elevated — rate proxy suggests wide US-Japan spread. Overcrowded carry trades have triggered global deleveraging events (e.g. Aug 2024 yen unwind). Monitor for sudden reversals.`
         : rateSpread > 4.0
@@ -161,7 +161,7 @@ export function calculateLiquidityConditions(
   } else {
     rating = 'abundant';
     ratingLabel = 'Abundant Liquidity';
-    actionAdvice = 'Favorable liquidity, maintain or适度 increase risk positions';
+    actionAdvice = 'Favorable liquidity, maintain or moderately increase risk positions';
   }
 
   return {
