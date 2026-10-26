@@ -90,7 +90,7 @@ const translations = {
 
     // ---- TodayActionPlan ----
     todayActionPlan: "Today's Action Plan",
-    synthesizedRec: 'synthesized recommendation',
+    synthesizedRec: 'technical read',
     hold: 'HOLD',
     confidenceIndex: 'Confidence',
     historyBtn: 'History',
@@ -120,8 +120,7 @@ const translations = {
     projectedPrice: 'Projected Price',
     expectedReturn: 'Expected Return',
     monteCarloBasis: 'Based on {days}-day Monte Carlo simulation (100 paths)',
-    whyAction: 'Why this action?',
-    reroll: 'Re-roll',
+    whyAction: 'Why this read?',
     disclaimer: 'This is an automated technical analysis summary, not financial advice. Always do your own research and manage risk accordingly.',
     insufficientData: 'Insufficient data for action plan (need 100+ data points)',
     actionBuy: 'Consider buying — bullish setup',
@@ -187,9 +186,9 @@ const translations = {
     reasonBearishWord: 'bearish',
 
     // ---- Headlines ----
-    headlineBuy: 'Consider buying ${price} — bullish setup',
-    headlineSell: 'Consider selling ${price} — bearish setup',
-    headlineHold: 'Hold — wait for clearer signals ${price}',
+    headlineBuy: 'Technical read leans bullish near ${price} — watch the support/stop levels',
+    headlineSell: 'Technical read leans bearish near ${price} — watch the resistance/stop levels',
+    headlineHold: 'Technical read is neutral near ${price} — wait for a clearer signal',
 
     // ---- Confidence Notifications ----
     confidenceSurgeTitle: '📈 Confidence Surge',
@@ -205,7 +204,9 @@ const translations = {
     greed: 'Greed',
     fear: 'Fear',
     sentimentScore: 'Sentiment Score',
+    greedScore: 'Greed Score',
     indicators: 'Indicators',
+    sentimentDisclaimer: 'Indicators are estimates derived from this stock\u2019s price action \u2014 not real survey or market data. Use as a directional signal only.',
 
     // ---- LiquidityMonitor ----
     liquidityConditions: 'Liquidity Proxy',
@@ -424,7 +425,7 @@ const translations = {
 
     // ---- TodayActionPlan ----
     todayActionPlan: '今日操作計劃',
-    synthesizedRec: '綜合操作建議',
+    synthesizedRec: '技術觀點',
     hold: '持有',
     confidenceIndex: '信心指數',
     historyBtn: '歷史',
@@ -454,7 +455,7 @@ const translations = {
     projectedPrice: '預測價格',
     expectedReturn: '預期報酬',
     monteCarloBasis: '基於 {days} 天蒙地卡羅模擬（100條路徑）',
-    whyAction: '為何如此建議？',
+    whyAction: '為何如此解讀？',
     reroll: '重新模擬',
     disclaimer: '本內容為自動技術分析摘要，非投資建議。請自行研究並妥善管理風險。',
     insufficientData: '數據不足，無法產生操作計劃（需 100 筆以上數據）',
@@ -521,9 +522,9 @@ const translations = {
     reasonBearishWord: '看空',
 
     // ---- Headlines ----
-    headlineBuy: '建議買入 ${price} — 多頭設置',
-    headlineSell: '建議減倉/賣出 ${price} — 空頭設置',
-    headlineHold: '持有觀望 — 等待更清晰信號 ${price}',
+    headlineBuy: '技術面偏多，約 ${price} — 留意支撐/停損位',
+    headlineSell: '技術面偏空，約 ${price} — 留意阻力/停損位',
+    headlineHold: '技術面中性，約 ${price} — 等待更明確訊號',
 
     // ---- Confidence Notifications ----
     confidenceSurgeTitle: '📈 信心指數飆升',
@@ -538,7 +539,9 @@ const translations = {
     greed: '貪婪',
     fear: '恐懼',
     sentimentScore: '情緒分數',
+    greedScore: '貪婪分數',
     indicators: '指標',
+    sentimentDisclaimer: '各指標為由本股票價格走勢推算的估計值，並非真實調查或市場數據。僅供方向性參考。',
 
     // ---- LiquidityMonitor ----
     liquidityConditions: '流動性代理指標',

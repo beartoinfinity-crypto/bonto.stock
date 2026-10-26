@@ -19,11 +19,9 @@ import {
   TrendingUp,
   TrendingDown,
   GitBranch,
-  RefreshCw,
   CheckCircle2,
   XCircle,
   BarChart3,
-  Activity,
   Gauge,
   ChevronDown,
   ChevronUp,
@@ -33,7 +31,6 @@ import { StockData, Signal, calculateSMA, calculateBollingerBands, generateMonte
 import { getStrategyRecommendations } from '@/lib/strategyRecommendation';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { useLanguage, TranslationKey } from '@/lib/i18n';
 import { toast } from 'sonner';
 
@@ -213,11 +210,10 @@ function computeConfidenceHistory(data: StockData[], daysBack: number = 7): Conf
 }
 
 function computeActionAdvice(
-  data: StockData[], 
+  data: StockData[],
   signals: Signal[],
   symbol: string,
   t: (key: TranslationKey) => string,
-  rerollCount: number = 0,
   forecastDays: number = 30,
   forecastPaths: number = 100,
   quotePrice?: number
@@ -240,9 +236,10 @@ function computeActionAdvice(
       return h >>> 0;
     };
 
-    // Generate Monte Carlo forecast for forward-looking insights (seeded to avoid changing every re-render)
+    // Monte Carlo forecast with a deterministic seed so the projection is
+    // stable for a given symbol/data/date — no re-roll.
     const seed = hashStringToSeed(
-      `${symbol}|${data[latestIdx].date}|${currentPrice.toFixed(4)}|${forecastDays}|${forecastPaths}|${rerollCount}`
+      `${symbol}|${data[latestIdx].date}|${currentPrice.toFixed(4)}|${forecastDays}|${forecastPaths}`
     );
     const mcResult = generateMonteCarloPaths(data, forecastDays, forecastPaths, { seed });
     const p50FinalPrice = mcResult.p50[mcResult.p50.length - 1];
@@ -401,7 +398,7 @@ function computeActionAdvice(
     // Factor 5: Volume Confirmation (成交量確認) - Weight: 10%
     const volumeStrong = volumeRatio > 1.2;
     const volumeWeak = volumeRatio < 0.8;
-    let volumeScore = volumeStrong ? 85 : volumeWeak ? 40 : 60;
+    const volumeScore = volumeStrong ? 85 : volumeWeak ? 40 : 60;
     const volumePositive = volumeStrong;
     confidenceFactors.push({
       name: t('factorVolume'),
@@ -565,11 +562,10 @@ type HistoryDaysOption = 7 | 14 | 30;
 
 export function TodayActionPlan({ data, signals, symbol, currentPrice: quotePrice }: TodayActionPlanProps) {
   const { t } = useLanguage();
-  const [rerollCount, setRerollCount] = useState(0);
   const [showConfidenceBreakdown, setShowConfidenceBreakdown] = useState(false);
   const [showConfidenceHistory, setShowConfidenceHistory] = useState(false);
   const [historyDays, setHistoryDays] = useState<HistoryDaysOption>(7);
-  const advice = useMemo(() => computeActionAdvice(data, signals, symbol, t, rerollCount, 30, 100, quotePrice), [data, signals, symbol, t, rerollCount, quotePrice]);
+  const advice = useMemo(() => computeActionAdvice(data, signals, symbol, t, 30, 100, quotePrice), [data, signals, symbol, t, quotePrice]);
   
   // Compute confidence history (past N trading days) — all hooks before early return
   const confidenceHistory = useMemo(() => computeConfidenceHistory(data, historyDays), [data, historyDays]);
@@ -690,16 +686,20 @@ export function TodayActionPlan({ data, signals, symbol, currentPrice: quotePric
               {advice.confidence}%
             </span>
             {confidenceTrend.direction !== 'flat' && (
-              <span className={cn(
-                "text-xs flex items-center gap-0.5",
-                confidenceTrend.direction === 'up' ? 'text-bullish' : 'text-bearish'
-              )}>
+              <span
+                className={cn(
+                  "text-xs flex items-center gap-0.5",
+                  confidenceTrend.direction === 'up' ? 'text-bullish' : 'text-bearish'
+                )}
+                title={`${confidenceTrend.direction === 'up' ? 'Up' : 'Down'} ${Math.abs(confidenceTrend.change).toFixed(0)} pts vs ${historyDays}${t('daysLabel')} ago`}
+              >
                 {confidenceTrend.direction === 'up' ? (
                   <TrendingUp className="h-3 w-3" />
                 ) : (
                   <TrendingDown className="h-3 w-3" />
                 )}
                 {Math.abs(confidenceTrend.change).toFixed(0)}
+                <span className="text-muted-foreground">pts · {historyDays}{t('daysLabel')}</span>
               </span>
             )}
           </div>
@@ -942,6 +942,27 @@ export function TodayActionPlan({ data, signals, symbol, currentPrice: quotePric
         <PriceBox label={t('riskReward')} value={advice.riskReward} isText icon={<Target className="h-3.5 w-3.5 text-primary" />} />
       </div>
 
+      {/* Unfavourable risk/reward caution */}
+      {advice.entryPrice && advice.stopLoss && advice.targetPrice && (() => {
+        const risk = Math.abs(advice.entryPrice - advice.stopLoss);
+        const reward = Math.abs(advice.targetPrice - advice.entryPrice);
+        const rr = risk > 0 ? reward / risk : 0;
+        if (rr < 1 && advice.action !== 'HOLD') {
+          return (
+            <div className="mb-5 p-3 rounded-lg border border-warning/40 bg-warning/10 flex items-start gap-2.5 animate-fade-in">
+              <AlertTriangle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-semibold text-warning">Risk/reward is unfavourable</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  The target is only {rr.toFixed(1)}x the stop distance ({advice.riskReward}). Upside is limited relative to downside risk — consider smaller size or waiting for a better entry.
+                </p>
+              </div>
+            </div>
+          );
+        }
+        return null;
+      })()}
+
       {/* Support & Resistance */}
       <div className="flex gap-3 mb-5">
         <div className="flex-1 p-3 bg-success/5 border border-success/20 rounded-lg text-center">
@@ -967,15 +988,6 @@ export function TodayActionPlan({ data, signals, symbol, currentPrice: quotePric
             <GitBranch className="h-4 w-4 text-primary" />
             <h4 className="text-sm font-semibold text-foreground">{t('forecastInsight')}</h4>
             <Badge variant="outline" className="text-xs">{t('p50Median')}</Badge>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="ml-auto h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-              onClick={() => setRerollCount(c => c + 1)}
-            >
-              <RefreshCw className="h-3 w-3 mr-1" />
-              {t('reroll')}
-            </Button>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

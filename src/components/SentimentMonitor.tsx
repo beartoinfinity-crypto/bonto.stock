@@ -82,7 +82,7 @@ export function SentimentMonitor({ data }: SentimentMonitorProps) {
               </p>
             </div>
             <div className="text-right">
-              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('sentimentScore')}</p>
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t('greedScore')}</p>
               <p className={cn('text-2xl font-bold tabular-nums leading-none', cfg.text)}>
                 {result.greedScore.toFixed(0)}
                 <span className="text-sm font-normal text-muted-foreground">/100</span>
@@ -155,7 +155,7 @@ export function SentimentMonitor({ data }: SentimentMonitorProps) {
         </div>
 
         <p className="text-xs text-muted-foreground italic">
-          * {t('disclaimer')}
+          * {t('sentimentDisclaimer')}
         </p>
       </CardContent>
     </Card>

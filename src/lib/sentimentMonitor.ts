@@ -80,69 +80,69 @@ export function calculateMarketSentiment(
 
   const indicators: SentimentIndicator[] = [
     {
-      name: 'NAAIM Exposure Index',
+      name: 'NAAIM Exposure (est.)',
       value: naaimValue,
       displayValue: naaimValue.toFixed(0),
       warningThreshold: '> 80 & median >= 95',
       isWarning: naaimWarning,
-      description: 'Active managers equity exposure percentage',
+      description: 'Price-action proxy for active-manager equity exposure',
       hint: naaimValue > 80
-        ? 'Readings above 80 historically precede corrections within 3-6 months. Smart money is heavily exposed — limited dry powder to push prices higher.'
+        ? 'Estimated exposure is elevated — historically that has preceded corrections within 3-6 months. Limited dry powder to push prices higher.'
         : naaimValue < 20
-        ? 'Extreme underexposure (bottom 10%) has marked major market bottoms. Fear creates opportunity.'
-        : 'Moderate exposure suggests balanced positioning — no extreme crowding risk.',
+        ? 'Estimated underexposure (bottom 10%) has marked major market bottoms. Fear creates opportunity.'
+        : 'Estimated exposure is balanced — no extreme crowding risk.',
     },
     {
-      name: 'Institutional Allocation',
+      name: 'Institutional Allocation (est.)',
       value: allocValue,
       displayValue: allocValue.toFixed(1) + '%',
       warningThreshold: '> 63% (extreme since 2007)',
       isWarning: allocWarning,
-      description: 'Large custodian equity allocation ratio',
+      description: 'Price-action proxy for large-custodian equity weight',
       hint: allocValue > 63
-        ? 'Near 2007 peak (65%) — institutions are max-weight equities. When everyone is in, who is left to buy? Rebalancing risk is elevated.'
+        ? 'Estimated allocation near the 2007 peak (65%) — everyone may already be in. Rebalancing risk is elevated.'
         : allocValue < 40
-        ? 'Institutions are underweight equities — potential fuel for an allocation-driven rally as they rebalance back to target.'
-        : 'Allocation is within normal range — no extreme positioning signal.',
+        ? 'Estimated allocation is underweight equities — potential fuel for an allocation-driven rally.'
+        : 'Estimated allocation is within a normal range — no extreme positioning signal.',
     },
     {
-      name: 'Retail Net Buying',
+      name: 'Retail Net Buying (est.)',
       value: retailRaw,
       displayValue: ordinal(retailRaw) + ' percentile',
       warningThreshold: '> 85th percentile',
       isWarning: retailWarning,
-      description: 'Daily retail fund flow percentile',
+      description: 'Volume-trend proxy for retail flow participation',
       hint: retailRaw > 85
-        ? 'Retail euphoria at 85th+ percentile. Historically, retail is a late-cycle participant — their peak buying often coincides with market tops.'
+        ? 'Estimated retail participation in the 85th+ percentile. Retail is often a late-cycle buyer — their peak buying has coincided with market tops.'
         : retailRaw < 15
-        ? 'Retail capitulation — extreme fear often creates buying opportunities when fundamentals are intact.'
-        : 'Retail activity is balanced — no contrarian signal.',
+        ? 'Estimated retail capitulation — extreme fear has often created buying opportunities when fundamentals are intact.'
+        : 'Estimated retail activity is balanced — no contrarian signal.',
     },
     {
-      name: 'S&P 500 Forward P/E',
+      name: 'S&P 500 Forward P/E (est.)',
       value: forwardPe,
       displayValue: forwardPe.toFixed(1) + 'x',
       warningThreshold: '> 22.5x (near historical peak)',
       isWarning: peWarning,
-      description: 'Forward P/E valuation level',
+      description: 'Price/momentum proxy for forward valuation',
       hint: forwardPe > 22.5
-        ? 'Valuations stretched above 22.5x — 10-year average is ~18x. Mean reversion risk is high. Either earnings must accelerate or prices must correct.'
+        ? 'Estimated valuation above 22.5x — the 10-year average is ~18x. Mean-reversion risk is high.'
         : forwardPe < 14
-        ? 'Below 14x forward P/E — historically a strong buy signal. Valuations are pricing in recession-level earnings.'
-        : 'Valuation is near historical average — fair value range.',
+        ? 'Estimated valuation below 14x — historically a strong entry zone. Prices may be pricing in recession-level earnings.'
+        : 'Estimated valuation is near the historical average — fair value range.',
     },
     {
-      name: 'Hedge Fund Leverage',
+      name: 'Hedge Fund Leverage (est.)',
       value: leverageValue,
       displayValue: leverageValue.toFixed(1) + 'x',
       warningThreshold: '> 7.5x (historical high)',
       isWarning: leverageWarning,
-      description: 'Hedge fund leverage ratio',
+      description: 'Volatility-regime proxy for hedge-fund leverage',
       hint: leverageValue > 7.5
-        ? 'Leverage at extreme levels — hedge funds are leveraged into the trend. A volatility spike will force deleveraging, amplifying drawdowns.'
+        ? 'Estimated leverage is extreme — a volatility spike can force deleveraging and amplify drawdowns.'
         : leverageValue < 3
-        ? 'Low leverage suggests defensive positioning — hedge funds are not chasing the rally. Contrarian bullish signal.'
-        : 'Leverage is moderate — no extreme risk-taking detected.',
+        ? 'Estimated leverage is low — defensively positioned funds are not chasing the rally. Contrarian bullish signal.'
+        : 'Estimated leverage is moderate — no extreme risk-taking detected.',
     },
   ];
 

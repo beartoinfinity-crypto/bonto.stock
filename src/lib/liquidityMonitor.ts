@@ -118,7 +118,7 @@ export function calculateLiquidityConditions(
     {
       name: 'FX Risk Estimate',
       value: usdjpyValue,
-      displayValue: `\u00A5${usdjpyValue.toFixed(1)} / ${rateSpread.toFixed(1)}%`,
+      displayValue: `\u00A5${usdjpyValue.toFixed(1)} \u00B7 ${rateSpread.toFixed(1)}% spread`,
       warningThreshold: 'High estimate + wide spread',
       isWarning: fxWarning,
       severity: fxWarning && usdjpyValue > 158 ? 'critical' : fxWarning ? 'warning' : 'normal',

@@ -1,10 +1,9 @@
 import { useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import {
-  TrendingUp, TrendingDown, Minus, BarChart3, Target, Activity,
-  Zap, AlertTriangle, CheckCircle2, Clock, Calendar, CalendarDays,
+  TrendingUp, TrendingDown, Minus, BarChart3, Clock, Calendar, CalendarDays,
+  Lightbulb, CheckCircle2,
 } from 'lucide-react';
 import {
   StockData,
@@ -20,35 +19,60 @@ interface ChartAnalystProps {
   symbol: string;
 }
 
+type Direction = 'bullish' | 'bearish' | 'neutral';
+
 interface Forecast {
   period: 'short' | 'mid' | 'long';
   label: string;
-  direction: 'bullish' | 'bearish' | 'neutral';
+  direction: Direction;
   confidence: 'High' | 'Medium' | 'Low';
   keyLevels: string[];
   insight: string;
 }
 
+interface MetricRow {
+  name: string;
+  value: string;
+  tone: Direction;
+  warn: boolean;
+  read: string;
+}
+
 interface Analysis {
-  trend: { direction: 'bullish' | 'bearish' | 'neutral'; strength: number; description: string };
-  movingAverages: { sma20: number | null; sma50: number | null; sma200: number | null; description: string };
-  rsi: { value: number | null; zone: string; description: string };
-  macd: { bullish: boolean; histogram: number; description: string };
-  bollinger: { position: string; pct: number; description: string };
-  supportResistance: { support: number; resistance: number; description: string };
-  volume: { trend: string; description: string };
-  priceAction: { description: string };
-  outlook: { bias: 'bullish' | 'bearish' | 'neutral'; confidence: string; summary: string };
+  asOf: string;
+  bars: number;
+  trend: {
+    direction: Direction;
+    strength: number;
+    changeWeek: number;
+    changeMonth: number;
+    change3Month: number;
+    changeDay: number;
+  };
+  movingAverages: {
+    sma20: number | null;
+    sma50: number | null;
+    sma200: number | null;
+    direction: Direction;
+  };
+  rsi: { value: number | null; zone: string; direction: Direction };
+  macd: {
+    bullish: boolean;
+    histogram: number;
+    histogramPrev: number | null;
+    crossover: 'up' | 'down' | 'none';
+  };
+  bollinger: { position: string; pct: number };
+  supportResistance: { support: number; resistance: number; riskReward: number };
+  volume: { trend: 'high' | 'low' | 'normal'; ratio: number; spike: boolean };
+  priceAction: { direction: Direction; pattern: string; bullish5: number; bearish5: number };
+  outlook: { bias: Direction; confidence: 'High' | 'Medium' | 'Low'; score: number; summary: string };
   forecasts: Forecast[];
+  rows: MetricRow[];
 }
 
-function pickBias(bullish: number, bearish: number): 'bullish' | 'bearish' | 'neutral' {
+function pickBias(bullish: number, bearish: number): Direction {
   return bullish > bearish + 1 ? 'bullish' : bearish > bullish + 1 ? 'bearish' : 'neutral';
-}
-
-function pickConfidence(bullish: number, bearish: number): 'High' | 'Medium' | 'Low' {
-  const diff = Math.abs(bullish - bearish);
-  return diff >= 3 ? 'High' : diff >= 2 ? 'Medium' : 'Low';
 }
 
 function analyze(data: StockData[]): Analysis | null {
@@ -68,16 +92,9 @@ function analyze(data: StockData[]): Analysis | null {
   const changeDay = prev ? ((last.close - prev.close) / prev.close) * 100 : 0;
 
   // -- Trend ----------------------------------------------------------
-  let trendDirection: 'bullish' | 'bearish' | 'neutral' = 'neutral';
-  let trendStrength = 0;
-  if (changeMonth > 3) { trendDirection = 'bullish'; trendStrength = Math.min(changeMonth / 10, 1); }
-  else if (changeMonth < -3) { trendDirection = 'bearish'; trendStrength = Math.min(Math.abs(changeMonth) / 10, 1); }
-
-  const trendDesc = trendDirection === 'bullish'
-    ? `${last.symbol} is trending higher \u2014 up ${changeWeek.toFixed(1)}% this week, ${changeMonth.toFixed(1)}% this month, and ${change3Month.toFixed(1)}% over three months. ${changeDay > 0 ? 'Today\u2019s session added to the gains.' : 'A modest pullback today does not undermine the broader uptrend.'}`
-    : trendDirection === 'bearish'
-    ? `${last.symbol} is under distribution \u2014 down ${changeWeek.toFixed(1)}% this week, ${Math.abs(changeMonth).toFixed(1)}% this month, and ${Math.abs(change3Month).toFixed(1)}% over three months. ${changeDay < 0 ? 'Selling continued today.' : 'A bounce today may be a dead cat bounce unless confirmed by follow-through.'}`
-    : `${last.symbol} is consolidating in a range. Week-over-week change is ${changeWeek.toFixed(1)}%, month-over-month ${changeMonth.toFixed(1)}%. No dominant trend \u2014 waiting for a catalyst.`;
+  let trendDirection: Direction = 'neutral';
+  if (changeMonth > 3) trendDirection = 'bullish';
+  else if (changeMonth < -3) trendDirection = 'bearish';
 
   // -- Moving Averages ------------------------------------------------
   const sma20 = calculateSMA(data, 20);
@@ -87,60 +104,22 @@ function analyze(data: StockData[]): Analysis | null {
   const sma50Last = sma50[sma50.length - 1];
   const sma200Last = sma200 ? sma200[sma200.length - 1] : null;
 
-  let crossProximity = '';
-  if (sma200Last && sma50Last) {
-    const gapPct = ((sma50Last - sma200Last) / sma200Last) * 100;
-    if (Math.abs(gapPct) < 1) {
-      crossProximity = gapPct > 0
-        ? ' The 50-day SMA is converging toward the 200-day \u2014 a potential Golden Cross within reach.'
-        : ' The 50-day SMA is converging toward the 200-day \u2014 a potential Death Cross looming.';
-    }
-  }
-
-  let maDesc = '';
+  let maDirection: Direction = 'neutral';
   if (sma20Last && sma50Last) {
-    const dist20 = ((last.close - sma20Last) / sma20Last * 100).toFixed(1);
-    const dist50 = ((last.close - sma50Last) / sma50Last * 100).toFixed(1);
-
-    if (last.close > sma20Last && sma20Last > sma50Last) {
-      maDesc = `Price ($${last.close.toFixed(2)}) trades ${dist20}% above the 20-day SMA ($${sma20Last.toFixed(2)}) and ${dist50}% above the 50-day SMA ($${sma50Last.toFixed(2)}) \u2014 a bullish "stacked" alignment where shorter MAs lead higher. `;
-    } else if (last.close < sma20Last && sma20Last < sma50Last) {
-      maDesc = `Price ($${last.close.toFixed(2)}) trades ${Math.abs(Number(dist20))}% below the 20-day SMA ($${sma20Last.toFixed(2)}) and ${Math.abs(Number(dist50))}% below the 50-day SMA ($${sma50Last.toFixed(2)}) \u2014 a bearish alignment where each MA acts as overhead resistance. `;
-    } else {
-      maDesc = `Price ($${last.close.toFixed(2)}) is tangled with the MAs \u2014 20-day at $${sma20Last.toFixed(2)} (${dist20}%), 50-day at $${sma50Last.toFixed(2)} (${dist50}%). The lack of clear separation signals indecision. `;
-    }
-    if (sma200Last) {
-      const dist200 = ((last.close - sma200Last) / sma200Last * 100).toFixed(1);
-      maDesc += last.close > sma200Last
-        ? `Above the 200-day SMA ($${sma200Last.toFixed(2)}, +${dist200}%) \u2014 the long-term trend remains constructive.`
-        : `Below the 200-day SMA ($${sma200Last.toFixed(2)}, ${dist200}%) \u2014 long-term momentum is negative. A reclaim of this level would be a significant bullish signal.`;
-    }
-    maDesc += crossProximity;
+    if (last.close > sma20Last && sma20Last > sma50Last) maDirection = 'bullish';
+    else if (last.close < sma20Last && sma20Last < sma50Last) maDirection = 'bearish';
   }
 
   // -- RSI ------------------------------------------------------------
   const rsi = calculateRSI(data);
   const rsiLast = rsi[rsi.length - 1];
-  const rsiPrev = rsi[rsi.length - 2];
   let rsiZone = 'neutral';
-  let rsiDesc = '';
+  let rsiDirection: Direction = 'neutral';
   if (rsiLast !== null) {
-    const rsiTrend = rsiPrev !== null ? rsiLast - rsiPrev : 0;
-    const rsiDir = rsiTrend > 1 ? 'rising' : rsiTrend < -1 ? 'falling' : 'flat';
-
-    if (rsiLast < 30) {
-      rsiZone = 'oversold';
-      rsiDesc = `RSI at ${rsiLast.toFixed(1)} (${rsiDir}) \u2014 deeply oversold. Historically, readings below 30 have preceded mean-reversion rallies in most equities. Watch for bullish divergence or a candle reversal pattern as confirmation before entering.`;
-    } else if (rsiLast > 70) {
-      rsiZone = 'overbought';
-      rsiDesc = `RSI at ${rsiLast.toFixed(1)} (${rsiDir}) \u2014 overbought territory. Strong momentum, but the risk/reward for new entries is unfavorable. A pullback toward the 40-50 zone would offer a better risk-adjusted entry.`;
-    } else if (rsiLast < 40) {
-      rsiDesc = `RSI at ${rsiLast.toFixed(1)} (${rsiDir}) \u2014 leaning bearish but not yet oversold. Momentum is weakening. A break below 30 would signal capitulation; a bounce from here would suggest buyers are stepping in.`;
-    } else if (rsiLast > 60) {
-      rsiDesc = `RSI at ${rsiLast.toFixed(1)} (${rsiDir}) \u2014 leaning bullish with room to run. Momentum favors buyers, but watch for exhaustion if RSI approaches 70 without price making new highs.`;
-    } else {
-      rsiDesc = `RSI at ${rsiLast.toFixed(1)} (${rsiDir}) \u2014 balanced momentum. Neither side has a clear edge. Wait for RSI to break above 60 (bullish) or below 40 (bearish) for a directional signal.`;
-    }
+    if (rsiLast < 30) { rsiZone = 'oversold'; rsiDirection = 'bullish'; }
+    else if (rsiLast > 70) { rsiZone = 'overbought'; rsiDirection = 'bearish'; }
+    else if (rsiLast < 45) rsiDirection = 'bullish';
+    else if (rsiLast > 55) rsiDirection = 'bearish';
   }
 
   // -- MACD -----------------------------------------------------------
@@ -152,42 +131,18 @@ function analyze(data: StockData[]): Analysis | null {
   const macdBullish = macdLast !== null && signalLast !== null && macdLast > signalLast;
   const macdCrossUp = histLast !== null && histPrev !== null && histLast > 0 && histPrev <= 0;
   const macdCrossDown = histLast !== null && histPrev !== null && histLast < 0 && histPrev >= 0;
-  const histAccelerating = histLast !== null && histPrev !== null ? Math.abs(histLast) > Math.abs(histPrev) : false;
-
-  const zeroLine = macdLast !== null ? (macdLast > 0 ? 'above' : 'below') : 'at';
-  let macdDesc = '';
-  if (macdCrossUp) {
-    macdDesc = `MACD just crossed above the signal line \u2014 a fresh bullish crossover. Histogram turned positive, confirming upward momentum is building. This is one of the most reliable short-term buy signals when confirmed by volume.`;
-  } else if (macdCrossDown) {
-    macdDesc = `MACD just crossed below the signal line \u2014 a bearish crossover. Histogram turned negative, indicating selling pressure is increasing. Consider tightening stops if long.`;
-  } else if (macdBullish) {
-    macdDesc = `MACD (${macdLast?.toFixed(2)}) remains above the signal line (${signalLast?.toFixed(2)}), ${zeroLine} the zero line. ${histAccelerating ? 'Histogram is expanding \u2014 momentum is accelerating.' : 'Histogram is narrowing \u2014 momentum may be peaking.'}`;
-  } else {
-    macdDesc = `MACD (${macdLast?.toFixed(2)}) is below the signal line (${signalLast?.toFixed(2)}), ${zeroLine} the zero line. ${histAccelerating ? 'Histogram is expanding to the downside \u2014 bearish momentum is intensifying.' : 'Histogram is narrowing \u2014 bearish momentum may be decelerating.'}`;
-  }
 
   // -- Bollinger Bands ------------------------------------------------
   const bb = calculateBollingerBands(data);
   const bbUpper = bb.upper[bb.upper.length - 1];
   const bbLower = bb.lower[bb.lower.length - 1];
-  const bbMiddle = bb.middle[bb.middle.length - 1];
   let bbPosition = 'middle';
   let bbPct = 50;
-  let bbDesc = '';
   if (bbUpper && bbLower) {
     const bbRange = bbUpper - bbLower;
     bbPct = bbRange > 0 ? ((last.close - bbLower) / bbRange) * 100 : 50;
-    const bandwidth = bbMiddle ? ((bbRange / bbMiddle) * 100).toFixed(1) : '?';
-
-    if (bbPct > 90) {
-      bbPosition = 'upper';
-      bbDesc = `Price sits at the upper band ($${bbUpper.toFixed(2)}), ${bbPct.toFixed(0)}% of band width. Bandwidth is ${bandwidth}% of middle band. ${last.close >= bbUpper ? 'A close at or above the upper band signals strong momentum \u2014 but watch for a reversion toward the mean.' : 'Approaching resistance at the upper band. A breakout above would open upside acceleration.'}`;
-    } else if (bbPct < 10) {
-      bbPosition = 'lower';
-      bbDesc = `Price sits at the lower band ($${bbLower.toFixed(2)}), ${bbPct.toFixed(0)}% of band width. Bandwidth is ${bandwidth}% of middle band. ${last.close <= bbLower ? `A close at or below the lower band signals selling exhaustion \u2014 a bounce toward the middle band ($${bbMiddle?.toFixed(2) ?? '?'}) is statistically likely.` : 'Near support at the lower band. A break below would signal further downside.'}`;
-    } else {
-      bbDesc = `Price is in the middle zone at ${bbPct.toFixed(0)}% of band width ($${bbLower.toFixed(2)} \u2013 $${bbUpper.toFixed(2)}). Bandwidth is ${bandwidth}%. ${parseFloat(bandwidth) < 5 ? 'Tight bandwidth suggests a volatility squeeze \u2014 expect an expansion move soon.' : 'No extreme positioning. A move toward either band would set the near-term direction.'}`;
-    }
+    if (bbPct > 90) bbPosition = 'upper';
+    else if (bbPct < 10) bbPosition = 'lower';
   }
 
   // -- Support / Resistance -------------------------------------------
@@ -198,125 +153,62 @@ function analyze(data: StockData[]): Analysis | null {
 
   const distSupport = ((last.close - support) / support * 100).toFixed(1);
   const distResist = ((resistance - last.close) / last.close * 100).toFixed(1);
-  const riskReward = (parseFloat(distResist) / (parseFloat(distSupport) || 1)).toFixed(1);
-
-  const srDesc = `Support at $${support.toFixed(2)} (${distSupport}% below) \u2014 ${last.close > support ? 'price holds a cushion above this floor.' : 'price is testing this level; a decisive break would target the next support zone.'} Resistance at $${resistance.toFixed(2)} (${distResist}% above). ${parseFloat(riskReward) > 2 ? `Risk/reward skews favorably at ${riskReward}:1 from current levels.` : `Risk/reward is ${riskReward}:1 \u2014 the upside to resistance is modest relative to downside risk.`}`;
+  const riskReward = Number((parseFloat(distResist) / (parseFloat(distSupport) || 1)).toFixed(1));
 
   // -- Volume ---------------------------------------------------------
   const avgVol20 = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
   const avgVol50 = volumes.slice(-50).reduce((a, b) => a + b, 0) / 50;
   const recentVolRatio = avgVol20 / (avgVol50 || 1);
   const lastVol = volumes[volumes.length - 1];
-  const volConfirm = changeWeek > 0 && recentVolRatio > 1;
-
-  let volDesc = '';
-  if (recentVolRatio > 1.3) {
-    volDesc = `20-day average volume is ${recentVolRatio.toFixed(1)}x the 50-day average \u2014 elevated participation confirms conviction behind the current trend.`;
-  } else if (recentVolRatio < 0.7) {
-    volDesc = `20-day average volume is ${recentVolRatio.toFixed(1)}x the 50-day average \u2014 declining participation suggests the move lacks institutional backing.`;
-  } else {
-    volDesc = `Volume is roughly in line with its 50-day average. No institutional accumulation or distribution signal.`;
-  }
-  if (lastVol > avgVol20 * 1.5) {
-    volDesc += ` Today\u2019s volume (${(lastVol / 1_000_000).toFixed(1)}M) is ${((lastVol / avgVol20 - 1) * 100).toFixed(0)}% above average \u2014 a significant spike.`;
-  }
-  volDesc += volConfirm
-    ? ' Volume confirms the upside move \u2014 a bullish sign.'
-    : changeWeek > 0 && recentVolRatio < 1
-    ? ' Price is rising on thin volume \u2014 a potential warning sign for the rally.'
-    : '';
+  const volTrend: 'high' | 'low' | 'normal' = recentVolRatio > 1.3 ? 'high' : recentVolRatio < 0.7 ? 'low' : 'normal';
 
   // -- Price Action ---------------------------------------------------
-  const candleRange = last.high - last.low;
-  const bodyRange = Math.abs(last.close - last.open);
-  const upperWick = last.high - Math.max(last.close, last.open);
+  const bullish5 = data.slice(-5).filter(d => d.close > d.open).length;
+  const bearish5 = 5 - bullish5;
+  const lastBody = Math.abs(last.close - last.open);
+  const lastRange = Math.max(0.0001, last.high - last.low);
   const lowerWick = Math.min(last.close, last.open) - last.low;
-  const isHammer = lowerWick > bodyRange * 2 && upperWick < bodyRange;
-  const isShootingStar = upperWick > bodyRange * 2 && lowerWick < bodyRange;
-  const isDoji = bodyRange < candleRange * 0.1;
-  const bullishCandles = data.slice(-5).filter(d => d.close > d.open).length;
-  const bearishCandles = 5 - bullishCandles;
-
-  let paDesc = '';
-  if (isDoji) {
-    paDesc = `A doji candle today signals indecision \u2014 neither buyers nor sellers won the session. After ${changeWeek > 0 ? 'a recent rally' : 'recent weakness'}, this could mark a turning point. Confirm with tomorrow\u2019s close.`;
-  } else if (isHammer) {
-    paDesc = `A hammer pattern formed \u2014 the long lower wick shows buyers stepped in aggressively at the lows. In a downtrend, this is one of the most reliable reversal signals. Watch for confirmation with a bullish close tomorrow.`;
-  } else if (isShootingStar) {
-    paDesc = `A shooting star appeared \u2014 price surged to new highs but sellers pushed it back. This is a classic exhaustion pattern at tops. If confirmed by a bearish follow-through, expect a pullback toward support.`;
+  const upperWick = last.high - Math.max(last.close, last.open);
+  let paPattern: string;
+  let paDirection: Direction;
+  if (lastBody < lastRange * 0.1) {
+    paPattern = 'Doji';
+    paDirection = 'neutral';
+  } else if (lowerWick > lastBody * 2 && upperWick < lastBody) {
+    paPattern = 'Hammer';
+    paDirection = 'bullish';
+  } else if (upperWick > lastBody * 2 && lowerWick < lastBody) {
+    paPattern = 'Shooting star';
+    paDirection = 'bearish';
   } else {
-    const bodyDir = last.close >= last.open ? 'bullish' : 'bearish';
-    paDesc = `Today\u2019s ${bodyDir} candle (range $${candleRange.toFixed(2)}) ${last.close >= last.open ? 'closed near its highs' : 'closed near its lows'}. Over the last 5 sessions: ${bullishCandles} green, ${bearishCandles} red. ${bullishCandles >= 4 ? 'Buying pressure dominates.' : bearishCandles >= 4 ? 'Selling pressure dominates.' : 'Mixed session sequence \u2014 no clear dominance.'}`;
+    paPattern = 'Trending day';
+    paDirection = bullish5 >= 3 ? 'bullish' : bearish5 >= 3 ? 'bearish' : 'neutral';
   }
 
-  // -- Forecasts ------------------------------------------------------
-
-  // Short-term (1-5 days): RSI, MACD crossover, Bollinger, candle pattern
+  // -- Forecasts (signals & confidence per timeframe) -----------------
   let shortBull = 0;
   let shortBear = 0;
   if (rsiLast !== null) {
-    if (rsiLast < 30) shortBull += 3;
-    else if (rsiLast < 40) shortBull += 1;
-    else if (rsiLast > 70) shortBear += 3;
-    else if (rsiLast > 60) shortBear += 1;
+    if (rsiLast < 30) shortBull += 3; else if (rsiLast < 40) shortBull += 1;
+    else if (rsiLast > 70) shortBear += 3; else if (rsiLast > 60) shortBear += 1;
   }
-  if (macdCrossUp) shortBull += 3;
-  else if (macdBullish) shortBull += 1;
-  else if (macdCrossDown) shortBear += 3;
-  else shortBear += 1;
-  if (bbPosition === 'lower') shortBull += 2;
-  else if (bbPosition === 'upper') shortBear += 2;
-  if (isHammer) shortBull += 2;
-  else if (isShootingStar) shortBear += 2;
-  else if (isDoji) { /* neutral */ }
-  else if (last.close >= last.open) shortBull += 1;
-  else shortBear += 1;
+  if (macdCrossUp) shortBull += 3; else if (macdBullish) shortBull += 1;
+  else if (macdCrossDown) shortBear += 3; else shortBear += 1;
+  if (bbPosition === 'lower') shortBull += 2; else if (bbPosition === 'upper') shortBear += 2;
+  if (paPattern === 'Hammer') shortBull += 2;
+  else if (paPattern === 'Shooting star') shortBear += 2;
+  else if (last.close >= last.open) shortBull += 1; else shortBear += 1;
 
-  const shortBias = pickBias(shortBull, shortBear);
-  const shortConf = pickConfidence(shortBull, shortBear);
-  const shortLevels = [
-    `Support $${support.toFixed(2)}`,
-    `Resistance $${resistance.toFixed(2)}`,
-    bbLower ? `BB Lower $${bbLower.toFixed(2)}` : null,
-    bbUpper ? `BB Upper $${bbUpper.toFixed(2)}` : null,
-  ].filter(Boolean) as string[];
-  const shortInsight = shortBias === 'bullish'
-    ? `Bullish setup for the next 1-5 sessions. ${rsiLast !== null && rsiLast < 35 ? 'Oversold RSI suggests a bounce is due.' : 'Momentum indicators favor upside.'} Look for a move toward $${resistance.toFixed(2)} as the near-term target.`
-    : shortBias === 'bearish'
-    ? `Bearish pressure likely to persist over the next 1-5 sessions. ${rsiLast !== null && rsiLast > 65 ? 'Overbought RSI suggests a pullback.' : 'Momentum indicators favor downside.'} Risk stays toward $${support.toFixed(2)}.`
-    : `Neutral \u2014 no strong edge in either direction for the next few sessions. Wait for a break above $${resistance.toFixed(2)} or below $${support.toFixed(2)} for direction.`;
-
-  // Mid-term (1-4 weeks): MA alignment, trend, volume, S/R
   let midBull = 0;
   let midBear = 0;
-  if (trendDirection === 'bullish') midBull += 2;
-  else if (trendDirection === 'bearish') midBear += 2;
+  if (trendDirection === 'bullish') midBull += 2; else if (trendDirection === 'bearish') midBear += 2;
   if (sma20Last && sma50Last && last.close > sma20Last && sma20Last > sma50Last) midBull += 2;
   else if (sma20Last && sma50Last && last.close < sma20Last && sma20Last < sma50Last) midBear += 2;
-  if (recentVolRatio > 1.2) {
-    if (changeWeek > 0) midBull += 1; else midBear += 1;
-  }
-  if (last.close > support && ((last.close - support) / support * 100) < 3) midBull += 1;
-  if (last.close < resistance && ((resistance - last.close) / last.close * 100) < 3) midBear += 1;
-  if (sma200Last) {
-    if (last.close > sma200Last) midBull += 1; else midBear += 1;
-  }
+  if (recentVolRatio > 1.2) { if (changeWeek > 0) midBull += 1; else midBear += 1; }
+  if (((last.close - support) / support * 100) < 3) midBull += 1;
+  if (((resistance - last.close) / last.close * 100) < 3) midBear += 1;
+  if (sma200Last) { if (last.close > sma200Last) midBull += 1; else midBear += 1; }
 
-  const midBias = pickBias(midBull, midBear);
-  const midConf = pickConfidence(midBull, midBear);
-  const midLevels = [
-    sma20Last ? `SMA20 $${sma20Last.toFixed(2)}` : null,
-    sma50Last ? `SMA50 $${sma50Last.toFixed(2)}` : null,
-    `Support $${support.toFixed(2)}`,
-    `Resistance $${resistance.toFixed(2)}`,
-  ].filter(Boolean) as string[];
-  const midInsight = midBias === 'bullish'
-    ? `The 1-4 week outlook favors bulls. ${sma20Last && sma50Last ? 'Price holding above both the 20 and 50-day SMAs provides a rising floor.' : 'Trend structure supports further upside.'} A sustained close above $${resistance.toFixed(2)} would confirm a breakout toward new highs.`
-    : midBias === 'bearish'
-    ? `The 1-4 week outlook favors bears. ${sma20Last && sma50Last ? 'Price trapped below the 20 and 50-day SMAs keeps a lid on rallies.' : 'Trend structure suggests further downside.'} Watch $${support.toFixed(2)} as the critical support \u2014 a break below accelerates the selloff.`
-    : `Consolidation is likely over the next 1-4 weeks. ${sma20Last && sma50Last ? 'Price is caught between the 20 and 50-day SMAs \u2014 a squeeze is forming.' : 'No clear trend edge.'} Wait for a decisive close above $${resistance.toFixed(2)} or below $${support.toFixed(2)} before committing.`;
-
-  // Long-term (1-3 months): SMA200, 3-month trend, S/R, volume
   let longBull = 0;
   let longBear = 0;
   if (sma200Last) {
@@ -324,93 +216,215 @@ function analyze(data: StockData[]): Analysis | null {
     if (sma50Last && sma50Last > sma200Last) longBull += 1;
     else if (sma50Last && sma50Last < sma200Last) longBear += 1;
   }
-  if (change3Month > 10) longBull += 2;
-  else if (change3Month > 3) longBull += 1;
-  else if (change3Month < -10) longBear += 2;
-  else if (change3Month < -3) longBear += 1;
-  if (recentVolRatio > 1.2 && change3Month > 0) longBull += 1;
-  else if (recentVolRatio > 1.2 && change3Month < 0) longBear += 1;
+  if (change3Month > 10) longBull += 2; else if (change3Month > 3) longBull += 1;
+  else if (change3Month < -10) longBear += 2; else if (change3Month < -3) longBear += 1;
 
+  const shortBias = pickBias(shortBull, shortBear);
+  const midBias = pickBias(midBull, midBear);
   const longBias = pickBias(longBull, longBear);
-  const longConf = pickConfidence(longBull, longBear);
+
+  const shortLevels = [
+    `Support $${support.toFixed(2)}`,
+    `Resistance $${resistance.toFixed(2)}`,
+    bbLower ? `BB lower $${bbLower.toFixed(2)}` : null,
+    bbUpper ? `BB upper $${bbUpper.toFixed(2)}` : null,
+  ].filter(Boolean) as string[];
+  const midLevels = [
+    sma20Last ? `SMA20 $${sma20Last.toFixed(2)}` : null,
+    sma50Last ? `SMA50 $${sma50Last.toFixed(2)}` : null,
+    `Support $${support.toFixed(2)}`,
+    `Resistance $${resistance.toFixed(2)}`,
+  ].filter(Boolean) as string[];
   const longLevels = [
     sma200Last ? `SMA200 $${sma200Last.toFixed(2)}` : null,
-    `3mo Low $${recentLows[0]?.toFixed(2) ?? '?'}`,
-    `3mo High $${recentHighs[0]?.toFixed(2) ?? '?'}`,
+    `3mo low $${recentLows[0]?.toFixed(2) ?? 'n/a'}`,
+    `3mo high $${recentHighs[0]?.toFixed(2) ?? 'n/a'}`,
     `Support $${support.toFixed(2)}`,
   ].filter(Boolean) as string[];
-  const longInsight = longBias === 'bullish'
-    ? `The 1-3 month outlook is constructive. ${sma200Last ? `Trading above the 200-day SMA ($${sma200Last.toFixed(2)}) confirms the long-term uptrend.` : 'Price structure is bullish on the quarterly timeframe.'} Accumulation on pullbacks toward $${support.toFixed(2)} is the preferred strategy.`
-    : longBias === 'bearish'
-    ? `The 1-3 month outlook is defensive. ${sma200Last ? `Trading below the 200-day SMA ($${sma200Last.toFixed(2)}) signals the long-term trend has turned negative.` : 'Price structure is bearish on the quarterly timeframe.'} Reduce exposure on rallies and wait for a reclaim of $${sma200Last?.toFixed(2) ?? resistance.toFixed(2)} before re-entering.`
-    : `The 1-3 month outlook is range-bound. ${sma200Last ? `Price is near the 200-day SMA ($${sma200Last.toFixed(2)}) \u2014 a key decision point.` : 'No strong quarterly trend.'} A decisive break above $${resistance.toFixed(2)} or below $${support.toFixed(2)} will set the direction for the next 1-3 months.`;
+
+  const shortInsight =
+    shortBias === 'bullish'
+      ? `Over the next 1-5 sessions the bias is modestly up. Watch a break of $${resistance.toFixed(2)} to confirm.`
+      : shortBias === 'bearish'
+      ? `Over the next 1-5 sessions the bias is modestly down. A break below $${support.toFixed(2)} would add conviction.`
+      : `No clear edge over the next 1-5 sessions \u2014 wait for a break of $${resistance.toFixed(2)} or $${support.toFixed(2)}.`;
+  const midInsight =
+    midBias === 'bullish'
+      ? `The 1-4 week view is constructive while price holds the 20/50-day averages. $${resistance.toFixed(2)} is the level to beat.`
+      : midBias === 'bearish'
+      ? `The 1-4 week view is cautious while price holds below the 20/50-day averages. $${support.toFixed(2)} is the level that matters.`
+      : `Likely consolidation over 1-4 weeks \u2014 no strong trend edge until $${resistance.toFixed(2)} or $${support.toFixed(2)} gives way.`;
+  const longInsight =
+    longBias === 'bullish'
+      ? `The 1-3 month trend is higher. Pullbacks toward $${support.toFixed(2)} have tended to hold.`
+      : longBias === 'bearish'
+      ? `The 1-3 month trend is lower. Rallies toward resistance have tended to fade.`
+      : `The 1-3 month view is range-bound near $${support.toFixed(2)}-$${resistance.toFixed(2)} until a decisive break.`;
 
   const forecasts: Forecast[] = [
-    { period: 'short', label: '1\u20135 Days', direction: shortBias, confidence: shortConf, keyLevels: shortLevels, insight: shortInsight },
-    { period: 'mid', label: '1\u20134 Weeks', direction: midBias, confidence: midConf, keyLevels: midLevels, insight: midInsight },
-    { period: 'long', label: '1\u20133 Months', direction: longBias, confidence: longConf, keyLevels: longLevels, insight: longInsight },
+    { period: 'short', label: '1\u20135 Days', direction: shortBias, confidence: pickConfidence(shortBull, shortBear), keyLevels: shortLevels, insight: shortInsight },
+    { period: 'mid', label: '1\u20134 Weeks', direction: midBias, confidence: pickConfidence(midBull, midBear), keyLevels: midLevels, insight: midInsight },
+    { period: 'long', label: '1\u20133 Months', direction: longBias, confidence: pickConfidence(longBull, longBear), keyLevels: longLevels, insight: longInsight },
   ];
 
-  // -- Overall Outlook ------------------------------------------------
-  let bullishScore = 0;
-  let bearishScore = 0;
-  const reasons: string[] = [];
-
-  if (trendDirection === 'bullish') { bullishScore += 2; reasons.push('upward trend'); }
-  else if (trendDirection === 'bearish') { bearishScore += 2; reasons.push('downward trend'); }
-
-  if (sma20Last && sma50Last && last.close > sma20Last && sma20Last > sma50Last) { bullishScore += 1; reasons.push('bullish MA alignment'); }
-  else if (sma20Last && sma50Last && last.close < sma20Last && sma20Last < sma50Last) { bearishScore += 1; reasons.push('bearish MA alignment'); }
-
-  if (rsiLast !== null) {
-    if (rsiLast < 30) { bullishScore += 1; reasons.push('oversold RSI'); }
-    else if (rsiLast > 70) { bearishScore += 1; reasons.push('overbought RSI'); }
-  }
-
-  if (macdBullish) { bullishScore += 1; reasons.push('bullish MACD'); }
-  else { bearishScore += 1; reasons.push('bearish MACD'); }
-
-  const bias = pickBias(bullishScore, bearishScore);
-  const confidence = pickConfidence(bullishScore, bearishScore);
+  // -- Overall outlook (aggregated across timeframes) -----------------
+  const totalBull = shortBull + midBull * 2 + longBull * 3;
+  const totalBear = shortBear + midBear * 2 + longBear * 3;
+  const score = totalBull + totalBear > 0 ? Math.round((totalBull / (totalBull + totalBear)) * 100) : 50;
+  const bias: Direction = score >= 62 ? 'bullish' : score <= 38 ? 'bearish' : 'neutral';
+  const confidence = pickConfidence(totalBull, totalBear);
 
   const biasLabel = bias === 'bullish' ? 'Bullish' : bias === 'bearish' ? 'Bearish' : 'Neutral';
-  const summary = `${biasLabel} overall outlook (${confidence} confidence). Key drivers: ${reasons.slice(0, 3).join(', ')}. ` +
-    (bias === 'bullish'
-      ? 'Look for pullback entries toward support \u2014 the trend is your friend.'
+  const summary =
+    bias === 'bullish'
+      ? 'The multi-timeframe read leans bullish. Entries near support with a defined stop are safer than chasing strength.'
       : bias === 'bearish'
-      ? 'Reduce exposure on rallies or wait for a break above resistance to confirm reversal.'
-      : 'Wait for a clear directional signal. Trade the range or sit on the sidelines.');
+      ? 'The multi-timeframe read leans bearish. Rallies into resistance are more likely to fade than to break.'
+      : 'Indicators are mixed \u2014 no persistent edge. Wait for a break above resistance or below support before committing.';
+
+  // -- Compact metric rows --------------------------------------------
+  const syntax = (n: number, d = 1) => `${n >= 0 ? '+' : ''}${n.toFixed(d)}%`;
+  const rows: MetricRow[] = [];
+  rows.push({
+    name: 'Trend (3 mo)',
+    value: syntax(change3Month),
+    tone: trendDirection,
+    warn: false,
+    read:
+      trendDirection === 'bullish'
+        ? `Up ${syntax(changeWeek)} this week and ${syntax(changeMonth)} this month${changeDay > 0 ? '; green today.' : '; softer today.'}`
+        : trendDirection === 'bearish'
+        ? `Down ${syntax(changeWeek)} this week and ${syntax(changeMonth)} this month.`
+        : `Range-bound \u2014 ${syntax(changeWeek)} this week, ${syntax(changeMonth)} this month.`,
+  });
+  rows.push({
+    name: 'Moving Averages',
+    value: sma20Last && sma50Last ? `$${sma20Last.toFixed(1)} / $${sma50Last.toFixed(1)}` : 'n/a',
+    tone: maDirection,
+    warn: false,
+    read:
+      maDirection === 'bullish'
+        ? `Price above the 20 and 50-day averages${sma200Last ? `; ${last.close > sma200Last ? 'also above' : 'below'} the 200-day ($${sma200Last.toFixed(1)}).` : '.'}`
+        : maDirection === 'bearish'
+        ? `Price below the 20 and 50-day averages${sma200Last ? `; and ${last.close > sma200Last ? 'above' : 'below'} the 200-day ($${sma200Last.toFixed(1)}).` : '.'}`
+        : `MAs are tangled \u2014 no clean alignment.`,
+  });
+  rows.push({
+    name: 'RSI (14)',
+    value: rsiLast !== null ? rsiLast.toFixed(0) : 'n/a',
+    tone: rsiDirection,
+    warn: rsiLast !== null && (rsiLast < 30 || rsiLast > 70),
+    read:
+      rsiLast === null ? 'No RSI data.'
+        : rsiLast < 30 ? `Oversold at ${rsiLast.toFixed(0)} \u2014 bounces are possible but a falling-knife risk remains.`
+        : rsiLast > 70 ? `Overbought at ${rsiLast.toFixed(0)} \u2014 stretched near-term, pullbacks are common.`
+        : rsiLast < 45 ? `Leaning oversold at ${rsiLast.toFixed(0)} \u2014 room on the left side.`
+        : rsiLast > 55 ? `Leaning overbought at ${rsiLast.toFixed(0)} \u2014 room on the right side.`
+        : `Balanced momentum around ${rsiLast.toFixed(0)}.`,
+  });
+  rows.push({
+    name: 'MACD',
+    value: histLast !== null ? `${histLast >= 0 ? '+' : ''}${histLast.toFixed(2)}` : 'n/a',
+    tone: macdBullish ? 'bullish' : 'bearish',
+    warn: macdCrossUp || macdCrossDown,
+    read:
+      macdCrossUp ? 'Fresh golden cross \u2014 momentum turning up.'
+        : macdCrossDown ? 'Fresh death cross \u2014 momentum turning down.'
+        : macdBullish
+        ? `MACD above signal${histPrev !== null && histLast !== null && Math.abs(histLast) > Math.abs(histPrev) ? ', histogram expanding' : ', histogram steady'} \u2014 mild up-lean.`
+        : `MACD below signal${histPrev !== null && histLast !== null && Math.abs(histLast) > Math.abs(histPrev) ? ', histogram expanding' : ', histogram steady'} \u2014 mild down-lean.`,
+  });
+  rows.push({
+    name: 'Bollinger (20,2)',
+    value: `${bbPct.toFixed(0)}% of band`,
+    tone: bbPosition === 'upper' ? 'bearish' : bbPosition === 'lower' ? 'bullish' : 'neutral',
+    warn: bbPct > 90 || bbPct < 10,
+    read:
+      bbPct > 90 ? `Riding the upper band \u2014 extended vs the recent range, mean-reversion risk.`
+        : bbPct < 10 ? `At the lower band \u2014 short-term stretched, a bounce is possible.`
+        : `Mid-band \u2014 no extreme positioning.`,
+  });
+  rows.push({
+    name: 'Key Levels',
+    value: `S $${support.toFixed(2)} / R $${resistance.toFixed(2)}`,
+    tone: riskReward >= 1 ? trendDirection : 'neutral',
+    warn: riskReward < 1,
+    read:
+      riskReward < 1
+        ? `Resistance is closer than support (R/R ${riskReward.toFixed(1)}:1) \u2014 the setup is not favourable right now.`
+        : `Upside to $${resistance.toFixed(2)} vs downside to $${support.toFixed(2)} is about ${riskReward.toFixed(1)}:1.`,
+  });
+  rows.push({
+    name: 'Volume',
+    value: `${recentVolRatio.toFixed(1)}x`,
+    tone: 'neutral',
+    warn: recentVolRatio > 1.6 || recentVolRatio < 0.6 || (lastVol > avgVol20 * 1.5 && avgVol20 > 0),
+    read:
+      lastVol > avgVol20 * 1.5 && avgVol20 > 0
+        ? `${(lastVol / 1_000_000).toFixed(1)}M shares today \u2014 a ${((lastVol / avgVol20 - 1) * 100).toFixed(0)}% spike above the 20-day norm.`
+        : recentVolRatio > 1.6 ? `20-day volume ${recentVolRatio.toFixed(1)}x the 50-day \u2014 participation is elevated${changeWeek > 0 ? ' and confirms the move.' : ' but the move is fading.'}`
+        : recentVolRatio < 0.6 ? `Volume has dried up (${recentVolRatio.toFixed(1)}x the 50-day) \u2014 low conviction both ways.`
+        : `Volume roughly in line with the 50-day average.`,
+  });
+  rows.push({
+    name: 'Price Action',
+    value: paPattern,
+    tone: paDirection,
+    warn: paPattern === 'Shooting star' || (paPattern === 'Hammer' && changeWeek < 0) || paPattern === 'Doji',
+    read:
+      paPattern === 'Shooting star' ? 'Shooting star \u2014 sellers rejected an early push higher. A caution candle at the top.'
+        : paPattern === 'Hammer' && changeWeek < 0 ? 'Hammer \u2014 buyers defended the lows during weakness. A potential reversal candle.'
+        : paPattern === 'Doji' ? 'Doji \u2014 indecision; a pause or a turn, neither confirmed yet.'
+        : paPattern === 'Trending day'
+        ? `Closed near the ${last.close >= last.open ? 'highs (5s: ' : 'lows (5s: '}${bullish5} green / ${bearish5} red).`
+        : `5 sessions: ${bullish5} green / ${bearish5} red.`,
+  });
+  rows.sort((a, b) => Number(b.warn) - Number(a.warn));
 
   return {
-    trend: { direction: trendDirection, strength: trendStrength, description: trendDesc },
-    movingAverages: { sma20: sma20Last, sma50: sma50Last, sma200: sma200Last, description: maDesc },
-    rsi: { value: rsiLast, zone: rsiZone, description: rsiDesc },
-    macd: { bullish: macdBullish, histogram: histLast ?? 0, description: macdDesc },
-    bollinger: { position: bbPosition, pct: bbPct, description: bbDesc },
-    supportResistance: { support, resistance, description: srDesc },
-    volume: { trend: recentVolRatio > 1.3 ? 'high' : recentVolRatio < 0.7 ? 'low' : 'normal', description: volDesc },
-    priceAction: { description: paDesc },
-    outlook: { bias, confidence, summary },
+    asOf: last.date,
+    bars: data.length,
+    trend: { direction: trendDirection, strength: Math.min(Math.abs(changeMonth) / 10, 1), changeWeek, changeMonth, change3Month, changeDay },
+    movingAverages: { sma20: sma20Last, sma50: sma50Last, sma200: sma200Last, direction: maDirection },
+    rsi: { value: rsiLast, zone: rsiZone, direction: rsiDirection },
+    macd: { bullish: macdBullish, histogram: histLast ?? 0, histogramPrev: histPrev, crossover: macdCrossUp ? 'up' : macdCrossDown ? 'down' : 'none' },
+    bollinger: { position: bbPosition, pct: bbPct },
+    supportResistance: { support, resistance, riskReward },
+    volume: { trend: volTrend, ratio: recentVolRatio, spike: lastVol > avgVol20 * 1.5 && avgVol20 > 0 },
+    priceAction: { direction: paDirection, pattern: paPattern, bullish5, bearish5 },
+    outlook: { bias, confidence, score, summary },
     forecasts,
+    rows,
   };
 }
 
-const trendIcons = {
-  bullish: TrendingUp,
-  bearish: TrendingDown,
-  neutral: Minus,
-};
-
-const trendBadge = {
-  bullish: { label: 'Bullish', className: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' },
-  bearish: { label: 'Bearish', className: 'bg-red-500/15 text-red-400 border-red-500/30' },
-  neutral: { label: 'Neutral', className: 'bg-muted text-muted-foreground border-border' },
-};
+function pickConfidence(bullish: number, bearish: number): 'High' | 'Medium' | 'Low' {
+  const diff = Math.abs(bullish - bearish);
+  return diff >= 3 ? 'High' : diff >= 2 ? 'Medium' : 'Low';
+}
 
 const forecastIcons = {
   short: Clock,
   mid: Calendar,
   long: CalendarDays,
+};
+
+const trendBadge = {
+  bullish: { label: 'Bullish', className: 'bg-emerald-500/15 text-emerald-500 border-emerald-500/30' },
+  bearish: { label: 'Bearish', className: 'bg-red-500/15 text-red-500 border-red-500/30' },
+  neutral: { label: 'Neutral', className: 'bg-muted text-muted-foreground border-border' },
+};
+
+const biasIcon = {
+  bullish: TrendingUp,
+  bearish: TrendingDown,
+  neutral: Minus,
+};
+
+const rowTone = {
+  bullish: { Icon: TrendingUp, className: 'text-emerald-500' },
+  bearish: { Icon: TrendingDown, className: 'text-red-500' },
+  neutral: { Icon: Minus, className: 'text-muted-foreground' },
 };
 
 export function ChartAnalyst({ data, symbol }: ChartAnalystProps) {
@@ -420,83 +434,117 @@ export function ChartAnalyst({ data, symbol }: ChartAnalystProps) {
     return (
       <Card>
         <CardContent className="py-8 text-center text-sm text-muted-foreground">
-          Insufficient data for analysis. Need at least 50 data points.
+          Insufficient data for commentary. Need at least 50 data points.
         </CardContent>
       </Card>
     );
   }
 
-  const { trend, movingAverages, rsi, macd, bollinger, supportResistance, volume, priceAction, outlook, forecasts } = analysis;
-  const TrendIcon = trendIcons[outlook.bias];
-  const outlookBadge = trendBadge[outlook.bias];
+  const { outlook, rows, forecasts } = analysis;
+  const bias = trendBadge[outlook.bias];
+  const BiasIcon = biasIcon[outlook.bias];
+  const bullishCount = rows.filter(r => r.tone === 'bullish').length;
+  const watchCount = rows.filter(r => r.warn).length;
+  const filledSegments = Math.max(1, Math.round((outlook.score / 100) * 8));
 
   return (
     <Card>
       <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-lg flex items-center gap-2">
-            <BarChart3 className="h-5 w-5 text-primary" />
-            Analyst Commentary — {symbol}
-          </CardTitle>
-          <Badge variant="outline" className={cn('text-xs', outlookBadge.className)}>
-            <TrendIcon className="h-3 w-3 mr-1" />
-            {outlookBadge.label} · {outlook.confidence} Confidence
-          </Badge>
-        </div>
+        <CardTitle className="text-lg flex items-center gap-2">
+          <BarChart3 className="h-5 w-5 text-primary" />
+          Analyst Commentary — {symbol}
+        </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4 text-sm">
+      <CardContent className="space-y-4">
 
-        {/* Trend */}
-        <Section icon={<TrendingUp className="h-3.5 w-3.5" />} title="Trend Analysis">
-          {trend.description}
-        </Section>
+        {/* Hero verdict */}
+        <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1">
+              <div className={cn('flex items-center gap-2', bias.className)}>
+                <BiasIcon className="h-5 w-5" />
+                <span className="text-2xl font-bold leading-none">{bias.label}</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                <span className="font-semibold">{bullishCount} of {rows.length} indicators bullish</span>
+                {watchCount > 0 && <span className="text-orange-500"> · {watchCount} to watch</span>}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Technical score</p>
+              <p className={cn('text-2xl font-bold tabular-nums leading-none', bias.className)}>
+                {outlook.score}
+                <span className="text-sm font-normal text-muted-foreground">/100</span>
+              </p>
+              <p className="text-[10px] text-muted-foreground">{outlook.confidence} confidence</p>
+            </div>
+          </div>
 
-        <Separator />
+          <div className="space-y-1">
+            <div className="flex gap-1" aria-hidden="true">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div
+                  key={i}
+                  className={cn('h-1.5 flex-1 rounded-full', i < filledSegments ? (outlook.bias === 'bullish' ? 'bg-emerald-500' : outlook.bias === 'bearish' ? 'bg-red-500' : 'bg-yellow-500') : 'bg-border')}
+                />
+              ))}
+            </div>
+            <div className="flex justify-between text-[10px] text-muted-foreground">
+              <span>Bearish</span>
+              <span>Bullish</span>
+            </div>
+          </div>
 
-        {/* Moving Averages */}
-        <Section icon={<Activity className="h-3.5 w-3.5" />} title="Moving Averages">
-          {movingAverages.description}
-        </Section>
-
-        <Separator />
-
-        {/* RSI + MACD */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Section icon={<Zap className="h-3.5 w-3.5" />} title="RSI (14)">
-            {rsi.description}
-          </Section>
-          <Section icon={<Activity className="h-3.5 w-3.5" />} title="MACD">
-            {macd.description}
-          </Section>
+          <div className="flex items-start gap-2 rounded-md bg-background/70 px-2.5 py-2">
+            <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-yellow-500" />
+            <p className="text-sm font-medium leading-snug">{outlook.summary}</p>
+          </div>
         </div>
 
-        <Separator />
+        {/* Metric rows */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Indicators</span>
+            <span className="text-xs text-muted-foreground">{bullishCount}/{rows.length} bullish{watchCount > 0 && ` · ${watchCount} watch`}</span>
+          </div>
 
-        {/* Bollinger + Volume */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Section icon={<BarChart3 className="h-3.5 w-3.5" />} title="Bollinger Bands">
-            {bollinger.description}
-          </Section>
-          <Section icon={<BarChart3 className="h-3.5 w-3.5" />} title="Volume Analysis">
-            {volume.description}
-          </Section>
+          {rows.map((r) => {
+            const Icon = rowTone[r.tone].Icon;
+            return (
+              <div
+                key={r.name}
+                className={cn(
+                  'rounded-md border px-3 py-2',
+                  r.warn ? 'border-orange-500/30 bg-orange-500/5' : 'border-border bg-muted/20',
+                )}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Icon className={cn('h-4 w-4 shrink-0', rowTone[r.tone].className)} />
+                    <span className="truncate text-sm font-medium">{r.name}</span>
+                    {r.warn && (
+                      <span className="shrink-0 rounded bg-orange-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-500">
+                        Watch
+                      </span>
+                    )}
+                  </div>
+                  <span className={cn('shrink-0 text-sm font-bold tabular-nums', r.warn ? 'text-orange-500' : 'text-foreground')}>
+                    {r.value}
+                  </span>
+                </div>
+                <p
+                  className={cn(
+                    'mt-1 pl-6 text-xs leading-relaxed text-muted-foreground',
+                    r.warn ? 'line-clamp-2' : 'truncate',
+                  )}
+                  title={r.read}
+                >
+                  {r.read}
+                </p>
+              </div>
+            );
+          })}
         </div>
-
-        <Separator />
-
-        {/* Support / Resistance */}
-        <Section icon={<Target className="h-3.5 w-3.5" />} title="Key Levels & Risk/Reward">
-          {supportResistance.description}
-        </Section>
-
-        <Separator />
-
-        {/* Price Action */}
-        <Section icon={<AlertTriangle className="h-3.5 w-3.5" />} title="Price Action & Patterns">
-          {priceAction.description}
-        </Section>
-
-        <Separator />
 
         {/* Forecasts */}
         <div className="space-y-3">
@@ -525,14 +573,7 @@ export function ChartAnalyst({ data, symbol }: ChartAnalystProps) {
                       {badge.label}
                     </Badge>
                   </div>
-                  <div className="text-[10px] text-muted-foreground">
-                    Confidence: {f.confidence}
-                  </div>
-                  <ul className="text-[11px] text-muted-foreground space-y-0.5">
-                    {f.keyLevels.map((l, i) => (
-                      <li key={i}>• {l}</li>
-                    ))}
-                  </ul>
+                  <div className="text-[10px] text-muted-foreground">Confidence: {f.confidence}</div>
                   <p className="text-xs text-foreground/90 leading-relaxed">{f.insight}</p>
                 </div>
               );
@@ -540,32 +581,14 @@ export function ChartAnalyst({ data, symbol }: ChartAnalystProps) {
           </div>
         </div>
 
-        {/* Overall Outlook */}
-        <div className={cn(
-          'rounded-lg border p-4',
-          outlook.bias === 'bullish' && 'bg-emerald-500/5 border-emerald-500/20',
-          outlook.bias === 'bearish' && 'bg-red-500/5 border-red-500/20',
-          outlook.bias === 'neutral' && 'bg-muted/50 border-border',
-        )}>
-          <div className="flex items-center gap-2 mb-2">
-            <CheckCircle2 className="h-4 w-4 text-primary" />
-            <span className="font-semibold text-sm">Analyst Outlook</span>
-          </div>
-          <p className="text-sm leading-relaxed">{outlook.summary}</p>
+        {/* Data basis */}
+        <div className="flex items-start gap-2 rounded-md bg-secondary/30 px-2.5 py-2">
+          <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+          <p className="text-xs text-muted-foreground italic">
+            {symbol} · based on {analysis.bars.toLocaleString()} daily closes through {analysis.asOf}. Derived from price and volume only — not financial advice.
+          </p>
         </div>
-
       </CardContent>
     </Card>
-  );
-}
-
-function Section({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-        {icon} {title}
-      </div>
-      <p className="text-sm leading-relaxed text-foreground/90">{children}</p>
-    </div>
   );
 }

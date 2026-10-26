@@ -148,6 +148,17 @@ Headless verification (`/flow`, AAPL auto-loaded): wheel renders after the chain
 
 Known inconsistency in the panel itself (pre-existing, untouched by the move): the suitability hero reads `EXCELLENT · 95/100` while the Alpaca checklist reads `ACCEPTABLE · 5/7`, because affordability ($33.1K needed, $20K cash) and concentration (166% of cash per contract) fail the checklist but barely move the suitability score.
 
+### 2.13 Public Trust Pass on the Four Home Panels
+
+Reliability, informativeness and readability pass over `ChartAnalyst.tsx` (Analyst Commentary), `TodayActionPlan.tsx` (Today's Action Plan), `SentimentMonitor.tsx` and `LiquidityMonitor.tsx`. Sentiment and Liquidity already had the approved verdict-first pattern; Commentary and Action Plan were prose walls.
+
+- **Analyst Commentary** (`ChartAnalyst.tsx`, 571 → 547 lines) rebuilt on the shared pattern: verdict hero (Bullish/Bearish/Neutral, `n of 8 indicators bullish · m to watch`, 0–100 technical score, 8-segment meter, confidence) over flagged-first metric rows (`WATCH` chips, 2-line reasons, passing rows truncate), the three timeframe forecast cards, and a data-basis footnote. The hero is now **coherent**: the outlook bias/score derives from the same weighted short/mid/long forecast points that drive the cards, so the panel no longer says `Neutral (Low)` while every forecast card says `Bullish (High)`. Overclaiming copy removed ("most reliable buy signal", "statistically likely", "historically preceded rallies").
+- **Today's Action Plan** (`TodayActionPlan.tsx`, 1054 → 992 lines): Monte Carlo **Re-roll button removed** — the P50 seed no longer includes `rerollCount`, so the projection is deterministic for a given symbol/date and can't be re-rolled into a "nicer" number. Added a **risk/reward caution** box when the reward is < 1x the stop distance and the action isn't HOLD (the panel previously recommended BUY next to a `1:0.2` R/R with no explanation). The unlabeled confidence-trend number now reads `4 pts · 7days`. Headlines toned from directives to reads ("Technical read leans bullish near $X — watch the support/stop levels") and `whyAction` → "Why this read?"; `synthesizedRec` → "technical read".
+- **Market Sentiment** (`SentimentMonitor.tsx` + `sentimentMonitor.ts`): the five indicators are **price-action estimates, not real macro data**, but the panel showed real-sounding names (NAAIM 200, P/E 27.2x, leverage 10.0x) with only a generic not-financial-advice footnote. Renamed to `NAAIM Exposure (est.)` etc., descriptions prefixed "price-action proxy", and a dedicated `sentimentDisclaimer` footnote discloses the derivation. Score relabeled `Sentiment Score` → `Greed Score` so high = greedy is unambiguous.
+- **Liquidity Proxy** (`LiquidityMonitor.tsx`): FX row value now labels the spread (`¥145.7 · 3.2% spread` instead of `¥145.7 / 3.2%`). Already disclosed estimates; unchanged otherwise.
+
+Verification: 353 tests pass; build emits `dist/assets/index-CyVb559A.js` (1,851.58 kB); headless render confirmed all four panels (Analyst Commentary card 1069 px, Action Plan 1044 px with deterministic P50 + R/R caution, Sentiment Greed 90/100 with `(est.)` names + disclosure, Liquidity Abundant 92/100). ESLint on the touched files: clean except pre-existing `i18n.tsx` `no-empty` + warnings.
+
 ---
 
 ## 3. Current Architecture
