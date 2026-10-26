@@ -1,7 +1,7 @@
 # Handoff Document — Smart Money Screener & Scheduled Scan
 
-> **Last updated:** 2026-10-22  
-> **Commit:** `aaf1d71` (pushed to `main`, Vercel auto-deployed)  
+> **Last updated:** 2026-10-26  
+> **Commit:** `c50971f` (pushed to `main`, Vercel auto-deployed)  
 > **Test suite:** 353 tests / 27 files passing  
 > **Typecheck:** no new errors (`tsc --noEmit` still reports ~30 pre-existing errors in unrelated files)
 
@@ -148,7 +148,7 @@ Headless verification (`/flow`, AAPL auto-loaded): wheel renders after the chain
 
 Known inconsistency in the panel itself (pre-existing, untouched by the move): the suitability hero reads `EXCELLENT · 95/100` while the Alpaca checklist reads `ACCEPTABLE · 5/7`, because affordability ($33.1K needed, $20K cash) and concentration (166% of cash per contract) fail the checklist but barely move the suitability score.
 
-### 2.13 Public Trust Pass on the Four Home Panels
+### 2.13 Public Trust Pass on the Four Home Panels (`c50971f`)
 
 Reliability, informativeness and readability pass over `ChartAnalyst.tsx` (Analyst Commentary), `TodayActionPlan.tsx` (Today's Action Plan), `SentimentMonitor.tsx` and `LiquidityMonitor.tsx`. Sentiment and Liquidity already had the approved verdict-first pattern; Commentary and Action Plan were prose walls.
 
