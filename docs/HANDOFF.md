@@ -1,7 +1,7 @@
 # Handoff Document — Smart Money Screener & Scheduled Scan
 
 > **Last updated:** 2026-10-26  
-> **Commit:** `c50971f` (pushed to `main`, Vercel auto-deployed)  
+> **Commit:** `c954d07` (pushed to `main`, Vercel auto-deployed)  
 > **Test suite:** 353 tests / 27 files passing  
 > **Typecheck:** no new errors (`tsc --noEmit` still reports ~30 pre-existing errors in unrelated files)
 
@@ -159,7 +159,7 @@ Reliability, informativeness and readability pass over `ChartAnalyst.tsx` (Analy
 
 Verification: 353 tests pass; build emits `dist/assets/index-CyVb559A.js` (1,851.58 kB); headless render confirmed all four panels (Analyst Commentary card 1069 px, Action Plan 1044 px with deterministic P50 + R/R caution, Sentiment Greed 90/100 with `(est.)` names + disclosure, Liquidity Abundant 92/100). ESLint on the touched files: clean except pre-existing `i18n.tsx` `no-empty` + warnings.
 
-### 2.14 Home-Panel Reliability & Readability Pass
+### 2.14 Home-Panel Reliability & Readability Pass (`c954d07`)
 
 Follow-up to §2.13 — the remaining panels that still presented fabricated data or buried their signal. Same two rules as before: never present an estimate as real data, and always give the panel a single coherent read.
 
