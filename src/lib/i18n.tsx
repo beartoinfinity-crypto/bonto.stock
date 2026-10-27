@@ -36,6 +36,8 @@ const translations = {
     week52High: '52W High',
     week52Low: '52W Low',
     sector: 'Sector',
+    intrinsicActual: 'Intrinsic (0% growth)',
+    intrinsicEst: 'Intrinsic (7.5% growth est.)',
 
     // ---- PriceChart ----
     priceChart: 'Price Chart',
@@ -371,6 +373,8 @@ const translations = {
     week52High: '52週高點',
     week52Low: '52週低點',
     sector: '產業',
+    intrinsicActual: '內在價值（0% 增長）',
+    intrinsicEst: '內在價值（估計 7.5% 增長）',
 
     // ---- PriceChart ----
     priceChart: '價格走勢圖',

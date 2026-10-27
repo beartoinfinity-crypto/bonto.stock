@@ -52,8 +52,8 @@ export function StockMetrics({ stock, historicalData = [] }: StockMetricsProps) 
     { label: t('avgVolume'), value: formatVolume(avgVolume), icon: Activity },
     { label: t('week52High'), value: '$' + formatNumber(week52High), icon: TrendingUp },
     { label: t('week52Low'), value: '$' + formatNumber(week52Low), icon: TrendingDown },
-    { label: 'Intrinsic (Actual)', value: ivActual > 0 ? '$' + formatNumber(ivActual) : 'N/A', icon: Gem },
-    { label: 'Intrinsic (Est.)', value: ivEstimated > 0 ? '$' + formatNumber(ivEstimated) : 'N/A', icon: Sparkles },
+    { label: t('intrinsicActual'), value: ivActual > 0 ? '$' + formatNumber(ivActual) : 'N/A', icon: Gem },
+    { label: t('intrinsicEst'), value: ivEstimated > 0 ? '$' + formatNumber(ivEstimated) : 'N/A', icon: Sparkles },
     { label: t('sector'), value: stock.sector || 'Unknown', icon: Calendar },
   ];
 

@@ -302,13 +302,28 @@ export function ForecastSimulator({ data, symbol }: ForecastSimulatorProps) {
             </div>
             <div className="bg-secondary/50 rounded-lg p-3">
               <div className="flex items-center gap-2 text-muted-foreground text-xs mb-1">
-                <AlertTriangle className="h-3 w-3" /> Bullish Paths
+                <BarChart2 className="h-3 w-3" /> Bullish Paths
               </div>
               <div className={cn('font-mono font-bold text-lg', (returnStats?.bullish ?? 0) >= numPaths / 2 ? 'text-bullish' : 'text-bearish')}>
                 {returnStats ? Math.round((returnStats.bullish / returnStats.total) * 100) : 0}%
               </div>
             </div>
           </div>
+
+          {/* Plain-language read */}
+          {mcResult && returnStats && (
+            <div className="flex items-start gap-2 rounded-md bg-background/70 border border-border px-2.5 py-2">
+              <Target className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <p className="text-sm font-medium leading-snug">
+                Median path {isBacktest ? 'ended' : 'points'} about <span className="tabular-nums">${mcResult.p50[mcResult.p50.length - 1].toFixed(2)}</span>{' '}
+                (<span className={cn('tabular-nums', p50Return >= 0 ? 'text-bullish' : 'text-bearish')}>{isBacktest ? '' : p50Return >= 0 ? '+' : ''}{p50Return.toFixed(1)}%</span>)
+                {' '}over {forecastDays} days, with 80% of paths between{' '}
+                <span className={cn('tabular-nums', p10Return < 0 ? 'text-bearish' : 'text-bullish')}>${mcResult.p10[mcResult.p10.length - 1].toFixed(2)}</span>{' '}
+                and{' '}
+                <span className={cn('tabular-nums', p90Return >= 0 ? 'text-bullish' : 'text-bearish')}>${mcResult.p90[mcResult.p90.length - 1].toFixed(2)}</span>.
+              </p>
+            </div>
+          )}
 
           {/* Range row */}
           {mcResult && (
