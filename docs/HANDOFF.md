@@ -1,7 +1,7 @@
 # Handoff Document — Smart Money Screener & Scheduled Scan
 
 > **Last updated:** 2026-10-26  
-> **Commit:** `c954d07` (pushed to `main`, Vercel auto-deployed)  
+> **Commit:** `709cf9d` (pushed to `main`, Vercel auto-deployed)  
 > **Test suite:** 353 tests / 27 files passing  
 > **Typecheck:** no new errors (`tsc --noEmit` still reports ~30 pre-existing errors in unrelated files)
 
@@ -171,7 +171,7 @@ Follow-up to §2.13 — the remaining panels that still presented fabricated dat
 
 Verification: 353 tests pass; `tsc --noEmit` clean (0 errors, the pre-existing unrelated errors are gone too); build emits `dist/assets/index-Bw2wGkAU.js` (1,889.45 kB) + `index-3qND3uCz.css` (83.59 kB). Headless render of all three home-page panels confirmed coherent heroes: KDJ `Mixed · 50/100` matching its K<D crossover row against a strong SMA uptrend, MTF-RSI "crossover read" with no false extreme claim, and PutCall `Balanced · 0.82` labeled as an estimate. `tsc` now clears repo-wide (previously ~30 pre-existing errors).
 
-### 2.15 Masters Pages: Honest Fundamentals + Public Disclosure
+### 2.15 Masters Pages: Honest Fundamentals + Public Disclosure (`709cf9d`)
 
 Audit of `/masters` (TradingMasters) and `/masters-matrix` (MasterMatrix), which share the `masterAnalysis.ts` engine. Two theory problems were real, and the presentation was fixed to be truthful for public users.
 
