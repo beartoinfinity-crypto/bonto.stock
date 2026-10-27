@@ -134,7 +134,7 @@ Fetch chain: `proxyFetch()` → server proxy first → direct → CORS proxies.
 
 **Fresh-quote speed (Master Matrix):** `fetchStockQuote` reads the local cache first, then (for uncached symbols) tries `quoteFromFinnhub` via the `/api/finnhub/quote` proxy — which rotates over the server `FINNHUB_API_KEY`/`FINNHUB_API_KEY_2` env keys plus any browser-saved `api_key`/`api_key_2` tokens — before falling back to Yahoo/Stooq. This makes fresh quote retrieval on the Master Matrix page much faster than Yahoo's slow/blocked endpoints. `useMasterMatrix.runAnalysis` also fetches in larger batches (6) with a shorter 120 ms delay between them.
 
-### `src/lib/masterAnalysis.ts` — 12 Trading Masters (663 lines)
+### `src/lib/masterAnalysis.ts` — 12 Trading Masters (633 lines)
 
 Rule-based engine (no AI/ML) implementing 12 investor strategies. Each master returns a verdict over a stock's historical bars.
 
@@ -147,6 +147,8 @@ Rule-based engine (no AI/ML) implementing 12 investor strategies. Each master re
 | `SP500_TICKERS` / `filterToSP500` | ~500 constituents |
 | `NASDAQ100_TICKERS` / `filterToNASDAQ100` | ~100 constituents |
 | `Verdict` | `BUY` / `HOLD` / `WATCH` / `SELL` / `AVOID` |
+
+Honest-input notes: `MasterAnalysisInput.pe` carries the trailing P/E when the feed provides one. The three valuation masters are **proxies only**: Greenblatt derives earnings yield from `1/pe` and uses 50-day strength as an explicitly-labeled quality proxy (no ROIC data); Lynch computes `PEG = pe / relativeStrength` (growth is not on the feed); Buffett reads a price-level margin of safety. When P/E is absent the valuation masters return `WATCH` with an explicit "no P/E data" risk instead of inventing numbers. The old single-day-`changePercent` formulas that masqueraded as earnings yield/roc are removed.
 
 ### `src/lib/tradingAgents.ts` — Trading Agents Engine (687 lines)
 
@@ -196,7 +198,7 @@ No Supabase credentials live in source. Browsers resolve them at runtime:
 - Edge functions (stock-data news, analyze-news-sentiment, social-sentiment, asymmetric-value-screener) — `GET /api/edge-config` (Vercel env `EDGE_FN_URL` / `EDGE_FN_KEY` — public anon key of the current project `aqyaarnpmvvdzasjefje`)
 - Local dev fallback: `VITE_SUPABASE_URL` / `VITE_SUPABASE_PUBLISHABLE_KEY` in the gitignored `.env`
 
-### `src/hooks/useMasterMatrix.ts` — Master Matrix Hook (563 lines)
+### `src/hooks/useMasterMatrix.ts` — Master Matrix Hook (516 lines)
 
 Central state for the Master Matrix and history pages.
 
@@ -285,9 +287,9 @@ Returns `{ selectedStock, historicalData, signals, isLoading, isRealData, setSel
 | Route | Page | Key Hook/Component |
 |-------|------|--------------------|
 | `/` | Index — Dashboard (278 lines) | `useStockData`; includes KDJIndicator with SMA crossover signals. Small viewports (<768px) auto-redirect to `/m` via `siteMode.mobileRedirectTarget()` (opt-out remembered in `stockpulse_use_full_site`) |
-| `/masters` | TradingMasters — 12-investor analyzer (305 lines) | `analyzeStock` + `summarizeMasterResult`; verdict summary boxes (BUY/HOLD/WATCH/SELL-AVOID), per-master cards |
+| `/masters` | TradingMasters — 12-investor analyzer (300 lines) | `analyzeStock` + `summarizeMasterResult`; verdict summary boxes (BUY/HOLD/WATCH/SELL-AVOID), per-master cards, "how to read" disclosure (shared inputs / rule-score confidence / fundamental masters are proxies) |
 | `/trading-agents` | TradingAgentsPage — multi-agent report (554 lines) | `runTradingAgents`; analyst team, bull/bear debate, trader plan, risk committee, portfolio decision, final 5-tier rating |
-| `/masters-matrix` | MasterMatrix — Top-50 matrix (542 lines) | `useMasterMatrix`; universe/custom-stock picker, rank, rows link to history |
+| `/masters-matrix` | MasterMatrix — Top-50 matrix (576 lines) | `useMasterMatrix`; universe/custom-stock picker, rank, rows link to history; SIM badge on rows scored from synthetic fallback history, snapshot disclosure ("this browser only"), "how to read" strip |
 | `/masters-matrix/:symbol` | StockHistory — Per-stock history (288 lines) | `useMasterMatrix`; 12-master verdicts per day, stats, "Backfill past year" |
 | `/ledger` | TradeLedger — Simulated traders (730 lines) | `useTradeLedger` + `tradeSimulator` + `ledgerView`; 7-persona leaderboard (cash/positions split), positions, per-person trades, global accumulated Decisions panel + All Transactions table with filter bar, stats, pagination, run-status badge; cloud viewer — auto-pulls the server-simulated ledger, Re-run session button |
 | `/tactical` | Tactical — Trade planner (706 lines) | `useTacticalHistory`, `tacticalEngine`; bar-by-bar replay with a full metric suite (Sharpe, Sortino, Calmar, max drawdown + duration, CAGR, profit factor, expectancy) computed from real fills |

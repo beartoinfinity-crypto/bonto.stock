@@ -165,6 +165,7 @@ export default function TradingAgentsPage() {
         previousClose: resolved.stock.price - resolved.stock.change,
         volume: resolved.stock.volume,
         marketCap: resolved.stock.marketCap,
+        pe: resolved.stock.pe && resolved.stock.pe > 0 ? resolved.stock.pe : undefined,
         historical: resolved.historical,
       };
       const res = await runTradingAgents(sym, input, resolved.stock, update);

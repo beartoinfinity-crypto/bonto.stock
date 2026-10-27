@@ -116,6 +116,7 @@ interface EngineDeps {
   previousClose: number;
   volume: number;
   marketCap: number;
+  pe?: number;
   historical: StockData[];
 }
 
@@ -605,6 +606,7 @@ export async function runTradingAgents(
     previousClose: deps.previousClose,
     volume: deps.volume,
     marketCap: deps.marketCap,
+    pe: deps.pe,
     historical: deps.historical,
   });
 

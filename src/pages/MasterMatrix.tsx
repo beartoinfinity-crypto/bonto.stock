@@ -83,6 +83,7 @@ export default function MasterMatrix() {
 
   const lastSnapshot = snapshots.length > 0 ? snapshots[snapshots.length - 1] : null;
   const isPositive = (v: number) => v >= 0;
+  const simCount = results.filter(r => r.isSimulated).length;
 
   return (
     <div className="min-h-screen bg-background">
@@ -97,7 +98,8 @@ export default function MasterMatrix() {
             </h1>
             <p className="text-muted-foreground mt-2">
               Top {Math.min(totalStocks, 50)} stocks in the selected universe screened by the 12 trading
-              masters. Each day's results are recorded into an accumulating matrix.
+              masters. Snapshots you record are saved in <span className="font-medium">this browser</span> — they
+              are not a shared cloud track record.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -250,6 +252,9 @@ export default function MasterMatrix() {
             <CardContent className="p-4 text-center">
               <div className="text-3xl font-bold text-primary">{results.length}</div>
               <div className="text-xs text-muted-foreground">Stocks shown</div>
+              {simCount > 0 && (
+                <div className="text-[10px] text-muted-foreground/70 mt-0.5">{simCount} from simulated history</div>
+              )}
             </CardContent>
           </Card>
           <Card>
@@ -261,7 +266,7 @@ export default function MasterMatrix() {
           <Card>
             <CardContent className="p-4 text-center">
               <div className="text-3xl font-bold text-warning">{snapshots.length}</div>
-              <div className="text-xs text-muted-foreground">Days recorded</div>
+              <div className="text-xs text-muted-foreground">Days recorded (this browser)</div>
             </CardContent>
           </Card>
           <Card className={cn(recordedToday ? 'bg-success/10 border-success/30' : '')}>
@@ -344,7 +349,7 @@ export default function MasterMatrix() {
             </CardTitle>
             <CardDescription>
               Rows are stocks; columns are the 12 masters. B=BUY H=HOLD W=WATCH S=SELL A=AVOID.
-              Click a column header to sort. Records one snapshot per day, accumulated over time.
+              Click a column header to sort. Snapshot per day, kept in this browser only.
             </CardDescription>
           </CardHeader>
           <CardContent className="overflow-x-auto">
@@ -394,7 +399,18 @@ export default function MasterMatrix() {
                     return (
                       <TableRow key={r.symbol}>
                         <TableCell className="font-mono font-medium">
-                          <Link to={`/masters-matrix/${r.symbol}`} className="hover:text-primary">{r.symbol}</Link>
+                          <div className="flex items-center gap-1.5">
+                            <Link to={`/masters-matrix/${r.symbol}`} className="hover:text-primary">{r.symbol}</Link>
+                            {r.isSimulated && (
+                              <Badge
+                                variant="outline"
+                                className="border-muted-foreground/40 text-muted-foreground text-[9px] px-1 py-0"
+                                title="History fell back to simulated data — no live/stored bars available for this symbol"
+                              >
+                                SIM
+                              </Badge>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1.5">
@@ -523,6 +539,46 @@ export default function MasterMatrix() {
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-destructive/30 border border-destructive/40 inline-block" /> S/A = SELL/AVOID</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-muted border border-border inline-block" /> W = WATCH</span>
           <span className="flex items-center gap-1"><Circle className="h-3 w-3" /> ▲/▼ = change vs last snapshot</span>
+        </div>
+
+        {/* How this works / limitations */}
+        <div className="mt-8 rounded-lg border border-border bg-muted/20">
+          <div className="px-4 py-3 border-b border-border">
+            <h2 className="text-sm font-semibold flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-primary" />
+              How to read this page
+            </h2>
+          </div>
+          <ul className="px-4 py-3 text-xs text-muted-foreground space-y-2 list-disc list-inside">
+            <li>
+              <span className="font-medium text-foreground">Rule-based approximations, not real investors.</span>{' '}
+              Each master is a simplified scoring model run on price, volume and P/E data — no AI, no balance-sheet,
+              earnings or order-flow access.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Several masters share the same inputs</span> (trend, volume,
+              relative strength, distance from the 52-week high). Their calls are correlated, so a stock scoring 6+ BUYs
+              is not six independent confirmations — treat the BUY count as a single trend-quality score.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Confidence is a rule score, not a probability.</span>{' '}
+              It is a fixed per-call weight, not a measured hit rate.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Fundamental masters are proxies.</span> Berkshire-style value,
+              Lynch GARP and Greenblatt use P/E and 50-day momentum when real valuation data is unavailable, and return
+              WATCH ("no valuation data") when even P/E is missing.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Snapshots live in this browser only.</span> Nothing on this
+              page is stored on a server; clearing browser data clears the accumulated history.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">SIM = simulated history.</span> Rows flagged SIM were scored
+              against generated (non-live) price history because no live or stored bars were available — treat those
+              calls with extra caution.
+            </li>
+          </ul>
         </div>
 
         {/* Disclaimer */}

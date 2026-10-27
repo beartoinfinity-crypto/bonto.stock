@@ -93,6 +93,7 @@ export default function TradingMasters() {
       previousClose: selectedStock.price - selectedStock.change,
       volume: selectedStock.volume,
       marketCap: selectedStock.marketCap,
+      pe: selectedStock.pe && selectedStock.pe > 0 ? selectedStock.pe : undefined,
       historical: histData,
     };
   }, [selectedStock, histData]);
@@ -136,7 +137,9 @@ export default function TradingMasters() {
             Trading Masters
           </h1>
           <p className="text-muted-foreground mt-2">
-            Ask 12 legendary investors and traders to analyze any stock. Each master applies their unique methodology.
+            Ask 12 legendary investors and traders to analyze any stock. Each master is a
+            simplified rule model over the same price/volume/P-E inputs — their calls are
+            approximations, not the real investors' judgment.
           </p>
         </div>
 
@@ -291,12 +294,28 @@ export default function TradingMasters() {
         </div>
 
         {/* Disclaimer */}
-        <div className="mt-8 p-4 rounded-lg bg-muted/30 border border-border text-center">
+        <div className="mt-8 p-4 rounded-lg bg-muted/30 border border-border">
           <p className="text-xs text-muted-foreground">
             <AlertTriangle className="h-3 w-3 inline mr-1" />
             Education only. Not financial advice. Past performance does not guarantee future results.
-            Each master's analysis is a simplified approximation of their methodology based on price and volume data.
+            Each master's analysis is a simplified approximation of their methodology based on price and
+            volume data.
           </p>
+          <ul className="mt-3 text-xs text-muted-foreground space-y-1.5 list-disc list-inside">
+            <li>
+              <span className="font-medium text-foreground">Several masters share the same inputs</span> (trend, volume,
+              relative strength, distance from the 52-week high), so agreement is not independent confirmation.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Confidence is a rule score, not a probability</span> — a fixed
+              per-call weight, not a measured hit rate.
+            </li>
+            <li>
+              <span className="font-medium text-foreground">Fundamental masters are proxies.</span> Berkshire-style value,
+              GARP and Magic Formula use P/E and 50-day price strength when real valuation data is unavailable, and return
+              WATCH (with "no P/E data") when even P/E is missing.
+            </li>
+          </ul>
         </div>
       </div>
     </div>

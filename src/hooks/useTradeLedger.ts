@@ -373,7 +373,7 @@ async function decisionFor(
       // holdings; non-holdings may be passed a simplified + bounded rating from
       // the matrix. For correctness we run the pipeline, bounded by HEAVY_TOPN.
       try {
-        const res = await runTradingAgents(sym, { price, previousClose: price, volume: 0, marketCap: 0, historical: hist }, stock);
+        const res = await runTradingAgents(sym, { price, previousClose: price, volume: 0, marketCap: 0, pe: stock.pe && stock.pe > 0 ? stock.pe : undefined, historical: hist }, stock);
         return agentDecision({ symbol: sym, price: res.price || price, rating: res.final.rating, conviction: res.final.conviction });
       } catch {
         return holdSignal(sym, price, changePercent);

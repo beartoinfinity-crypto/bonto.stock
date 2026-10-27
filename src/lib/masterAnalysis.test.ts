@@ -98,4 +98,37 @@ describe('masterAnalysis', () => {
     const input = buildStockInput({ ...aapl, marketCap: '2.8T' }, []);
     expect(input.marketCap).toBe(2.8e12);
   });
+
+  it('fundamental masters refuse to invent valuation when P/E is missing', () => {
+    // No P/E data → Greenblatt and Lynch must not fabricate a BUY off today's
+    // price change. They return WATCH with an explicit "no P/E data" signal.
+    const input = { ...buildInput(aapl), pe: undefined };
+    const masters = analyzeStock('AAPL', input);
+    const greenblatt = masters.find(m => m.id === 'greenblatt')!;
+    const lynch = masters.find(m => m.id === 'peter-lynch')!;
+    const buffett = masters.find(m => m.id === 'buffett-graham')!;
+
+    expect(greenblatt.verdict).toBe('WATCH');
+    expect(greenblatt.metrics.some(m => m.value === 'n/a')).toBe(true);
+    expect(greenblatt.risks.join(' ')).toMatch(/no P\/E data/i);
+    expect(lynch.verdict).toBe('WATCH');
+    expect(lynch.metrics.some(m => m.value === 'n/a')).toBe(true);
+    // Buffett's P/E metric also reads n/a without valuation data.
+    expect(buffett.metrics.some(m => m.label === 'P/E' && m.value === 'n/a')).toBe(true);
+  });
+
+  it('fundamental masters use real P/E when provided (no single-day-change formulas)', () => {
+    const input = { ...buildInput(aapl), pe: 25 };
+    const masters = analyzeStock('AAPL', input);
+    const greenblatt = masters.find(m => m.id === 'greenblatt')!;
+    const lynch = masters.find(m => m.id === 'peter-lynch')!;
+    const buffett = masters.find(m => m.id === 'buffett-graham')!;
+
+    const earningsYield = greenblatt.metrics.find(m => m.label.includes('Earnings Yield'))!;
+    expect(earningsYield.value).toBe('4.0%'); // 1/25
+    // Metrics no longer claim fake "ROC" or bare relative-strength PEG.
+    expect(greenblatt.metrics.some(m => m.label === 'ROC Est.')).toBe(false);
+    expect(lynch.metrics.some(m => m.label === 'PEG (est.)')).toBe(true);
+    expect(buffett.metrics.some(m => m.label === 'P/E' && m.value === '25.0')).toBe(true);
+  });
 });

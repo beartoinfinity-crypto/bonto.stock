@@ -263,6 +263,9 @@ const masterNames: Record<string, string> = {
 };
 
 const CACHE_KEY = 'stockpulse_masters_top50';
+// The top-50 matrix is a point-in-time screen of today's data. Never serve a
+// cached screen older than this — a stale "Live" matrix is worse than a slow one.
+const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 interface StoredCache {
   entries: StockMasterResult[];
@@ -541,6 +544,8 @@ function loadFromCache(): { entries: StockMasterResult[]; computedAt: string } |
     if (!raw) return null;
     const stored: StoredCache = JSON.parse(raw);
     if (!stored.entries || stored.entries.length === 0) return null;
+    const computedAt = new Date(stored.computedAt).getTime();
+    if (!Number.isFinite(computedAt) || Date.now() - computedAt > CACHE_TTL_MS) return null;
     return stored;
   } catch {
     return null;

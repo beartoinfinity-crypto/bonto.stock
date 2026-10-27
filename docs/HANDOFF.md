@@ -171,6 +171,30 @@ Follow-up to §2.13 — the remaining panels that still presented fabricated dat
 
 Verification: 353 tests pass; `tsc --noEmit` clean (0 errors, the pre-existing unrelated errors are gone too); build emits `dist/assets/index-Bw2wGkAU.js` (1,889.45 kB) + `index-3qND3uCz.css` (83.59 kB). Headless render of all three home-page panels confirmed coherent heroes: KDJ `Mixed · 50/100` matching its K<D crossover row against a strong SMA uptrend, MTF-RSI "crossover read" with no false extreme claim, and PutCall `Balanced · 0.82` labeled as an estimate. `tsc` now clears repo-wide (previously ~30 pre-existing errors).
 
+### 2.15 Masters Pages: Honest Fundamentals + Public Disclosure
+
+Audit of `/masters` (TradingMasters) and `/masters-matrix` (MasterMatrix), which share the `masterAnalysis.ts` engine. Two theory problems were real, and the presentation was fixed to be truthful for public users.
+
+**Theory review — what was wrong and what changed:**
+- The three "fundamental" masters (Buffett, Lynch, Greenblatt) were scoring on price/OHLCV only, yet presented invented numbers as fact: Greenblatt's `earningsYieldEstimate = 8 + today's single-day changePercent` and a "ROC Est." that was really `20 + relative strength/2`; Lynch's `PEG = today's change / 50-day momentum` (not P/E ÷ growth). Buffett's "margin of safety" was a bare price-level proxy.
+- Roughly 7 of 12 masters key off the same inputs (trend, volume, relative strength, distance from 52-week high), so "≥6 BUY" was not six independent confirmations — the BUY count is closer to a single trend-quality score.
+
+**Engine fixes (`masterAnalysis.ts`):**
+- `MasterAnalysisInput.pe` carries the trailing P/E from the feed. Greenblatt derives real earnings yield from `1/pe` and labels the RS-based term `Quality Proxy (50d RS)` (no ROIC data exists). Lynch computes `PEG (est.) = pe / relativeStrength` with the growth proxy labelled. Buffett's metrics now show a real `P/E` and the philosophy says plainly it reads price relative to the 52-week range only. When P/E is absent, all three return `WATCH` with an explicit `no P/E data` risk instead of inventing a number. The single-day-`changePercent` formulas are gone.
+- `pe` threaded through `buildStockInput`, `tradingAgents.EngineDeps`, `TradingMasters`, `TradingAgentsPage`, and `useTradeLedger` so the honest paths work everywhere.
+
+**MasterMatrix (`/masters-matrix`) page:**
+- Header copy now says snapshots are saved "in this browser" (they are localStorage-only — not a shared cloud track record). "Days recorded" reads "(this browser)".
+- `SIM` badge on rows scored from synthetic fallback history, plus a `{n} from simulated history` line under "Stocks shown".
+- New "How to read this page" strip: rule-based approximations; several masters share inputs so agreement ≠ independence; confidence is a rule score not a probability; fundamental masters are proxies; snapshots are browser-only; SIM = simulated history.
+- Fix: `loadFromCache` never expired — served a stale "Live" matrix. Added a 12h TTL.
+
+**TradingMasters (`/masters`) page:**
+- Header copy no longer claims "each master applies their unique methodology" — it now says the masters are simplified rule models over the same inputs.
+- Bottom disclosure expanded with the shared-inputs / rule-score-confidence / proxies-note bullets.
+
+Verified: 355 tests (2 new: fundamental masters refuse to invent valuation without P/E, and use real P/E when provided), `tsc --noEmit` clean, build emits `dist/assets/index-BPXm3iKF.js`. Headless `/masters` render confirmed honest output on AAPL: Buffett `P/E 39.4` + "no balance-sheet data" hedge, Lynch `PEG (est.) 3.15` + "Growth Proxy", Greenblatt `Earnings Yield (1/P/E) 2.5%` + `Quality Proxy`, and the disclosure strip present. (The recorded-today bug was a misread — `recordToday` closes over the hook's full analyzed state, not the filtered view, so no fix was needed there.)
+
 ---
 
 ## 3. Current Architecture

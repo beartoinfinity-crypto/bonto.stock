@@ -30,6 +30,8 @@ export interface MasterAnalysisInput {
   previousClose: number;
   volume: number;
   marketCap: number;
+  /** Trailing P/E ratio when the feed provides one (0/undefined = no valuation data). */
+  pe?: number;
   historical: StockData[];
 }
 
@@ -62,6 +64,7 @@ export function buildStockInput(stock: Stock, historical: StockData[]): MasterAn
     previousClose: stock.price ? stock.price - (stock.change ?? 0) : 0,
     volume: stock.volume ?? 0,
     marketCap: parseMarketCap(stock.marketCap),
+    pe: stock.pe && stock.pe > 0 ? stock.pe : undefined,
     historical,
   };
 }
@@ -90,6 +93,10 @@ export function analyzeStock(symbol: string, data: MasterAnalysisInput): MasterA
   const volume = data?.volume ?? 0;
   const historical = data?.historical ?? [];
   const marketCap = data?.marketCap ?? 0;
+  // Trailing P/E when the feed provides one. The fundamental masters only run
+  // their valuation math when this is present; otherwise they fall back to a
+  // clearly-stated "no valuation data" WATCH instead of inventing numbers.
+  const pe = data?.pe && data.pe > 0 ? data.pe : null;
 
   // Calculate key metrics from historical data
   const closes = historical.map((d) => d.close);
@@ -141,94 +148,110 @@ export function analyzeStock(symbol: string, data: MasterAnalysisInput): MasterA
   const masters: MasterAnalysis[] = [];
 
   // 1. Buffett / Graham - Value
-  const belowSma200 = price < sma200;
   const inBuyZone = pctFromHigh < -20;
   masters.push({
     id: 'buffett-graham',
     name: 'Warren Buffett / Ben Graham',
     title: 'Value Investor',
-    philosophy: 'Buy a dollar of business for 50 cents. Demand a durable moat, low debt, high ROE, and a margin of safety.',
+    philosophy: 'Buy a dollar of business for 50 cents. Demand a durable moat, low debt, high ROE, and a margin of safety. This proxy has no balance-sheet data, so it reads price relative to the 52-week range only.',
     verdict: inBuyZone ? 'BUY' : trendUp ? 'HOLD' : trendDown ? 'AVOID' : 'WATCH',
-    confidence: inBuyZone ? 75 : trendUp ? 60 : trendDown ? 62 : 40,
+    confidence: inBuyZone && pe !== null ? 60 : inBuyZone ? 45 : trendUp ? 55 : trendDown ? 60 : 40,
     strengths: [
-      inBuyZone ? `${Math.abs(pctFromHigh).toFixed(0)}% below 52-week high — potential margin of safety` : null,
+      inBuyZone ? `${Math.abs(pctFromHigh).toFixed(0)}% below 52-week high — price-level margin of safety` : null,
+      pe !== null ? `P/E ${pe.toFixed(1)}` : null,
       trendUp ? 'Price above SMA200 — long-term uptrend intact' : null,
-      relativeVolume > 1.5 ? 'Above-average volume — institutional interest' : null,
     ].filter(Boolean) as string[],
     risks: [
       isParabolic ? 'Parabolic move — wait for pullback' : null,
-      pctFromHigh > -5 ? 'Near all-time highs — limited margin of safety' : null,
-      trendDown ? 'Below SMA200 — fundamental concern' : null,
+      pctFromHigh > -5 ? 'Near all-time highs — limited price cushion' : null,
+      trendDown ? 'Below SMA200 — trending lower' : null,
+      pe === null ? 'No P/E data on this feed — valuation not scored' : null,
     ].filter(Boolean) as string[],
     specificAdvice: inBuyZone
-      ? 'Attractive valuation zone. Research the business moat, debt levels, and ROE before committing. Size by conviction — never more than 25% of portfolio in one name.'
-      : 'Wait for a meaningful pullback (20%+ from highs) before initiating a position. Buffett says: "Be fearful when others are greedy."',
+      ? 'Price sits well below the 52-week high (a price-level margin of safety). No balance-sheet data is available here, so verify the moat, debt and ROE yourself before committing.'
+      : 'No meaningful price cushion off the 52-week high. Wait for a pullback before initiating — Graham-style value needs a margin of safety above the raw price level.',
     metrics: [
       { label: 'Price vs SMA200', value: `${((price / sma200 - 1) * 100).toFixed(1)}%`, good: price > sma200 },
       { label: 'From 52W High', value: `${pctFromHigh.toFixed(1)}%`, good: pctFromHigh < -15 },
-      { label: 'From 52W Low', value: `+${pctFromLow.toFixed(1)}%`, good: pctFromLow > 20 },
+      { label: 'P/E', value: pe !== null ? pe.toFixed(1) : 'n/a', good: pe !== null && pe < 20 },
     ],
   });
 
   // 2. Peter Lynch - GARP
-  const growthEstimate = rs; // proxy using recent relative strength
-  const lynchPEG = growthEstimate > 0 ? (changePercent / growthEstimate) : 99;
-  const fairPEG = lynchPEG < 1;
+  // Real PEG needs P/E and EPS growth. The feed gives us P/E but not growth,
+  // so 50-day relative strength stands in as an explicitly-labelled growth
+  // proxy. No P/E data means no PEG — the master refuses to guess instead of
+  // inventing a number.
+  const growthProxy = rs; // 50-day relative strength as a growth proxy
+  const lynchPEG = pe !== null && growthProxy > 0 ? pe / growthProxy : null;
+  const fairPEG = lynchPEG !== null && lynchPEG < 1;
   masters.push({
     id: 'peter-lynch',
     name: 'Peter Lynch',
     title: 'GARP Investor',
-    philosophy: 'Invest in what you know. PEG = P/E ÷ EPS growth. PEG ≤ 1 = fair value; ≤ 0.5 = cheap growth.',
-    verdict: fairPEG ? 'BUY' : trendUp ? 'HOLD' : 'SELL',
-    confidence: fairPEG ? 70 : trendUp ? 55 : 35,
+    philosophy: 'Invest in what you know. PEG = P/E ÷ EPS growth. PEG ≤ 1 = fair value; ≤ 0.5 = cheap growth. Without EPS growth data this uses 50-day price strength as a growth proxy.',
+    verdict: pe === null ? 'WATCH' : fairPEG ? 'BUY' : trendUp ? 'HOLD' : lynchPEG !== null && lynchPEG > 1.5 ? 'SELL' : 'WATCH',
+    confidence: fairPEG ? 70 : trendUp ? 55 : pe === null ? 30 : 40,
     strengths: [
-      fairPEG ? 'PEG ratio suggests fair or undervalued growth' : null,
+      fairPEG ? 'PEG (growth proxied by 50-day strength) suggests fair or undervalued growth' : null,
       rs > 10 ? `Strong ${rs.toFixed(0)}% relative strength over 50 days` : null,
       trendUp ? 'Uptrend confirms growth story' : null,
+      pe !== null ? `P/E ${pe.toFixed(1)}` : null,
     ].filter(Boolean) as string[],
     risks: [
-      lynchPEG > 2 ? 'Expensive relative to growth' : null,
+      lynchPEG !== null && lynchPEG > 2 ? 'Expensive relative to growth proxy' : null,
+      pe === null ? 'No P/E data on this feed — PEG not scored' : null,
       isParabolic ? 'Parabolic move — unsustainable' : null,
       trendDown ? 'Downtrend — growth may be decelerating' : null,
     ].filter(Boolean) as string[],
-    specificAdvice: fairPEG
-      ? 'Growth-at-a-reasonable-price setup. The stock is growing faster than the market prices it. Let winners run — Lynch held winners for years.'
-      : 'Overvalued relative to growth. Wait for a better entry or let earnings catch up.',
+    specificAdvice: pe === null
+      ? 'No P/E data on this feed, so a Lynch PEG can\'t be computed. Treat the call as unrated and check valuation on a paid feed.'
+      : fairPEG
+        ? 'Growth-at-a-reasonable-price setup (growth proxied by price strength). Verify the real EPS growth story before committing.'
+        : 'Valuation is not compelling against the growth proxy. Wait for a better entry or for earnings to catch up.',
     metrics: [
-      { label: 'Relative Strength (50d)', value: `${rs.toFixed(1)}%`, good: rs > 10 },
+      { label: 'P/E', value: pe !== null ? pe.toFixed(1) : 'n/a', good: pe !== null },
+      { label: 'Growth Proxy (50d)', value: `${rs.toFixed(1)}%`, good: rs > 10 },
+      { label: 'PEG (est.)', value: lynchPEG !== null ? lynchPEG.toFixed(2) : 'n/a', good: fairPEG },
       { label: 'Trend', value: trendUp ? 'Up' : trendDown ? 'Down' : 'Neutral', good: trendUp },
-      { label: 'Volume vs Avg', value: `${relativeVolume.toFixed(1)}x`, good: relativeVolume > 1 },
     ],
   });
 
   // 3. Joel Greenblatt - Magic Formula
-  const earningsYieldEstimate = changePercent > 0 ? 8 + changePercent : 5 + changePercent;
-  const rocEstimate = rs > 0 ? 20 + rs / 2 : 10;
-  const combinedRank = (100 - earningsYieldEstimate) + (100 - rocEstimate);
-  const magicBuy = combinedRank < 100;
+  // Real Magic Formula needs ROIC and EBIT/EV earnings yield — neither is on
+  // the free feed. Earnings yield is derived from the trailing P/E (1/P/E);
+  // return on capital is proxied by 50-day relative strength and explicitly
+  // labelled as such. No P/E data means the rank can't be scored.
+  const earningsYield = pe !== null ? (1 / pe) * 100 : null;
+  const qualityProxy = rs > 0 ? 20 + rs / 2 : 10;
+  const combinedRank = earningsYield !== null ? (100 - earningsYield) + (100 - qualityProxy) : null;
+  const magicBuy = combinedRank !== null && combinedRank < 140;
   masters.push({
     id: 'greenblatt',
     name: 'Joel Greenblatt',
     title: 'Magic Formula',
-    philosophy: 'Rank by Return on Capital (quality) + Earnings Yield (cheapness). Buy lowest combined rank. Hold ~1 year. Rebalance. No emotion.',
-    verdict: magicBuy ? 'BUY' : trendUp ? 'HOLD' : 'SELL',
-    confidence: magicBuy ? 72 : trendUp ? 55 : 35,
+    philosophy: 'Rank by Return on Capital (quality) + Earnings Yield (cheapness). Buy lowest combined rank. This proxy uses 1/P/E for yield and 50-day strength for quality — no ROIC data is available.',
+    verdict: pe === null ? 'WATCH' : magicBuy ? 'BUY' : trendUp ? 'HOLD' : 'SELL',
+    confidence: magicBuy ? 70 : trendUp ? 55 : pe === null ? 30 : 35,
     strengths: [
       magicBuy ? 'Combined quality + cheapness rank is attractive' : null,
-      rs > 15 ? 'Strong momentum supports quality thesis' : null,
+      earningsYield !== null && earningsYield > 8 ? `Earnings yield ${earningsYield.toFixed(1)}% (from P/E ${pe?.toFixed(1)})` : null,
       trendUp ? 'Above SMA50 — trend aligns with value' : null,
     ].filter(Boolean) as string[],
     risks: [
-      !magicBuy ? 'Combined rank not compelling — may be expensive or low quality' : null,
+      pe === null ? 'No P/E data on this feed — rank not scored' : null,
+      combinedRank !== null && combinedRank >= 140 ? 'Combined rank not compelling — may be expensive or low quality' : null,
       isParabolic ? 'Parabolic — mechanical system says wait' : null,
     ].filter(Boolean) as string[],
-    specificAdvice: magicBuy
-      ? 'Mechanical system says buy. Equal-weight with 20-30 other names. Hold for 1 year. Rebalance. Do NOT add favourites or abandon after a bad year.'
-      : 'Rank not in top tier. System says skip this one and find cheaper/higher-quality alternatives.',
+    specificAdvice: pe === null
+      ? 'No P/E data on this feed, so a Magic Formula rank can\'t be computed. Treat the call as unrated.'
+      : magicBuy
+        ? 'Mechanical rank looks attractive (quality proxied by price strength, yield from P/E). Equal-weight with 20-30 other names. Hold for 1 year, then rebalance without emotion.'
+        : 'Rank not in the top tier. System says skip this one and look for cheaper and/or higher-momentum alternatives.',
     metrics: [
-      { label: 'Earnings Yield Est.', value: `${earningsYieldEstimate.toFixed(1)}%`, good: earningsYieldEstimate > 10 },
-      { label: 'ROC Est.', value: `${rocEstimate.toFixed(1)}%`, good: rocEstimate > 20 },
-      { label: 'Combined Rank', value: `${combinedRank.toFixed(0)}`, good: combinedRank < 100 },
+      { label: 'Earnings Yield (1/P/E)', value: earningsYield !== null ? `${earningsYield.toFixed(1)}%` : 'n/a', good: earningsYield !== null && earningsYield > 8 },
+      { label: 'Quality Proxy (50d RS)', value: `${qualityProxy.toFixed(1)}%`, good: qualityProxy > 20 },
+      { label: 'Combined Rank', value: combinedRank !== null ? combinedRank.toFixed(0) : 'n/a', good: combinedRank !== null && combinedRank < 140 },
     ],
   });
 
